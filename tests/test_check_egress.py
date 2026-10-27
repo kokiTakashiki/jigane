@@ -133,9 +133,9 @@ def test_dynamic_import_of_network_module_fails(tmp_path: Path) -> None:
 def test_url_not_in_allowlist_fails(tmp_path: Path) -> None:
     root = make_tree(tmp_path, {"a.py": 'URL = "https://example.com/x"\n'})
     problems = run(root)
-    assert len(problems) == 1
-    assert "jigane/a.py:1" in problems[0]
-    assert "example.com" in problems[0]
+    where = "jigane/a.py:1: 許可リストに無い宛先 example.com。"
+    how = "許すなら scripts/egress_allowlist.toml へ足し、docs/data-destinations.md の表も直す"
+    assert problems == [where + how]
 
 
 def test_bare_host_and_escaped_pattern_are_checked(tmp_path: Path) -> None:
@@ -391,18 +391,18 @@ def test_document_matching_allowlist_passes(tmp_path: Path) -> None:
 def test_host_only_in_document_fails(tmp_path: Path) -> None:
     write_document(tmp_path, DOCUMENT.replace("`github.com` |", "`github.com`、`evil.example` |"))
     problems = document(tmp_path, DOCUMENT_ALLOWLIST)
-    assert len(problems) == 1
-    assert "evil.example" in problems[0]
-    assert "destinations に無い" in problems[0]
+    where = "docs/data-destinations.md の表「送り先」にあり、"
+    what = "scripts/egress_allowlist.toml の destinations に無い: evil.example"
+    assert problems == [where + what]
 
 
 def test_host_only_in_allowlist_fails(tmp_path: Path) -> None:
     write_document(tmp_path, DOCUMENT)
     allowlist = {"destinations": {"hosts": [*DOCUMENT_ALLOWLIST["destinations"]["hosts"], "x.io"]}}
     problems = document(tmp_path, allowlist)
-    assert len(problems) == 1
-    assert "x.io" in problems[0]
-    assert "表「送り先」に無い" in problems[0]
+    where = "scripts/egress_allowlist.toml の destinations にあり、"
+    what = "docs/data-destinations.md の表「送り先」に無い: x.io"
+    assert problems == [where + what]
 
 
 def test_missing_document_fails(tmp_path: Path) -> None:

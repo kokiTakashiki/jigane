@@ -129,7 +129,12 @@ def test_prose_and_table_cell_paths_are_candidates() -> None:
     assert prose["tests/test_x.py"].via is MentionVia.TABLE_CELL
     assert prose["pyproject.toml"].via is MentionVia.PROSE
     assert "foo.xyz" not in prose
-    assert not any("example.com" in m.name for m in mentions)
+    assert {m.name for m in mentions} == {
+        "and/or",
+        "scripts/sample_tool.py",
+        "pyproject.toml",
+        "tests/test_x.py",
+    }
 
 
 def test_code_span_path_wins_over_prose_in_same_section() -> None:
