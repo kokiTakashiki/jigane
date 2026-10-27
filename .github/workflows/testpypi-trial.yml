@@ -1,0 +1,90 @@
+# TestPyPI へ試しに公開するためのワークフロー。release.yml の publish を uv publish と attest-action に替える前に、
+# 同じ形の公開が TestPyPI で通ることを確かめる。公開リポジトリの main に置き、手で起こす。
+# 起こす前に、利用者の側で次の二つを用意する。
+#   - TestPyPI の trusted publisher の登録（Owner kokiTakashiki、Repository name jigane、このファイル名 testpypi-trial.yml、environment testpypi）
+#   - 公開リポジトリの environment testpypi の作成
+# TestPyPI は同じ版を二度上げられない。起こすたびに version の入力を変える。
+# 試しが済んだら、このファイルを公開リポジトリから消す。
+name: testpypi-trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 試しの版（PEP 440 の dev 版、例 0.0.0.dev1）。TestPyPI に載った版は再利用できない
+        required: true
+        default: 0.0.0.dev1
+        type: string
+
+# 既定のトークンは何も持たせない。必要な権限は各ジョブが最小で宣言する。
+permissions: {}
+
+# 試しを重ねて走らせない。公開は途中で止めると中途半端になるので、止めずに待たせる。
+concurrency:
+  group: testpypi-trial
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      TRIAL_VERSION: ${{ inputs.version }}
+    steps:
+      # 入力は env 経由でだけ読み、シェルの式へ直に展開しない。dev 版だけを通す。
+      - name: 版が PEP 440 の dev 版であることを確かめる
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$TRIAL_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}\.dev[0-9]+$ ]]; then
+            echo "::error::version が dev 版の形（例 0.0.0.dev1）ではない"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      # version は pyproject.toml に静的に書かれ、ビルドの後ろ盾（uv_build）に環境変数で上書きする手段が無い。
+      # このランナーの作業ツリーの pyproject.toml だけを書き換える。コミットも push もしない。
+      # --frozen で uv.lock を再生成しない。
+      - name: 作業ツリーの version を試しの版に差し替える
+        shell: bash
+        run: uv version --frozen "$TRIAL_VERSION"
+      - run: uv build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trial
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # 承認者が承認するまで止まる。id-token を持つのはこのジョブだけにする。
+    environment: testpypi
+    # attestations: write は足さない。attest-action と uv publish は id-token だけで足りる。
+    # GitHub の attestation（attest-build-provenance）は本番でも替えないので、この試しでは試さない。
+    permissions:
+      id-token: write # TestPyPI の信頼された発行者（OIDC）と attest-action の署名のため
+      contents: read
+    steps:
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: trial
+          path: dist
+      - uses: astral-sh/attest-action@39b6ce43875c196a579e31635b11aa2a2036384a # v0.0.7
+        with:
+          paths: dist/*
+      - run: uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
