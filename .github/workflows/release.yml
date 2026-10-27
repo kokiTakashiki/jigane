@@ -143,9 +143,14 @@ jobs:
     # 承認者が承認するまで止まる。id-token を持つのはこのジョブだけにする。
     environment: pypi
     permissions:
-      id-token: write # PyPI の信頼された発行者（OIDC）と来歴の署名のため
-      attestations: write # 来歴の証明を保存するため
+      id-token: write # uv publish の信頼された発行者（OIDC）と、attest-action と GitHub の来歴の署名のため
+      attestations: write # GitHub の来歴の証明を保存するため
     steps:
+      # attest-action は自身の pyproject の require-build-hashes を読むため uv 0.13.0 以上を要る。宣言の >=0.9.12 より新しい。
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release
@@ -154,9 +159,11 @@ jobs:
           subject-path: |
             dist/*
             sbom.cdx.json
-      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+      # PEP 740 の attestation を dist/ の wheel と sdist に付け、uv publish が PyPI へ一緒に上げる。
+      - uses: astral-sh/attest-action@39b6ce43875c196a579e31635b11aa2a2036384a # v0.0.7
         with:
-          attestations: true
+          paths: dist/*
+      - run: uv publish --trusted-publishing always
 
   github-release:
     name: github-release

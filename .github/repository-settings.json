@@ -53,7 +53,7 @@
     "repos/{repo}/actions/permissions/selected-actions": {
       "github_owned_allowed": true,
       "verified_allowed": false,
-      "patterns_allowed": ["astral-sh/setup-uv@*", "pypa/gh-action-pypi-publish@*"]
+      "patterns_allowed": ["astral-sh/setup-uv@*", "astral-sh/attest-action@*"]
     },
     "repos/{repo}/actions/permissions/workflow": {
       "default_workflow_permissions": "read",
@@ -86,6 +86,17 @@
       "total_count": 1,
       "branch_policies[].name": ["v*"],
       "branch_policies[].type": ["tag"]
+    },
+    "repos/{repo}/environments/testpypi": {
+      "can_admins_bypass": false,
+      "protection_rules[].type": ["required_reviewers", "branch_policy"],
+      "deployment_branch_policy.protected_branches": false,
+      "deployment_branch_policy.custom_branch_policies": true
+    },
+    "repos/{repo}/environments/testpypi/deployment-branch-policies": {
+      "total_count": 1,
+      "branch_policies[].name": ["main"],
+      "branch_policies[].type": ["branch"]
     },
     "repos/{repo}/vulnerability-alerts": {
       "enabled": true

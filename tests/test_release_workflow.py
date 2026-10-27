@@ -7,6 +7,7 @@ from workflow_yaml import job_map, load_yaml
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 AUDIT = "uv run --locked python scripts/audit_dependencies.py"
+UV_PUBLISH = "uv publish --trusted-publishing always"
 
 
 def release_text() -> str:
@@ -211,3 +212,32 @@ def test_a_trigger_beyond_the_tag_push_is_not_equal() -> None:
     exact = load_yaml("on:\n  push:\n    tags: ['v*']\nname: x\n")
     assert wider["on"] != {"push": {"tags": ["v*"]}}
     assert exact["on"] == {"push": {"tags": ["v*"]}}
+
+
+def uses_action(name: str) -> Callable[[CommentedMap], bool]:
+    return lambda step: f"{name}@" in str(step.get("uses", ""))
+
+
+def test_publish_attests_and_uploads_with_uv_not_the_docker_action() -> None:
+    publish = jobs()["publish"]
+    assert not any(
+        "gh-action-pypi-publish" in str(step.get("uses", "")) for step in publish["steps"]
+    )
+    attest = step_index(publish, uses_action("astral-sh/attest-action"))
+    upload = step_index(publish, lambda step: step.get("run") == UV_PUBLISH)
+    # attestation を付けてから、uv publish が dist/ ごと上げる。
+    assert attest < upload
+    assert publish["steps"][attest]["with"] == {"paths": "dist/*"}
+
+
+def test_publish_installs_the_uv_that_attest_action_needs() -> None:
+    publish = jobs()["publish"]
+    setup = step_index(publish, uses_action("astral-sh/setup-uv"))
+    attest = step_index(publish, uses_action("astral-sh/attest-action"))
+    # attest-action は uv が既にあれば自分で入れない。先に 0.13.0 を入れる。
+    assert setup < attest
+    assert publish["steps"][setup]["with"]["version"] == "0.13.0"
+
+
+def test_publish_still_attests_build_provenance_with_github() -> None:
+    step_index(jobs()["publish"], uses_action("actions/attest-build-provenance"))

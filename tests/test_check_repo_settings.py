@@ -164,6 +164,8 @@ TAG_RULES = "repos/o/r/rules/tags"
 TAG_SCOPE = "repos/o/r/rulesets/tag-scope"
 ENVIRONMENT = "repos/o/r/environments/pypi"
 ENVIRONMENT_POLICIES = "repos/o/r/environments/pypi/deployment-branch-policies"
+TESTPYPI_ENVIRONMENT = "repos/o/r/environments/testpypi"
+TESTPYPI_ENVIRONMENT_POLICIES = "repos/o/r/environments/testpypi/deployment-branch-policies"
 
 
 @pytest.mark.parametrize("missing", ["creation", "update", "deletion"])
@@ -198,8 +200,16 @@ def test_tag_scope_difference_is_reported(key: str, actual: list[str]) -> None:
 
 
 def test_pypi_environment_expects_reviewers_and_no_admin_bypass() -> None:
+    assert_environment_expects_reviewers_and_no_admin_bypass(ENVIRONMENT)
+
+
+def test_testpypi_environment_expects_reviewers_and_no_admin_bypass() -> None:
+    assert_environment_expects_reviewers_and_no_admin_bypass(TESTPYPI_ENVIRONMENT)
+
+
+def assert_environment_expects_reviewers_and_no_admin_bypass(endpoint: str) -> None:
     responses = build_responses("public")
-    environment = responses[ENVIRONMENT]
+    environment = responses[endpoint]
     assert environment["can_admins_bypass"] is False
     environment["can_admins_bypass"] = True
     environment["protection_rules"] = [{"type": "branch_policy"}]
@@ -207,9 +217,9 @@ def test_pypi_environment_expects_reviewers_and_no_admin_bypass() -> None:
     differences = checker.find_differences(SETTINGS["public"], "o/r", reader(responses))
     reviewers_missing = "期待 'required_reviewers' を含む、実際 ['branch_policy']"
     assert differences == [
-        f"{ENVIRONMENT}: can_admins_bypass: 期待 False、実際 True",
-        f"{ENVIRONMENT}: protection_rules[].type: {reviewers_missing}",
-        f"{ENVIRONMENT}: deployment_branch_policy.custom_branch_policies: 期待 True、実際 False",
+        f"{endpoint}: can_admins_bypass: 期待 False、実際 True",
+        f"{endpoint}: protection_rules[].type: {reviewers_missing}",
+        f"{endpoint}: deployment_branch_policy.custom_branch_policies: 期待 True、実際 False",
     ]
 
 
@@ -227,6 +237,27 @@ def test_pypi_deployment_must_be_tag_v_star_only(policies: list[dict[str, str]])
     differences = checker.find_differences(SETTINGS["public"], "o/r", reader(responses))
     assert differences != []
     assert all(difference.startswith(f"{ENVIRONMENT_POLICIES}: ") for difference in differences)
+
+
+@pytest.mark.parametrize(
+    "policies",
+    [
+        [{"name": "main", "type": "branch"}, {"name": "v*", "type": "tag"}],
+        [{"name": "v*", "type": "tag"}],
+        [{"name": "*", "type": "branch"}],
+    ],
+)
+def test_testpypi_deployment_must_be_main_branch_only(policies: list[dict[str, str]]) -> None:
+    responses = build_responses("public")
+    responses[TESTPYPI_ENVIRONMENT_POLICIES] = {
+        "total_count": len(policies),
+        "branch_policies": policies,
+    }
+    differences = checker.find_differences(SETTINGS["public"], "o/r", reader(responses))
+    assert differences != []
+    assert all(
+        difference.startswith(f"{TESTPYPI_ENVIRONMENT_POLICIES}: ") for difference in differences
+    )
 
 
 def test_tag_scope_collects_include_and_bypass_of_active_tag_rulesets() -> None:
@@ -352,7 +383,11 @@ def test_public_selected_actions_match_passes() -> None:
     "patterns",
     [
         ["astral-sh/setup-uv@*"],
-        ["astral-sh/setup-uv@*", "pypa/gh-action-pypi-publish@*", "astral-sh/attest-action@*"],
+        [
+            "astral-sh/setup-uv@*",
+            "astral-sh/attest-action@*",
+            "example/extra-action@*",
+        ],
     ],
 )
 def test_public_selected_actions_difference_is_reported(patterns: list[str]) -> None:
@@ -363,11 +398,6 @@ def test_public_selected_actions_difference_is_reported(patterns: list[str]) -> 
     assert differences == [
         f"{SELECTED_ACTIONS}: patterns_allowed: 期待 {wanted!r}、実際 {patterns!r}"
     ]
-
-
-# 公開の日の TestPyPI の試しのために、ワークフローが使う前から期待に入れてよい action。
-# 試しが済んで release.yml が使うようになるか、期待から消すなら、ここからも外す。
-TRIAL_ONLY_ACTIONS = frozenset({"astral-sh/attest-action"})
 
 
 def third_party_actions(text: str) -> set[str]:
@@ -394,32 +424,20 @@ def expected_actions(expected: dict[str, Any]) -> set[str]:
 
 
 def unused_unexpected_actions(allowed: set[str], used: set[str]) -> set[str]:
-    return allowed - used - TRIAL_ONLY_ACTIONS
-
-
-def with_trial_actions(expected: dict[str, Any]) -> dict[str, Any]:
-    trial = dict(expected)
-    trial["patterns_allowed"] = [
-        *expected["patterns_allowed"],
-        *(f"{action}@*" for action in sorted(TRIAL_ONLY_ACTIONS)),
-    ]
-    return trial
+    return allowed - used
 
 
 def test_public_selected_actions_allow_every_public_workflow_use() -> None:
     expected = SETTINGS["public"][SELECTED_ACTIONS_TEMPLATE]
     used = public_workflow_third_party_uses()
     assert used <= expected_actions(expected)
-    assert used <= expected_actions(with_trial_actions(expected))
     assert expected["github_owned_allowed"] is True
 
 
-def test_public_selected_actions_unused_entries_are_only_trial_actions() -> None:
+def test_public_selected_actions_have_no_unused_entries() -> None:
     expected = SETTINGS["public"][SELECTED_ACTIONS_TEMPLATE]
     used = public_workflow_third_party_uses()
     assert unused_unexpected_actions(expected_actions(expected), used) == set()
-    # 試しの間は期待に attest-action が足され、使うワークフローはまだ無い
-    assert unused_unexpected_actions(expected_actions(with_trial_actions(expected)), used) == set()
     stray = {*expected_actions(expected), "example/unused-action"}
     assert unused_unexpected_actions(stray, used) == {"example/unused-action"}
 
