@@ -155,7 +155,19 @@ def run_zizmor(directory: Path) -> int:
     # 設定は公開の写しに含まれない。無いときは設定なしで走らせる
     config = ["--config", str(ZIZMOR_CONFIG)] if ZIZMOR_CONFIG.is_file() else []
     try:
-        run_tool(["zizmor", "--offline", "--no-progress", "--pedantic", *config, str(directory)])
+        run_tool(
+            [
+                "zizmor",
+                "--offline",
+                "--no-progress",
+                "--pedantic",
+                # CI など環境変数で出力が色付きに変わるのを避け、どこでも同じ文面にする
+                "--color",
+                "never",
+                *config,
+                str(directory),
+            ]
+        )
     except CommandError as error:
         sys.stdout.write(error.stdout)
         sys.stderr.write(error.stderr)

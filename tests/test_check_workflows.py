@@ -67,12 +67,18 @@ def zizmor_returncode(directory: Path) -> int:
 
 def zizmor_rules(directory: Path) -> set[str]:
     """zizmor が指摘した規則の名前。指摘が無ければ空。"""
+    # 色は環境変数（CI など）で自動に入る。入ると行頭に制御文字が付き、規則名を拾えない
     command = ["zizmor", "--offline", "--no-progress", "--pedantic", "--format", "plain"]
     try:
-        run_tool([*command, str(directory)])
+        run_tool([*command, "--color", "never", str(directory)])
     except CommandError as error:
-        return set(re.findall(r"^\w+\[([\w-]+)\]", error.stdout, re.MULTILINE))
-    return set()
+        returncode, stdout = error.returncode, error.stdout
+    else:
+        return set()
+    rules = set(re.findall(r"^\w+\[([\w-]+)\]", stdout, re.MULTILINE))
+    # 終了コードが指摘を示すのに規則名が読めないのは、出力の形が変わった合図
+    assert rules, f"zizmor exited {returncode} with unreadable output: {stdout!r}"
+    return rules
 
 
 def test_clean_workflow_passes(tmp_path: Path) -> None:
