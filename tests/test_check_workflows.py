@@ -9,6 +9,7 @@ from types import ModuleType
 
 import pytest
 from dev_launch import run_tool
+from workflow_yaml import load_yaml
 
 from jigane.git.process import CommandError
 
@@ -89,11 +90,13 @@ def test_zizmor_fails_on_flawed_workflow(tmp_path: Path, body: str) -> None:
     assert zizmor_returncode(directory) != 0
 
 
-def test_restore_commented_on_makes_ci_yml_readable() -> None:
-    checker = load_checker()
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    restored = checker.restore_commented_on(text)
-    assert "\non:\n" in restored
+def test_every_workflow_has_a_live_on_at_the_top_level() -> None:
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    assert workflows
+    for workflow in workflows:
+        text = workflow.read_text(encoding="utf-8")
+        assert not any(line.startswith("# on:") for line in text.splitlines()), workflow.name
+        assert "on" in load_yaml(text), workflow.name
 
 
 def test_repository_workflows_pass_zizmor() -> None:
@@ -101,11 +104,12 @@ def test_repository_workflows_pass_zizmor() -> None:
     assert checker.audit(ROOT / ".github" / "workflows") == 0
 
 
-def test_audit_runs_every_check_on_the_restored_copy(tmp_path: Path) -> None:
+def test_audit_runs_every_check_on_an_unchanged_copy(tmp_path: Path) -> None:
     checker = load_checker()
     source = tmp_path / "src"
     source.mkdir()
-    (source / "t.yml").write_text("# on:\n#   push:\nname: t\n", encoding="utf-8")
+    body = "on:\n  push:\nname: t\n"
+    (source / "t.yml").write_text(body, encoding="utf-8")
     seen: list[str] = []
 
     def record(copy: Path) -> int:
@@ -114,7 +118,7 @@ def test_audit_runs_every_check_on_the_restored_copy(tmp_path: Path) -> None:
 
     assert checker.audit(source, checks=(record, record)) == 0
     assert len(seen) == 2
-    assert all(text.startswith("on:\n") for text in seen)
+    assert seen == [body, body]
 
 
 def test_audit_runs_later_checks_after_a_failure_and_returns_the_first_code(
@@ -341,13 +345,6 @@ def test_zizmor_catches_what_the_hand_written_rules_no_longer_cover(
     header, body, rule = ZIZMOR_HANDLES[case]
     directory = write_workflow(tmp_path, body, header)
     assert rule in zizmor_rules(directory)
-
-
-def test_zizmor_catches_a_dangerous_trigger_in_the_commented_draft(tmp_path: Path) -> None:
-    checker = load_checker()
-    draft = HEADER.replace("on:\n  push:\n", "# on:\n#   pull_request_target:\n")
-    directory = write_workflow(tmp_path, RUN_OK, checker.restore_commented_on(draft))
-    assert "dangerous-triggers" in zizmor_rules(directory)
 
 
 UNPINNED_COMPOSITE_ACTION = """\

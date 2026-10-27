@@ -18,7 +18,6 @@ import argparse
 import hashlib
 import io
 import platform
-import re
 import sys
 import tarfile
 import tempfile
@@ -51,25 +50,6 @@ ACTIONLINT_SHA256 = {
 # actionlint 自身は 0〜3 で終わる。4 は実体を用意できなかったことを指し、指摘とは区別する
 ACTIONLINT_UNAVAILABLE_EXIT_CODE = 4
 DEFAULT_DIRECTORY = Path(".github/workflows")
-COMMENTED_ON = re.compile(r"^# on:\s*$")
-COMMENTED_ON_BODY = re.compile(r"^#( {2}.*)$")
-
-
-def restore_commented_on(text: str) -> str:
-    restored: list[str] = []
-    inside_on = False
-    for line in text.splitlines():
-        body = COMMENTED_ON_BODY.match(line)
-        if COMMENTED_ON.match(line):
-            inside_on = True
-            restored.append("on:")
-        elif inside_on and body:
-            restored.append(body.group(1))
-        else:
-            # on: の塊が終わった行。以後の `# ` はふつうのコメントなので触れない
-            inside_on = False
-            restored.append(line)
-    return "\n".join(restored) + "\n"
 
 
 def actionlint_platform() -> str:
@@ -208,8 +188,7 @@ def audit(
         copy = github / DEFAULT_DIRECTORY.name
         copy.mkdir(parents=True)
         for workflow in sorted(directory.glob("*.yml")):
-            text = restore_commented_on(workflow.read_text(encoding="utf-8"))
-            (copy / workflow.name).write_text(text, encoding="utf-8")
+            (copy / workflow.name).write_bytes(workflow.read_bytes())
         for action in composite_actions(directory):
             destination = github / action.relative_to(directory.resolve().parent)
             destination.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,3 @@
-import importlib.util
 from collections.abc import Callable
 from pathlib import Path
 
@@ -51,17 +50,6 @@ def step_index(job: CommentedMap, matches: Callable[[CommentedMap], bool]) -> in
     return found[0]
 
 
-def trigger_of(text: str) -> object:
-    spec = importlib.util.spec_from_file_location(
-        "check_workflows", ROOT / "scripts" / "check_workflows.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return load_yaml(module.restore_commented_on(text))["on"]
-
-
 def test_only_the_job_in_the_pypi_environment_holds_id_token() -> None:
     tree = release()
     assert permission_holders(tree, "id-token") == environment_holders(tree, "pypi") == {"publish"}
@@ -94,8 +82,8 @@ def test_verify_audits_locked_dependencies_of_the_tagged_commit() -> None:
     assert all("continue-on-error" not in step for step in verify.get("steps", []))
 
 
-def test_restored_trigger_is_a_tag_push_only() -> None:
-    assert trigger_of(release_text()) == {"push": {"tags": ["v*"]}}
+def test_trigger_is_a_tag_push_only() -> None:
+    assert release()["on"] == {"push": {"tags": ["v*"]}}
 
 
 def test_gh_token_never_reaches_steps_that_run_code_of_the_tag() -> None:
@@ -219,8 +207,7 @@ def test_a_commented_needs_is_not_a_dependency() -> None:
 
 
 def test_a_trigger_beyond_the_tag_push_is_not_equal() -> None:
-    text = "# on:\n#   push:\n#     tags: ['v*']\n#   workflow_dispatch:\nname: x\n"
-    assert trigger_of(text) != {"push": {"tags": ["v*"]}}
-    assert trigger_of("# on:\n#   push:\n#     tags: ['v*']\nname: x\n") == {
-        "push": {"tags": ["v*"]}
-    }
+    wider = load_yaml("on:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\nname: x\n")
+    exact = load_yaml("on:\n  push:\n    tags: ['v*']\nname: x\n")
+    assert wider["on"] != {"push": {"tags": ["v*"]}}
+    assert exact["on"] == {"push": {"tags": ["v*"]}}

@@ -255,6 +255,12 @@ def test_working_profile_has_no_signature_expectation() -> None:
     assert not any("rules" in endpoint for endpoint in SETTINGS["working"])
 
 
+@pytest.mark.parametrize("workflow", ["ci.yml", "release.yml"])
+def test_working_profile_expects_the_public_workflows_disabled(workflow: str) -> None:
+    endpoint = f"repos/{{repo}}/actions/workflows/{workflow}"
+    assert SETTINGS["working"][endpoint] == {"state": "disabled_manually"}
+
+
 def test_tag_rules_come_from_active_tag_rulesets_only() -> None:
     summaries = [
         {"id": 1, "target": "branch", "enforcement": "active"},

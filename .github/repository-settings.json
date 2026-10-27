@@ -24,6 +24,9 @@
     "repos/{repo}/actions/workflows/ci.yml": {
       "state": "disabled_manually"
     },
+    "repos/{repo}/actions/workflows/release.yml": {
+      "state": "disabled_manually"
+    },
     "repos/{repo}/actions/workflows/private-ci.yml": {
       "state": "active"
     }
