@@ -1,0 +1,7 @@
+class FooTest {
+    @Test
+    void reads() throws Exception {
+        FileInputStream in = new FileInputStream("a.txt"); // bad
+        BufferedReader r = new BufferedReader(new FileReader("b.txt")); // bad
+    }
+}

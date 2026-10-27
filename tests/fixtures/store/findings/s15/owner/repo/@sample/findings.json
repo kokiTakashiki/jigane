@@ -1,0 +1,33 @@
+{
+ "last_number": 11,
+ "groups": {
+  "macro": [
+   {
+    "id": "F11",
+    "severity": "nit",
+    "viewpoint": "M2",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f4.js",
+      "start_line": 3,
+      "end_line": 47
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [
+     "text"
+    ],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

@@ -1,0 +1,22 @@
+{
+ "id": "owner/repo:sample",
+ "mode": "feature",
+ "created_at": "2026-10-17T09:35:07+00:00",
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f5.py"
+ ],
+ "declaration": {
+  "source": "excerpts",
+  "intent": null,
+  "excerpts": [
+   {
+    "path": "src/f4.md",
+    "start_line": 1,
+    "end_line": 7,
+    "text": "text"
+   }
+  ]
+ },
+ "warnings": []
+}

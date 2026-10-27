@@ -1,0 +1,141 @@
+{
+ "macro": {
+  "ran_at": "2026-10-18T12:11:54+00:00",
+  "model": "claude-sonnet-5-5",
+  "effort": "xhigh",
+  "invocations": [
+   {
+    "role": "discovery:route",
+    "split_index": null,
+    "input_tokens": 8,
+    "output_tokens": 4120,
+    "cache_read_input_tokens": 215329,
+    "cache_creation_input_tokens": 109845,
+    "cost_usd": 0.5236618000000001,
+    "duration_ms": 38564,
+    "num_turns": 9,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "4c68bbfcfa23",
+    "prompt_chars": 8939
+   },
+   {
+    "role": "discovery:verify",
+    "split_index": null,
+    "input_tokens": 10,
+    "output_tokens": 4257,
+    "cache_read_input_tokens": 323083,
+    "cache_creation_input_tokens": 111390,
+    "cost_usd": 0.5527666,
+    "duration_ms": 40766,
+    "num_turns": 11,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "75488086f61c",
+    "prompt_chars": 7630
+   },
+   {
+    "role": "discovery:purpose",
+    "split_index": null,
+    "input_tokens": 12,
+    "output_tokens": 4732,
+    "cache_read_input_tokens": 431347,
+    "cache_creation_input_tokens": 116572,
+    "cost_usd": 0.5999014,
+    "duration_ms": 41839,
+    "num_turns": 13,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "717247eef5b9",
+    "prompt_chars": 8486
+   }
+  ],
+  "discovered": 0,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0,
+  "discovered_by_perspective": {
+   "route": 0,
+   "verify": 0,
+   "purpose": 0
+  },
+  "failed_perspectives": {},
+  "merged_duplicates": 0,
+  "conclude": {
+   "ran": false,
+   "error": null,
+   "candidates": [],
+   "merged_groups": [],
+   "discarded": []
+  }
+ },
+ "micro": {
+  "ran_at": "2026-10-18T12:13:00+00:00",
+  "model": "claude-sonnet-5-5",
+  "effort": null,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 10,
+    "output_tokens": 1710,
+    "cache_read_input_tokens": 345448,
+    "cache_creation_input_tokens": 106301,
+    "cost_usd": 0.5114136,
+    "duration_ms": 19701,
+    "num_turns": 7,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "50e80ab976bf",
+    "prompt_chars": 8141
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 607,
+    "cache_read_input_tokens": 2579,
+    "cache_creation_input_tokens": 98076,
+    "cost_usd": 0.3988978,
+    "duration_ms": 9717,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "7973e6755025",
+    "prompt_chars": 7331
+   },
+   {
+    "role": "judge",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 606,
+    "cache_read_input_tokens": 2821,
+    "cache_creation_input_tokens": 99045,
+    "cost_usd": 0.4028122,
+    "duration_ms": 7956,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "36dbf989b3b6",
+    "prompt_chars": 7899
+   }
+  ],
+  "discovered": 1,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": null,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 4,
+  "reviewed_files": 4
+ }
+}

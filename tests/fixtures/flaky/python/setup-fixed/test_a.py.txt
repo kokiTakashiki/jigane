@@ -1,0 +1,5 @@
+import datetime
+
+
+def test_a():
+    assert datetime.datetime.now()

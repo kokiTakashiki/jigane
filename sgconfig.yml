@@ -1,0 +1,6 @@
+# ast-grep の設定。Python の呼び出しの形を、行の正規表現ではなく構文木で検査する。
+# ast-grep は引数や文字列の形まで見る規則だけを置く。import の向きは import-linter と ruff の banned-api が見る。
+ruleDirs:
+  - ast-grep/rules
+testConfigs:
+  - testDir: ast-grep/rule-tests

@@ -1,0 +1,171 @@
+{
+ "macro": {
+  "ran_at": "2026-10-21T07:30:37+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 3,
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 4133,
+    "cache_read_input_tokens": 1999,
+    "cache_creation_input_tokens": 14074,
+    "duration_ms": 36164,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.0980298,
+    "cost_source": "measured",
+    "prompt_version": "fe39b61af2ce",
+    "prompt_chars": 18797
+   }
+  ],
+  "discarded": [
+   {
+    "source": "S1",
+    "reason": "text"
+   }
+  ],
+  "elapsed_s": 72.8,
+  "effort": "xhigh",
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0,
+  "record_kind": "succeeded"
+ },
+ "micro": {
+  "ran_at": "2026-10-21T07:31:24+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 1,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 8,
+    "output_tokens": 1705,
+    "cache_read_input_tokens": 40263,
+    "cache_creation_input_tokens": 11357,
+    "duration_ms": 15202,
+    "num_turns": 7,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.0705466,
+    "cost_source": "measured",
+    "prompt_version": "a9960d1b3ff1",
+    "prompt_chars": 6506
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 914,
+    "cache_read_input_tokens": 8961,
+    "cache_creation_input_tokens": 7367,
+    "duration_ms": 15162,
+    "num_turns": 4,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.0404082,
+    "cost_source": "measured",
+    "prompt_version": "0df5604536cf",
+    "prompt_chars": 6050
+   },
+   {
+    "role": "judge",
+    "split_index": 0,
+    "input_tokens": 2,
+    "output_tokens": 362,
+    "cache_read_input_tokens": 1889,
+    "cache_creation_input_tokens": 6616,
+    "duration_ms": 6867,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.0304658,
+    "cost_source": "measured",
+    "prompt_version": "cea7f62a1357",
+    "prompt_chars": 8412
+   },
+   {
+    "role": "themes",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 318,
+    "cache_read_input_tokens": 1664,
+    "cache_creation_input_tokens": 2631,
+    "duration_ms": 4783,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.014040799999999999,
+    "cost_source": "measured",
+    "prompt_version": "03c07316e4ba",
+    "prompt_chars": 1208
+   }
+  ],
+  "elapsed_s": 46.7,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": {
+   "failed": false,
+   "failure": null,
+   "unknown_ids": 0,
+   "duplicate_ids": 0,
+   "unassigned": 0
+  },
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 3,
+  "reviewed_files": 3,
+  "budget_stops": []
+ },
+ "security": {
+  "ran_at": "2026-10-21T07:31:32+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 0,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 2,
+    "output_tokens": 226,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 13229,
+    "duration_ms": 5342,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.05518,
+    "cost_source": "measured",
+    "prompt_version": "d36b377750b9",
+    "prompt_chars": 6717
+   }
+  ],
+  "elapsed_s": 6.8,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 3,
+  "reviewed_files": 3,
+  "budget_stops": []
+ }
+}

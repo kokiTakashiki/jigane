@@ -1,0 +1,18 @@
+id: no-git-stash-python
+valid:
+  - run_command(["git", "status"])
+  - |
+    # git stash は使わない
+    x = 1
+  - |
+    def f():
+        """git stash を説明する docstring。"""
+  - run_command(["stash", "git"])
+invalid:
+  - run_command(["git", "stash"])
+  - run_command(["git", "-C", d, "stash", "pop"])
+  - os.system("git stash")
+  - os.system(f"git stash {mode}")
+  - os.system(r"git stash")
+  - run_command(("git", "stash"))
+  - run_command([f"git", "stash"])

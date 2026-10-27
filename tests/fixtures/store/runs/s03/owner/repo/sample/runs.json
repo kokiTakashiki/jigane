@@ -1,0 +1,32 @@
+{
+ "security": {
+  "ran_at": "2026-10-17T12:04:02+00:00",
+  "model": "claude-sonnet-5-5",
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 990,
+    "cache_read_input_tokens": 18484,
+    "cache_creation_input_tokens": 19875,
+    "cost_usd": 0.0931048,
+    "duration_ms": 10378,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0
+   }
+  ],
+  "discovered": 0,
+  "dropped_without_evidence": 0,
+  "dropped_outside_shard": 0,
+  "dropped_invalid_schema": 0,
+  "failed_splits": 0,
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 4,
+  "reviewed_files": 4
+ }
+}

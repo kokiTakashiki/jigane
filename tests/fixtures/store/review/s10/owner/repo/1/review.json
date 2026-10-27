@@ -1,0 +1,46 @@
+{
+ "id": "owner/repo#1",
+ "mode": "diff",
+ "created_at": "2026-10-18T12:17:18+00:00",
+ "refreshed_at": "2026-10-18T12:36:51+00:00",
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f2.java"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "pull_request",
+  "intent": "text",
+  "excerpts": []
+ },
+ "warnings": [],
+ "pull_request": {
+  "url": "https://example.invalid/pull/1",
+  "number": 48,
+  "title": "title",
+  "base_sha": "f9d17cdb40d9574ca1617a1074fbd7ded21160e9",
+  "head_sha": "53279d6f5f8f5770cda1eaab4972c706a8651172",
+  "merge_base": "f9d17cdb40d9574ca1617a1074fbd7ded21160e9",
+  "linked_issues": [],
+  "base_tree": "text"
+ },
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_pull_requests": [
+   {
+    "number": 46,
+    "title": "title",
+    "files": [
+     "src/f1.java"
+    ]
+   }
+  ],
+  "owners": [
+   {
+    "path": "src/f2.java",
+    "owners": []
+   }
+  ]
+ }
+}

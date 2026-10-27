@@ -1,0 +1,13 @@
+import Testing
+
+struct CollectionTests {
+    @Test func keys() {
+        let dict = ["a": 1, "b": 2]
+        #expect(Array(dict.keys) == ["a", "b"])
+    }
+
+    @Test func set() {
+        let values: Set<Int> = [1, 2, 3]
+        #expect(Array(values) == [1, 2, 3])
+    }
+}

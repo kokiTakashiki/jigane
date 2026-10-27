@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public void Runs()
+    {
+        new Thread(() => Work()).Start();
+        var worker = new Thread(Work);
+        worker.Start();
+        Task.Run(() => Work());
+    }
+}

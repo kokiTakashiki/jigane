@@ -1,0 +1,14 @@
+class FooTest {
+    @Test
+    void clocks() {
+        long a = System.currentTimeMillis(); // bad
+        long b = System.nanoTime(); // bad
+        Date d = new Date(); // bad
+        LocalDate day = LocalDate.now(); // bad
+        Instant at = Instant.now(); // bad
+        LocalDateTime z = LocalDateTime.now(ZoneId.of("UTC")); // bad
+        Instant utc = Instant.now(Clock.systemUTC()); // bad
+        LocalDate sys = LocalDate.now(Clock.systemDefaultZone()); // bad
+        Calendar c = Calendar.getInstance(); // bad
+    }
+}

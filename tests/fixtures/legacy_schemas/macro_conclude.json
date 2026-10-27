@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "discarded": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "concern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "disclosed_at": {
+            "description": "kind が disclosed_limitation のときだけ書く。開示の場所（ファイルと節）を書く。複数の場所は読点で区切って並べる。",
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "unverifiable_from_diagram",
+              "not_a_contract",
+              "deepening",
+              "decided_by_declaration",
+              "settled_earlier",
+              "disclosed_limitation",
+              "other"
+            ]
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "pattern": "^S[0-9]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "claim": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "declaration_ref": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deepens": {
+            "pattern": "^F[0-9]+$",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/$defs/location"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "from_concern": {
+            "pattern": "^F[0-9]+$",
+            "type": "string"
+          },
+          "in_scope": {
+            "type": "boolean"
+          },
+          "judgment_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nit_reason": {
+            "additionalProperties": false,
+            "properties": {
+              "concern": {
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "unverifiable_from_diagram",
+                  "not_a_contract",
+                  "deepening",
+                  "decided_by_declaration",
+                  "settled_earlier",
+                  "disclosed_limitation",
+                  "other"
+                ],
+                "type": "string"
+              },
+              "places": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "text": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "text",
+              "concern",
+              "places"
+            ],
+            "type": "object"
+          },
+          "out_of_scope": {
+            "additionalProperties": false,
+            "properties": {
+              "paths": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "paths",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "references": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope_reason": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "warning",
+              "nit"
+            ]
+          },
+          "triage_reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "viewpoint": {
+            "enum": [
+              "M0",
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ]
+          }
+        },
+        "required": [
+          "severity",
+          "viewpoint",
+          "claim",
+          "body",
+          "evidence",
+          "declaration_ref",
+          "judgment_region",
+          "references",
+          "in_scope",
+          "scope_reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "merged": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "finding_index": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "pattern": "^S[0-9]+$",
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "required": [
+          "finding_index",
+          "sources"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "findings",
+    "merged",
+    "discarded"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,30 @@
+id: no-claude-launch-outside-llm-runs
+language: python
+severity: error
+message: claude は jigane.llm_runs.claude.run から起動する。同意、予算、--restricted、秘密のファイルの拒否はその口だけが付ける。
+# 検出は書き方を拾う補い。文字列の連結や変数を経由する形は拾えない。拾えない形は
+# jigane.git.process の run_command と run_resolved が claude の名前を断って止める。
+ignores:
+  - jigane/llm_runs/claude.py
+  # 口の定義そのもの
+  - jigane/git/process.py
+  # 口を呼ぶ試験（Windows の解決の試験）
+  - tests/test_process_windows.py
+  - tests/test_claude_launch_guard.py
+  # 偽の claude.cmd と claude.exe を PATH に置き、Windows での起動の解決を確かめる試験。lint の走査の範囲の外にあるが、範囲に入れても当たらないようにする
+  - tests_windows/test_windows_launch.py
+rule:
+  any:
+    # claude の実行ファイルを決める口と、claude 用の起動の口を、llm_runs の外で使う形
+    - pattern: claude_binary($$$)
+    - pattern: $MODULE.claude_binary($$$)
+    - kind: identifier
+      regex: ^run_claude_resolved$
+    # ["claude", ...] や ("claude.exe", ...) のように引数の列の先頭が claude である形
+    - kind: string
+      regex: ^[rRbBfFuU]{0,2}["']claude(\.exe)?["']$
+      nthChild: 1
+      inside:
+        any:
+          - kind: list
+          - kind: tuple

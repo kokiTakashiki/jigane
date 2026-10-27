@@ -1,0 +1,19 @@
+[project]
+name = "jigane-language-kotlin"
+version = "0.1.0"
+description = "jigane に Kotlin の宣言の一覧を足す言語プラグインの例"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "jigane>=0.1.0",
+]
+
+[project.entry-points."jigane.languages"]
+kotlin = "jigane_language_kotlin:plugin"
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""

@@ -1,0 +1,9 @@
+public class FooTests
+{
+    [Fact]
+    public void Sum()
+    {
+        Assert.Equal(0.3, a + b);
+        Assert.AreEqual(0.3, Compute());
+    }
+}

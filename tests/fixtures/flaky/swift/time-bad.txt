@@ -1,0 +1,12 @@
+import Foundation
+import XCTest
+
+final class TimeTests: XCTestCase {
+    func testNow() {
+        let a = Date()
+        let b = Date.now
+        let c = CFAbsoluteTimeGetCurrent()
+        XCTAssertNotNil([a, b])
+        XCTAssertGreaterThan(c, 0)
+    }
+}

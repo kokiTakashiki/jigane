@@ -1,0 +1,11 @@
+class FooTest {
+    @Test
+    void runs() throws Exception {
+        work();
+        service.start();
+    }
+
+    private void helper() {
+        new Thread(() -> work()).start();
+    }
+}

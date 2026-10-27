@@ -1,0 +1,79 @@
+{
+ "macro": {
+  "ran_at": "2026-10-21T15:43:51+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 0,
+  "elapsed_s": 32.0,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "effort": "xhigh",
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 262,
+    "cache_read_input_tokens": 3067,
+    "cache_creation_input_tokens": 12300,
+    "duration_ms": 3375,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.0524374,
+    "cost_source": "measured",
+    "prompt_version": "ff0c37e5e422",
+    "prompt_chars": 18011
+   }
+  ],
+  "discarded": [],
+  "dropped_without_bot_findings": 0,
+  "record_kind": "succeeded"
+ },
+ "micro": {
+  "ran_at": "2026-10-21T15:44:14+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 0,
+  "elapsed_s": 21.9,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "effort": null,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 6,
+    "output_tokens": 974,
+    "cache_read_input_tokens": 32151,
+    "cache_creation_input_tokens": 12614,
+    "duration_ms": 20895,
+    "num_turns": 6,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.0666382,
+    "cost_source": "measured",
+    "prompt_version": "517f29018475",
+    "prompt_chars": 10435,
+    "concerns": {
+     "passed": [],
+     "unspecified": 0
+    }
+   }
+  ],
+  "launch_failures": [],
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 3,
+  "reviewed_files": 3,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "unverified_candidates": 0,
+  "budget_stops": [],
+  "mcp_servers": [],
+  "theme_bundling": null
+ }
+}

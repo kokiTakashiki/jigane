@@ -1,0 +1,25 @@
+{
+ "next_violation": 1,
+ "next_warning": 3,
+ "keys": {
+  "src/f8.cs\u0000FLK-NETWORK\u000043b883c87bd8855f\u00001": "W1",
+  "src/f8.cs\u0000FLK-NETWORK\u00002271ad7f28e7da20\u00001": "W2"
+ },
+ "violations": [],
+ "warnings": [
+  {
+   "number": "W1",
+   "id": "text",
+   "cause": "Network",
+   "confidence": "direct",
+   "path": "src/f8.cs",
+   "line": 1245,
+   "excerpt": "text",
+   "reason": "text",
+   "source": "text",
+   "legitimate": "text",
+   "detector_note": "",
+   "remedy": "text"
+  }
+ ]
+}

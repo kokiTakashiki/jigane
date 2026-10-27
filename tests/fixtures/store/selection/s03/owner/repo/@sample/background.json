@@ -1,0 +1,22 @@
+{
+ "issues": [],
+ "documents": [],
+ "past_changes": [
+  {
+   "kind": "commit",
+   "sha": "10587f923a4e8ca928e33778bd8854a774322309",
+   "title": "title",
+   "files": [
+    "src/f1.py"
+   ]
+  }
+ ],
+ "owners": [
+  {
+   "path": "src/f2.py",
+   "owners": [
+    "owner"
+   ]
+  }
+ ]
+}

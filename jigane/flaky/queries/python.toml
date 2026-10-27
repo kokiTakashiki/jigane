@@ -1,0 +1,114 @@
+# Python の flaky の query。tree-sitter の query で、検出した節を @hit に取る。
+# id は catalog.toml の項目の id。check は checks.py の名前で、query の結果に掛ける検査。
+
+[[query]]
+id = "FLK-ASYNC-WAIT"
+query = '''
+(call function: (attribute) @fn (#match? @fn "^(time|asyncio)[.]sleep$")) @hit
+'''
+
+[[query]]
+id = "FLK-TIME"
+check = "time_without_fixation"
+direction = "freezegun か time-machine で時刻を固定してください。"
+query = '''
+(call function: (attribute) @fn
+  (#match? @fn "^(datetime[.](datetime[.])?(now|today|utcnow)|date[.]today|datetime[.]date[.]today|time[.]time)$")) @hit
+'''
+
+[[query]]
+id = "FLK-RANDOM"
+check = "random_without_seed"
+query = '''
+(call function: (attribute) @fn
+  (#match? @fn "^random[.](random|randint|choice|choices|shuffle|sample|uniform|randrange|gauss)$")) @hit
+'''
+
+[[query]]
+id = "FLK-NETWORK"
+check = "python_network_target"
+query = '''
+(call function: (attribute) @fn
+  (#match? @fn "^(requests[.](get|post|put|delete|patch|head|request)|httpx[.](get|post|put|delete|request)|urllib[.]request[.]urlopen|http[.]client[.]HTTPS?Connection|socket[.]create_connection)$")) @hit
+(call function: (identifier) @fn (#match? @fn "^(urlopen|HTTPSConnection|HTTPConnection)$")) @hit
+'''
+
+[[query]]
+id = "FLK-IO"
+direction = "pytest の tmp_path を使い、テストごとの一時ディレクトリ配下にファイルを作ってください。"
+query = '''
+(call function: (identifier) @fn
+  arguments: (argument_list . (string (string_content) @path))
+  (#match? @fn "^(open|Path)$")
+  (#match? @path "^(/tmp/|/var/|/home/|/Users/)")) @hit
+'''
+
+[[query]]
+id = "FLK-UNORDERED"
+check = "unordered_list_equality"
+query = '''
+(assert_statement (comparison_operator) @hit)
+'''
+
+[[query]]
+id = "FLK-FLOAT"
+direction = "pytest.approx か math.isclose で許容誤差を付けて比較してください。"
+check = "float_equality"
+query = '''
+(assert_statement (comparison_operator (float)) @hit)
+'''
+
+[[query]]
+id = "FLK-FLOAT"
+direction = "assertAlmostEqual か math.isclose で許容誤差を付けて比較してください。"
+check = "float_assert_equal"
+query = '''
+(call function: (attribute attribute: (identifier) @method)
+  arguments: (argument_list (float))
+  (#eq? @method "assertEqual")) @hit
+'''
+
+[[query]]
+id = "FLK-WALL-CLOCK"
+check = "wall_clock_upper_bound"
+query = '''
+(assert_statement (comparison_operator) @hit)
+'''
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+query = '''
+(if_statement consequence: (block
+  (call function: (attribute) @fn (#eq? @fn "pytest.skip")) @hit))
+(decorator (call function: (attribute) @fn
+  (#match? @fn "^(pytest[.]mark[.]skipif|unittest[.]skipIf|unittest[.]skipUnless)$"))) @hit
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "module_global_mutation"
+query = '''
+(call function: (attribute object: (identifier) attribute: (identifier))) @hit
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "in_test_function"
+query = '''
+(global_statement) @hit
+'''
+
+[[query]]
+id = "FLK-RESOURCE-LEAK"
+direction = "with 文で開き、ブロックを抜けるときに確実に閉じてください。"
+check = "not_in_with"
+query = '''
+(call function: (identifier) @fn (#eq? @fn "open")) @hit
+'''
+
+[[query]]
+id = "FLK-CONCURRENCY"
+check = "thread_start_in_test"
+query = '''
+(call function: (attribute attribute: (identifier) @method (#eq? @method "start"))) @hit
+'''

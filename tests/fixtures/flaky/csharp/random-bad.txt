@@ -1,0 +1,10 @@
+public class FooTests
+{
+    [Fact]
+    public void Dice()
+    {
+        var a = new Random();
+        var b = Random.Shared.Next();
+        var c = Guid.NewGuid();
+    }
+}

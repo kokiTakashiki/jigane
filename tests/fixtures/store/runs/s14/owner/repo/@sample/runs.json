@@ -1,0 +1,87 @@
+{
+ "macro": {
+  "ran_at": "2026-10-21T13:32:16+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 3,
+  "elapsed_s": 64.9,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "effort": "xhigh",
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 6371,
+    "cache_read_input_tokens": 3036,
+    "cache_creation_input_tokens": 11061,
+    "duration_ms": 54469,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.1085652,
+    "cost_source": "measured",
+    "prompt_version": "ff0c37e5e422",
+    "prompt_chars": 14273
+   }
+  ],
+  "discarded": [
+   {
+    "source": "S1",
+    "reason": "text",
+    "kind": "not_a_contract",
+    "concern": "text"
+   },
+   {
+    "source": "S2",
+    "reason": "text",
+    "kind": "unverifiable_from_diagram",
+    "concern": "text"
+   }
+  ],
+  "dropped_without_bot_findings": 0,
+  "record_kind": "succeeded"
+ },
+ "micro": {
+  "ran_at": "2026-10-21T13:32:26+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 0,
+  "elapsed_s": 9.6,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "effort": null,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 6,
+    "output_tokens": 708,
+    "cache_read_input_tokens": 28232,
+    "cache_creation_input_tokens": 10201,
+    "duration_ms": 8491,
+    "num_turns": 5,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.053542400000000004,
+    "cost_source": "measured",
+    "prompt_version": "517f29018475",
+    "prompt_chars": 6175
+   }
+  ],
+  "launch_failures": [],
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 2,
+  "reviewed_files": 2,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "unverified_candidates": 0,
+  "budget_stops": [],
+  "theme_bundling": null
+ }
+}

@@ -1,0 +1,10 @@
+import XCTest
+
+final class RandomTests: XCTestCase {
+    func testRandom() {
+        let n = Int.random(in: 0..<10)
+        let pick = [1, 2, 3].randomElement()
+        let order = [1, 2, 3].shuffled()
+        XCTAssertNotNil([n, pick as Any, order])
+    }
+}

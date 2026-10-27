@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # 先頭の注釈
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: uv
+    directory: "/"
+    open-pull-requests-limit: 5 # 既存の上限
+    ignore:
+      # 除外の理由
+      - dependency-name: "x"
+        versions: ["1.0.0"]

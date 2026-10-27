@@ -1,0 +1,49 @@
+{#- PR への返信の文面。差分レビュー式で使う。 -#}
+{% macro item(finding) %}
+- **{{ finding.number }}** [{{ finding.severity }}] {{ finding.claim | md }}{% if finding.evidence %}（{% for e in finding.evidence %}`{{ e.location }}`{{ "、" if not loop.last }}{% endfor %}）{% endif %}
+{% if finding.body %}
+  {{ finding.body | md | indent(2) }}
+{% endif %}
+{% endmacro %}
+{% if pull_request %}{{ pull_request.title | md }}（#{{ pull_request.number }}）{% else %}{{ review.id }}{% endif %} のレビューです。次の {{ findings | length }} 件{% if gates.counted %}とゲート違反 {{ gates.counted }} 件{% endif %}を確認してください。
+{% if gates.violations %}
+
+## ゲート違反
+
+{% for v in gates.violations %}
+- **{{ v.number }}**{% if v.severity %}（{{ v.severity }}）{% endif %}{% if v.allowed %}外しました（{{ v.allowed | md }}）{% endif %} `{{ v.path }}:{{ v.line }}` {{ v.explanation.text | md }}
+{% endfor %}
+{% endif %}
+{% for group in groups %}
+
+## {{ group.label }}
+{% if group.group == "micro" %}
+{% for theme in group.themes %}
+
+### {{ (theme.title | md) if theme.title else "その他" }}
+
+{% for finding in theme.findings %}
+{{ item(finding) | trim }}
+{% endfor %}
+{% endfor %}
+{% else %}
+
+{% for finding in group.regular %}
+{{ item(finding) | trim }}
+{% endfor %}
+{% for section in group.kind_sections if section.findings %}
+
+### {{ section.heading }}
+
+{% for finding in section.findings %}
+{{ item(finding) | trim }}
+{% if finding.scope_reason %}
+  範囲外の理由: {{ finding.scope_reason | md }}
+{% endif %}
+{% if finding.deepens %}
+  前の回の指摘: {{ finding.deepens | md }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endfor %}

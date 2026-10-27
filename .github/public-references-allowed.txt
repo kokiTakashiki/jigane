@@ -1,0 +1,15 @@
+# 公開の写しに残してよい参照。1 行「パス:語」。語は、除外した .github/private-names.txt の名前か、除外したパス。
+# この一覧と .github/public-exclude.txt は検査の対象に入れない。どちらも除くパスや残す参照を書くのが役目のため。
+scripts/export_public.py:.github/private-names.txt
+scripts/export_public.py:.github/public-exclude.txt
+scripts/workflow_rules.py:.github/public-exclude.txt
+# 絶対パスを検出する規則の判定語。手元のパスではない。
+jigane/flaky/checks.py:/Users/
+jigane/flaky/queries/java.toml:/Users/
+jigane/flaky/queries/python.toml:/Users/
+jigane/flaky/queries/swift.toml:/Users/
+# flaky の悪い例。絶対パスを書いた行を規則が検出することを確かめる入力。
+tests/fixtures/flaky/java/io-bad.txt:/Users/
+# 非公開の語が保存先に漏れないことを確かめる試験が、探す語として持っている。
+tests/test_store_compat.py:kokitakashiki
+tests/test_store_compat.py:/Users/

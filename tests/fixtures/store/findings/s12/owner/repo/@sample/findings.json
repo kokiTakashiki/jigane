@@ -1,0 +1,54 @@
+{
+ "last_number": 1,
+ "groups": {
+  "macro": [],
+  "micro": [
+   {
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "D6",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.js",
+      "start_line": 269,
+      "end_line": 271
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f2.js",
+       "start_line": 267,
+       "end_line": 271
+      }
+     ],
+     "verdict": "weakened",
+     "reason": "text"
+    },
+    "group": "micro",
+    "theme": "B1",
+    "triage": "folded"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F1"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

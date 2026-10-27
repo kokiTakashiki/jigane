@@ -1,0 +1,31 @@
+{
+ "last_number": 1,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f4",
+      "start_line": 2,
+      "end_line": 55
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "must_read"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

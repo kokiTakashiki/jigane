@@ -1,0 +1,92 @@
+{
+ "micro": {
+  "ran_at": "2026-10-20T14:12:01+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 6,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 8,
+    "output_tokens": 6227,
+    "cache_read_input_tokens": 77918,
+    "cache_creation_input_tokens": 24178,
+    "cost_usd": 0.1745816,
+    "duration_ms": 53056,
+    "num_turns": 6,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "a5ef31fbf59c",
+    "prompt_chars": 20866
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 6,
+    "output_tokens": 1807,
+    "cache_read_input_tokens": 41783,
+    "cache_creation_input_tokens": 19763,
+    "cost_usd": 0.1054906,
+    "duration_ms": 19572,
+    "num_turns": 6,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "0df5604536cf",
+    "prompt_chars": 22355
+   },
+   {
+    "role": "judge",
+    "split_index": 0,
+    "input_tokens": 2,
+    "output_tokens": 757,
+    "cache_read_input_tokens": 2821,
+    "cache_creation_input_tokens": 17415,
+    "cost_usd": 0.0777982,
+    "duration_ms": 7710,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "cea7f62a1357",
+    "prompt_chars": 28409
+   },
+   {
+    "role": "themes",
+    "split_index": null,
+    "input_tokens": 4,
+    "output_tokens": 544,
+    "cache_read_input_tokens": 7112,
+    "cache_creation_input_tokens": 4583,
+    "cost_usd": 0.0252024,
+    "duration_ms": 6452,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "03c07316e4ba",
+    "prompt_chars": 1541
+   }
+  ],
+  "elapsed_s": 91.1,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": {
+   "failed": false,
+   "failure": null,
+   "unknown_ids": 0,
+   "duplicate_ids": 0,
+   "unassigned": 0
+  },
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 7,
+  "reviewed_files": 7,
+  "budget_stops": []
+ }
+}

@@ -1,0 +1,19 @@
+id: no-name-kill-python
+valid:
+  - run_command(["kill", "123"])
+  - |
+    # pkill は使わない
+    x = 1
+  - |
+    def f():
+        """pkill を説明する docstring。"""
+  - run_command(["echo", "pkill"])
+invalid:
+  - run_command(["pkill", "-f", name])
+  - os.system("pkill foo")
+  - subprocess.run(["killall", name])
+  - subprocess.run("pgrep -f x", shell=True)
+  - os.system(f"pkill {name}")
+  - os.system(b"pkill foo")
+  - subprocess.run(("pkill", "x"))
+  - subprocess.run([r"killall", name])

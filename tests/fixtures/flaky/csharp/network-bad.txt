@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Calls()
+    {
+        var client = new HttpClient();
+        var r = await client.GetAsync("https://example.com/api");
+        var t = new TcpClient("example.com", 80);
+        var s = await new HttpClient().GetStringAsync("https://example.com");
+    }
+}

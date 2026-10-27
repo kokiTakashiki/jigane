@@ -1,0 +1,14 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-20T08:44:00+00:00",
+    "findings": [],
+    "discard": {
+     "discovered": 3,
+     "discarded": 3
+    }
+   }
+  ]
+ }
+}

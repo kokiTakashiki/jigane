@@ -1,0 +1,10 @@
+import Foundation
+import XCTest
+
+final class ThreadTests: XCTestCase {
+    func testAsync() async {
+        let value = await Task { 1 }.value
+        XCTAssertEqual(value, 1)
+        DispatchQueue.main.async { }
+    }
+}

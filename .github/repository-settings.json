@@ -1,0 +1,94 @@
+{
+  "working": {
+    "repos/{repo}": {
+      "visibility": "private",
+      "allow_forking": false,
+      "has_wiki": false,
+      "has_projects": false,
+      "has_discussions": false
+    },
+    "repos/{repo}/actions/permissions": {
+      "enabled": true,
+      "allowed_actions": "selected",
+      "sha_pinning_required": true
+    },
+    "repos/{repo}/actions/permissions/selected-actions": {
+      "github_owned_allowed": true,
+      "verified_allowed": false,
+      "patterns_allowed": ["astral-sh/setup-uv@*"]
+    },
+    "repos/{repo}/actions/permissions/workflow": {
+      "default_workflow_permissions": "read",
+      "can_approve_pull_request_reviews": false
+    },
+    "repos/{repo}/actions/workflows/ci.yml": {
+      "state": "disabled_manually"
+    },
+    "repos/{repo}/actions/workflows/private-ci.yml": {
+      "state": "active"
+    }
+  },
+  "public": {
+    "repos/{repo}": {
+      "visibility": "public",
+      "allow_forking": true,
+      "has_wiki": false,
+      "has_projects": false,
+      "has_discussions": false,
+      "allow_merge_commit": false,
+      "allow_rebase_merge": false,
+      "allow_squash_merge": true,
+      "delete_branch_on_merge": true,
+      "security_and_analysis.secret_scanning.status": "enabled",
+      "security_and_analysis.secret_scanning_push_protection.status": "enabled"
+    },
+    "repos/{repo}/actions/permissions": {
+      "enabled": true,
+      "allowed_actions": "selected",
+      "sha_pinning_required": true
+    },
+    "repos/{repo}/actions/permissions/selected-actions": {
+      "github_owned_allowed": true,
+      "verified_allowed": false,
+      "patterns_allowed": ["astral-sh/setup-uv@*", "pypa/gh-action-pypi-publish@*"]
+    },
+    "repos/{repo}/actions/permissions/workflow": {
+      "default_workflow_permissions": "read",
+      "can_approve_pull_request_reviews": false
+    },
+    "repos/{repo}/actions/permissions/fork-pr-contributor-approval": {
+      "approval_policy": "all_external_contributors"
+    },
+    "repos/{repo}/private-vulnerability-reporting": {
+      "enabled": true
+    },
+    "repos/{repo}/rules/branches/main": {
+      "[].type": "required_signatures"
+    },
+    "repos/{repo}/rules/tags": {
+      "[].type": ["required_signatures", "creation", "update", "deletion"]
+    },
+    "repos/{repo}/rulesets/tag-scope": {
+      "include": ["refs/tags/v*"],
+      "exclude": [],
+      "bypass_actors": ["RepositoryRole:5"]
+    },
+    "repos/{repo}/environments/pypi": {
+      "can_admins_bypass": false,
+      "protection_rules[].type": ["required_reviewers", "branch_policy"],
+      "deployment_branch_policy.protected_branches": false,
+      "deployment_branch_policy.custom_branch_policies": true
+    },
+    "repos/{repo}/environments/pypi/deployment-branch-policies": {
+      "total_count": 1,
+      "branch_policies[].name": ["v*"],
+      "branch_policies[].type": ["tag"]
+    },
+    "repos/{repo}/vulnerability-alerts": {
+      "enabled": true
+    },
+    "repos/{repo}/automated-security-fixes": {
+      "enabled": false
+    }
+  }
+}

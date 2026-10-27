@@ -1,0 +1,464 @@
+{
+ "mode": "diff",
+ "segments": [
+  {
+   "old_path": "src/f1.py",
+   "new_path": "src/f1.py",
+   "old_span": {
+    "start_line": 238,
+    "end_line": 238
+   },
+   "new_span": {
+    "start_line": 237,
+    "end_line": 241
+   },
+   "qualified_name": "Sym1",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 4,
+   "declaration_kind": "function",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 7,
+    "end_line": 7
+   },
+   "new_span": {
+    "start_line": 7,
+    "end_line": 7
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 43,
+    "end_line": 43
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 103,
+    "end_line": 103
+   },
+   "new_span": {
+    "start_line": 104,
+    "end_line": 104
+   },
+   "qualified_name": "Sym2",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "class",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 104,
+    "end_line": 104
+   },
+   "new_span": {
+    "start_line": 105,
+    "end_line": 105
+   },
+   "qualified_name": "Sym3",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 117,
+    "end_line": 117
+   },
+   "new_span": {
+    "start_line": 118,
+    "end_line": 118
+   },
+   "qualified_name": "Sym4",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 128,
+    "end_line": 128
+   },
+   "new_span": {
+    "start_line": 129,
+    "end_line": 131
+   },
+   "qualified_name": "Sym5",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 3,
+   "declaration_kind": "function",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 354,
+    "end_line": 354
+   },
+   "new_span": null,
+   "qualified_name": "Sym7",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 1,
+   "new_line_count": 0,
+   "declaration_kind": "class",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 355,
+    "end_line": 355
+   },
+   "new_span": null,
+   "qualified_name": "Sym8",
+   "kind": "behavior_removal",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 0,
+   "declaration_kind": "variable",
+   "change_kind": "removed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 363,
+    "end_line": 363
+   },
+   "new_span": null,
+   "qualified_name": "Sym9",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 0,
+   "declaration_kind": "function",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f3.py",
+   "new_path": "src/f3.py",
+   "old_span": {
+    "start_line": 373,
+    "end_line": 373
+   },
+   "new_span": null,
+   "qualified_name": "Sym9",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 0,
+   "declaration_kind": "function",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f4.py",
+   "new_path": "src/f4.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 85,
+    "end_line": 86
+   },
+   "qualified_name": "Sym10",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f4.py",
+   "new_path": "src/f4.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 87,
+    "end_line": 88
+   },
+   "qualified_name": "Sym10",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f4.py",
+   "new_path": "src/f4.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 89,
+    "end_line": 89
+   },
+   "qualified_name": "Sym11",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f4.py",
+   "new_path": "src/f4.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 91,
+    "end_line": 92
+   },
+   "qualified_name": "",
+   "kind": "format_only",
+   "level": "machine",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": null,
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f2.py",
+   "new_path": "src/f2.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 109,
+    "end_line": 109
+   },
+   "qualified_name": "Sym19",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "class",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f2.py",
+   "new_path": "src/f2.py",
+   "old_span": {
+    "start_line": 139,
+    "end_line": 139
+   },
+   "new_span": {
+    "start_line": 142,
+    "end_line": 142
+   },
+   "qualified_name": "Sym21",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "function",
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f8.py",
+   "new_path": "src/f8.py",
+   "old_span": null,
+   "new_span": {
+    "start_line": 14,
+    "end_line": 14
+   },
+   "qualified_name": "",
+   "kind": "test",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "change_kind": "added",
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f8.py",
+   "new_path": "src/f8.py",
+   "old_span": {
+    "start_line": 17,
+    "end_line": 17
+   },
+   "new_span": {
+    "start_line": 18,
+    "end_line": 18
+   },
+   "qualified_name": "",
+   "kind": "test",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "change_kind": "changed",
+   "bot_comment_ids": [],
+   "visibility": null
+  }
+ ],
+ "regions": [
+  {
+   "key": "src/f3.py::Sym3::public_interface",
+   "kind": "public_interface",
+   "path": "src/f3.py",
+   "qualified_name": "Sym3",
+   "summary": "text",
+   "old_span": {
+    "start_line": 104,
+    "end_line": 104
+   },
+   "new_span": {
+    "start_line": 105,
+    "end_line": 105
+   },
+   "line_count": 1,
+   "content_hash": "d151a4c30692f0fe976b5de18b34f799c0a43c6e8386081d8b0e90035d689b26",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J1"
+  },
+  {
+   "key": "src/f3.py::Sym8::behavior_removal",
+   "kind": "behavior_removal",
+   "path": "src/f3.py",
+   "qualified_name": "Sym8",
+   "summary": "text",
+   "old_span": {
+    "start_line": 355,
+    "end_line": 355
+   },
+   "new_span": null,
+   "line_count": 1,
+   "content_hash": "4f2810355580597469651cdfcfed1b4748ccf872c9304e82172f3dc2912a108c",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J4"
+  },
+  {
+   "key": "src/f3.py::Sym9::public_interface",
+   "kind": "public_interface",
+   "path": "src/f3.py",
+   "qualified_name": "Sym9",
+   "summary": "text",
+   "old_span": {
+    "start_line": 363,
+    "end_line": 363
+   },
+   "new_span": null,
+   "line_count": 1,
+   "content_hash": "722778dd8fab2ca99fb7c9f4688da25fb9e539783a20401c17b83576edbca5e8",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J5"
+  },
+  {
+   "key": "src/f4.py::Sym10::public_interface",
+   "kind": "public_interface",
+   "path": "src/f4.py",
+   "qualified_name": "Sym10",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 85,
+    "end_line": 86
+   },
+   "line_count": 2,
+   "content_hash": "5b2c350dd0485454b669da14369173ee7c0e009c60f1060dc3cb5c4bead90d85",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J6"
+  }
+ ],
+ "line_counts": {
+  "by_kind": {
+   "comment_only": 6,
+   "format_only": 4,
+   "generated": 0,
+   "test": 43,
+   "logic": 62,
+   "sensitive_logic": 0,
+   "public_interface": 20,
+   "internal_interface": 0,
+   "dependency_build": 0,
+   "behavior_removal": 3,
+   "bot_response": 0
+  },
+  "by_level": {
+   "required": 23,
+   "confirm": 105,
+   "machine": 10
+  }
+ }
+}

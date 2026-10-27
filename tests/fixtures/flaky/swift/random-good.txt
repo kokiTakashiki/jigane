@@ -1,0 +1,10 @@
+import XCTest
+
+final class RandomTests: XCTestCase {
+    func testSeeded() {
+        var generator = SeededGenerator(seed: 42)
+        let n = Int.random(in: 0..<10, using: &generator)
+        let order = [1, 2, 3].shuffled(using: &generator)
+        XCTAssertNotNil([n, order.count])
+    }
+}

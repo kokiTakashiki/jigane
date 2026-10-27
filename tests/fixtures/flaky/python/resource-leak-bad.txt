@@ -1,0 +1,3 @@
+def test_a():
+    f = open('x.txt')
+    f.read()

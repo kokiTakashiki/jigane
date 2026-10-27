@@ -1,0 +1,12 @@
+import Foundation
+import XCTest
+
+final class FileTests: XCTestCase {
+    func testWrite() throws {
+        let directory = FileManager.default.temporaryDirectory
+        let file = directory.appendingPathComponent(UUID().uuidString)
+        try "x".write(to: file, atomically: true, encoding: .utf8)
+        let legacy = NSTemporaryDirectory() + "out.txt"
+        try "x".write(toFile: legacy, atomically: true, encoding: .utf8)
+    }
+}

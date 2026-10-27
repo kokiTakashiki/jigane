@@ -1,0 +1,122 @@
+{
+ "last_number": 4,
+ "groups": {
+  "macro": [
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "decided_by_declaration",
+     "text": "text",
+     "concern": "text"
+    }
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "not_a_contract",
+     "text": "text",
+     "concern": "text"
+    }
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F3",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f6.py",
+      "start_line": 231,
+      "end_line": 242
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F4",
+    "severity": "warning",
+    "viewpoint": "D4",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": "B1",
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f6.py",
+       "start_line": 231,
+       "end_line": 242
+      }
+     ],
+     "verdict": "weakened",
+     "reason": "text",
+     "verified": false,
+     "tool_claim": {
+      "relies": false,
+      "basis": "none",
+      "version": ""
+     }
+    },
+    "triage_reason": "text"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F4"
+   ],
+   "severity": "warning",
+   "triage": "remaining"
+  }
+ ]
+}

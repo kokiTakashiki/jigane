@@ -1,0 +1,23 @@
+import time
+
+
+def test_a(clock):
+    start = time.monotonic()
+    work()
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0  # jigane: allow-flaky FLK-WALL-CLOCK -- 期待 0.5 秒に 4 倍の余裕
+    assert elapsed > 0.0
+    assert elapsed < limit
+
+
+def test_b():
+    start = 1
+    count = len(items) - start
+    assert count < 3
+
+
+def test_c():
+    t0 = time.perf_counter()
+    work()
+    # jigane: allow-flaky FLK-WALL-CLOCK -- 期待 10 ms の 5 倍を上限にする
+    assert time.perf_counter() - t0 < 0.05

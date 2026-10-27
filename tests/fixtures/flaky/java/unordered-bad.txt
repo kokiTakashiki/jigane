@@ -1,0 +1,9 @@
+class FooTest {
+    @Test
+    void order() {
+        assertEquals(List.of(1, 2), new ArrayList<>(map.keySet())); // bad
+        assertEquals(Arrays.asList("a", "b"), new ArrayList<>(new HashSet<>(names))); // bad
+        assertEquals(List.of(1, 2), map.values()); // bad
+        assertEquals(expected, new ArrayList<>(map.keySet())); // bad
+    }
+}

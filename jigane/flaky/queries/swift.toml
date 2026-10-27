@@ -1,0 +1,122 @@
+# Swift の flaky の query。XCTest と Swift Testing（@Test、#expect）の書き方を拾う。
+# id は catalog.toml の項目の id。check は checks.py の名前で、query の結果に掛ける検査。
+
+[[query]]
+id = "FLK-ASYNC-WAIT"
+direction = "XCTestExpectation を作り、fulfillment(of:timeout:) で完了を待つか、async/await で結果を直接待ってください。"
+note = "XCTestExpectation と Swift Testing の confirmation は完了を待つ仕組みで、当てません。Task.sleep は、時間の経過そのものを検査する Clock の注入と併せて使うときだけ正当です。"
+query = '''
+(call_expression . (_) @fn (#match? @fn "^(sleep|usleep|Thread[.]sleep|Task[.]sleep)$")) @hit
+'''
+
+[[query]]
+id = "FLK-TIME"
+note = "Date を固定する依存の注入（withDependencies など）の内側で呼ぶときと、経過時間の計測を検査するときです。"
+query = '''
+(call_expression . (simple_identifier) @fn (call_suffix (value_arguments) @args)
+  (#eq? @fn "Date") (#eq? @args "()")) @hit
+(call_expression . (simple_identifier) @fn (#eq? @fn "CFAbsoluteTimeGetCurrent")) @hit
+(navigation_expression (simple_identifier) @type (navigation_suffix (simple_identifier) @member)
+  (#eq? @type "Date") (#eq? @member "now")) @hit
+'''
+
+[[query]]
+id = "FLK-RANDOM"
+check = "swift_random_without_generator"
+note = "using: に種を固定した乱数生成器を渡すときです。生成器を渡す呼び出しは当てません。"
+query = '''
+(call_expression . (_) @fn
+  (#match? @fn "^((Int|UInt|Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Double|Float|CGFloat|Bool)[.]random|arc4random|arc4random_uniform|drand48|rand|random)$|[.](randomElement|shuffled|shuffle)$")) @hit
+'''
+
+[[query]]
+id = "FLK-NETWORK"
+check = "swift_non_local_session"
+note = "URLProtocol で応答を差し替えた URLSession は共有の URLSession.shared ではないので当てません。宛先が localhost と確かめられる接続も当てません。"
+query = '''
+(call_expression . (_) @fn
+  (#match? @fn "^URLSession[.]shared[.](dataTask|data|downloadTask|download|uploadTask|upload|bytes)$")) @hit
+'''
+
+[[query]]
+id = "FLK-IO"
+direction = "FileManager.default.temporaryDirectory に UUID を付けたパスを作り、テストの後で削除してください。"
+note = "FileManager.default.temporaryDirectory と NSTemporaryDirectory は実行ごとに分けられる前提で当てません。"
+query = '''
+(call_expression
+  (call_suffix (value_arguments (value_argument
+    (value_argument_label (simple_identifier) @label)
+    (line_string_literal (line_str_text) @path))))
+  (#match? @label "^(fileURLWithPath|forWritingAtPath|forUpdatingAtPath|atPath|toFile)$")
+  (#match? @path "^(/tmp/|/var/|/home/|/Users/|/private/)")) @hit
+'''
+
+[[query]]
+id = "FLK-UNORDERED"
+check = "swift_unordered_array_equality"
+query = '''
+(call_expression . (simple_identifier) @fn (#match? @fn "^XCTAssertEqual$")) @hit
+(macro_invocation (simple_identifier) @macro
+  (call_suffix (value_arguments (value_argument (equality_expression) @hit)))
+  (#match? @macro "^(expect|require)$"))
+'''
+
+[[query]]
+id = "FLK-FLOAT"
+check = "swift_float_equality"
+note = "XCTAssertEqual の accuracy: を付けた比較は当てません。計算の結果が厳密に決まる桁（0.5 など）を検査するときは当たります。"
+query = '''
+(call_expression . (simple_identifier) @fn (#eq? @fn "XCTAssertEqual")) @hit
+(macro_invocation (simple_identifier) @macro
+  (call_suffix (value_arguments (value_argument (equality_expression) @hit)))
+  (#match? @macro "^(expect|require)$"))
+'''
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+note = "対応しない OS や実行環境のときに、理由を明示して外すときです。"
+query = '''
+(call_expression . (simple_identifier) @fn (#match? @fn "^(XCTSkipIf|XCTSkipUnless)$")) @hit
+((attribute) @hit (#match? @hit "(?s)^@(Test|Suite)\\b.*[.](enabled|disabled)[(]if:"))
+'''
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+check = "swift_skip_in_condition"
+query = '''
+(control_transfer_statement
+  (call_expression . (simple_identifier) @fn (#eq? @fn "XCTSkip"))) @hit
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "swift_static_var_assignment"
+note = "tearDown で元へ戻す static var と、テストごとに作り直す状態です。"
+query = '''
+(assignment) @hit
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "swift_static_var_mutation_call"
+query = '''
+(call_expression) @hit
+'''
+
+[[query]]
+id = "FLK-RESOURCE-LEAK"
+check = "swift_filehandle_not_closed"
+note = "FileHandle を返す補助関数と、tearDown で閉じる設計です。"
+query = '''
+(call_expression . (simple_identifier) @fn
+  (#eq? @fn "FileHandle")) @hit
+'''
+
+[[query]]
+id = "FLK-CONCURRENCY"
+check = "swift_in_test_function"
+note = "async/await の Task は当てません。Thread を join 相当で待ち、共有の状態を持たないときです。"
+query = '''
+(call_expression . (_) @fn
+  (#match? @fn "^(Thread|Thread[.]detachNewThread)$|^(?s:DispatchQueue[.]global[(].*[)][.]async(After)?)$")) @hit
+'''

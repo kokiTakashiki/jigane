@@ -1,0 +1,125 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-20T00:16:02+00:00",
+    "findings": [
+     {
+      "id": "F1",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f2.py",
+        "start_line": 1,
+        "end_line": 1
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f6.py",
+       "start_line": 1,
+       "end_line": 1
+      },
+      "judgment_region": "text",
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T00:19:48+00:00",
+    "findings": [
+     {
+      "id": "F2",
+      "severity": "warning",
+      "viewpoint": "M4",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f6.py",
+        "start_line": 169,
+        "end_line": 169
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f6.py",
+       "start_line": 169,
+       "end_line": 169
+      },
+      "judgment_region": "text",
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F3",
+      "severity": "warning",
+      "viewpoint": "M1",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f6.py",
+        "start_line": 42,
+        "end_line": 42
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f6.py",
+       "start_line": 42,
+       "end_line": 42
+      },
+      "judgment_region": "text",
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "out_of_scope",
+      "out_of_scope": {
+       "paths": [],
+       "reason": "text"
+      }
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T00:25:27+00:00",
+    "findings": [
+     {
+      "id": "F4",
+      "severity": "warning",
+      "viewpoint": "M4",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f6.py",
+        "start_line": 62,
+        "end_line": 63
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f6.py",
+       "start_line": 93,
+       "end_line": 94
+      },
+      "judgment_region": "text",
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     }
+    ]
+   }
+  ]
+ }
+}

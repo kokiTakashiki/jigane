@@ -1,0 +1,82 @@
+id: no-name-kill-python
+snapshots:
+  os.system("pkill foo"):
+    labels:
+    - source: "\"pkill foo\""
+      style: primary
+      start: 10
+      end: 21
+    - source: ("pkill foo")
+      style: secondary
+      start: 9
+      end: 22
+  os.system(b"pkill foo"):
+    labels:
+    - source: b"pkill foo"
+      style: primary
+      start: 10
+      end: 22
+    - source: (b"pkill foo")
+      style: secondary
+      start: 9
+      end: 23
+  "os.system(f\"pkill {name}\")":
+    labels:
+    - source: f"pkill {name}"
+      style: primary
+      start: 10
+      end: 25
+    - source: (f"pkill {name}")
+      style: secondary
+      start: 9
+      end: 26
+  "run_command([\"pkill\", \"-f\", name])":
+    labels:
+    - source: "\"pkill\""
+      style: primary
+      start: 13
+      end: 20
+    - source: "[\"pkill\", \"-f\", name]"
+      style: secondary
+      start: 12
+      end: 33
+  "subprocess.run(\"pgrep -f x\", shell=True)":
+    labels:
+    - source: "\"pgrep -f x\""
+      style: primary
+      start: 15
+      end: 27
+    - source: ("pgrep -f x", shell=True)
+      style: secondary
+      start: 14
+      end: 40
+  "subprocess.run((\"pkill\", \"x\"))":
+    labels:
+    - source: "\"pkill\""
+      style: primary
+      start: 16
+      end: 23
+    - source: ("pkill", "x")
+      style: secondary
+      start: 15
+      end: 29
+  "subprocess.run([\"killall\", name])":
+    labels:
+    - source: "\"killall\""
+      style: primary
+      start: 16
+      end: 25
+    - source: "[\"killall\", name]"
+      style: secondary
+      start: 15
+      end: 32
+  "subprocess.run([r\"killall\", name])":
+    labels:
+    - source: r"killall"
+      style: primary
+      start: 16
+      end: 26
+    - source: "[r\"killall\", name]"
+      style: secondary
+      start: 15
+      end: 33

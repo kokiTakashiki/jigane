@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # ワークフローの action を SHA のまま上げる。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # 公開された直後の版を取り込まない。乗っ取られた版は公開から数日のうちに取り下げられることが多い（zizmor の既定の推奨は 7 日）
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    # github-actions と同じ。乗っ取られた直後の版を取り込まない
+    cooldown:
+      default-days: 7
+    ignore:
+      # 0.26.0 は言語アダプタの試験で bus error になる。パッチ版は確かめるため外さない
+      - dependency-name: "tree-sitter"
+        versions: ["0.26.0"]
+    open-pull-requests-limit: 0

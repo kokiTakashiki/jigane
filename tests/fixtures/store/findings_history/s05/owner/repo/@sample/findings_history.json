@@ -1,0 +1,90 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-20T14:54:04+00:00",
+    "findings": [
+     {
+      "id": "F1",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f2.md",
+        "start_line": 1,
+        "end_line": 275
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F2",
+      "severity": "warning",
+      "viewpoint": "M4",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f2.md",
+        "start_line": 1,
+        "end_line": 275
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F3",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "discard_kind": "text",
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "concern": "text",
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     },
+     {
+      "id": "F5",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "discard_kind": "text",
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     }
+    ],
+    "discard": {
+     "discovered": 6,
+     "discarded": 4
+    }
+   }
+  ]
+ }
+}

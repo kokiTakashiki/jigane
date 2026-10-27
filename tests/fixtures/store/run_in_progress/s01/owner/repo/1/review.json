@@ -1,0 +1,55 @@
+{
+ "id": "owner/repo#1",
+ "kind": "pull_request",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": true,
+ "created_at": "2026-10-19T09:32:10+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f12.md"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "pull_request",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "5b4c4b2f3012b463742837328d4a7b315df06398",
+  "head_sha": "ad14177f4d0e0b8ce88b73b34674f565a15d21fc",
+  "merge_base": "5b4c4b2f3012b463742837328d4a7b315df06398",
+  "base_tree": "text"
+ },
+ "pull_request": {
+  "url": "https://example.invalid/pull/1",
+  "number": 3,
+  "title": "title",
+  "linked_issues": []
+ },
+ "local_range": null,
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_pull_requests": [
+   {
+    "number": 2,
+    "title": "title",
+    "files": [
+     "src/f1.md"
+    ]
+   }
+  ],
+  "owners": [
+   {
+    "path": "src/f12.md",
+    "owners": []
+   }
+  ]
+ }
+}

@@ -1,0 +1,8 @@
+class FooTest {
+    @Test
+    void sums() {
+        assertEquals(0.3, a + b, 1e-9);
+        assertEquals(0.5, price);
+        assertEquals(3, count());
+    }
+}

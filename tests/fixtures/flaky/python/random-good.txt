@@ -1,0 +1,7 @@
+import random
+
+random.seed(1)
+
+
+def test_a():
+    assert random.randint(1, 3)

@@ -1,0 +1,39 @@
+# Python の呼び出しと遅延参照の query。capture の名前は csharp.toml と揃える。
+#   call      呼び出しの式の節点（call）
+#   callee    呼び出しの名前の節点
+#   receiver  受け手の式。受け手の無い呼び出しでは付かない
+#   arguments 引数の並び（argument_list）
+# Foo() は構文では関数の呼び出しと区別できないので、生成の判定は解決の側で行う。
+
+[[query]]
+name = "calls"
+query = '''
+(call
+  function: (attribute object: _ @receiver attribute: (identifier) @callee)
+  arguments: (argument_list) @arguments) @call
+(call
+  function: (identifier) @callee
+  arguments: (argument_list) @arguments) @call
+(call
+  function: (attribute object: _ @receiver attribute: (identifier) @callee)
+  arguments: (generator_expression) @arguments) @call
+(call
+  function: (identifier) @callee
+  arguments: (generator_expression) @arguments) @call
+'''
+
+[[query]]
+name = "lambdas"
+query = '''
+(lambda) @lambda
+'''
+
+# 引数に置かれた裸の名前と a.b は、メソッドの参照かもしれない。変数との区別は resolve.py で行う。
+[[query]]
+name = "method_groups"
+query = '''
+(argument_list (identifier) @method_group)
+(argument_list (attribute object: _ @receiver attribute: (identifier) @callee) @method_group)
+(keyword_argument value: (identifier) @method_group)
+(keyword_argument value: (attribute object: _ @receiver attribute: (identifier) @callee) @method_group)
+'''

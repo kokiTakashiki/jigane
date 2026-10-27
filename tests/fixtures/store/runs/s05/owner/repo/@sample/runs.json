@@ -1,0 +1,41 @@
+{
+ "macro": {
+  "ran_at": "2026-10-19T09:54:57+00:00",
+  "elapsed_s": 16.9,
+  "model": "claude-sonnet-5-5",
+  "effort": "xhigh",
+  "invocations": [
+   {
+    "role": "single",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 854,
+    "cache_read_input_tokens": 2747,
+    "cache_creation_input_tokens": 12288,
+    "cost_usd": 0.0582454,
+    "duration_ms": 7921,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "3c2fa042c020",
+    "prompt_chars": 20263
+   }
+  ],
+  "discovered": 0,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0,
+  "shape": "diagram",
+  "discovered_by_perspective": {},
+  "failed_perspectives": {},
+  "merged_duplicates": 0,
+  "conclude": {
+   "ran": true,
+   "error": null,
+   "candidates": [],
+   "merged_groups": [],
+   "discarded": []
+  }
+ }
+}

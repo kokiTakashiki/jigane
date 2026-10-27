@@ -1,0 +1,18 @@
+class FooTest {
+    static final int LIMIT = 3;
+    int local = 0;
+    List<String> items = new ArrayList<>();
+
+    @BeforeEach
+    void reset() {
+        local = 0;
+    }
+
+    @Test
+    void a() {
+        local++;
+        items.add("x");
+        int counter = 0;
+        counter++;
+    }
+}

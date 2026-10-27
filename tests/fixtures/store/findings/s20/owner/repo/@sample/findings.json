@@ -1,0 +1,107 @@
+{
+ "last_number": 4,
+ "groups": {
+  "macro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.py",
+      "start_line": 33,
+      "end_line": 33
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "deepens": "F1"
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "other",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.py",
+      "start_line": 55,
+      "end_line": 56
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F3",
+    "severity": "nit",
+    "viewpoint": "D7",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B1",
+    "adjudication": null
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.py",
+      "start_line": 128,
+      "end_line": 142
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F4",
+    "severity": "nit",
+    "viewpoint": "D9",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B1",
+    "adjudication": null
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F3",
+    "F4"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

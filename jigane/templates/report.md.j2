@@ -1,0 +1,40 @@
+{#- レポートの文面。機能レビュー式と差分レビュー式の両方で使える。 -#}
+{% macro item(finding) %}
+- **{{ finding.number }}** [{{ finding.severity }}] {{ finding.claim | md }}{% if finding.evidence %}（{% for e in finding.evidence %}`{{ e.location }}`{{ "、" if not loop.last }}{% endfor %}）{% endif %}
+{% if finding.body %}
+  {{ finding.body | md | indent(2) }}
+{% endif %}
+{% endmacro %}
+# レビューレポート: {{ review.id }}
+
+## 概要
+
+- 宣言の出典: {{ declaration.source | md }}
+- 最終的な指摘: {{ findings | length }} 件
+{% if gates.violations %}
+
+## ゲート違反
+
+{% for v in gates.violations %}
+- **{{ v.number }}**{% if v.allowed %}外しました（{{ v.allowed | md }}）{% endif %} `{{ v.path }}:{{ v.line }}` {{ v.explanation.text | md }}
+{% endfor %}
+{% endif %}
+{% for group in groups %}
+
+## {{ group.label }}
+{% if group.group == "micro" %}
+{% for theme in group.themes %}
+
+### {{ (theme.title | md) if theme.title else "その他" }}
+
+{% for finding in theme.findings %}
+{{ item(finding) | trim }}
+{% endfor %}
+{% endfor %}
+{% else %}
+
+{% for finding in group.findings %}
+{{ item(finding) | trim }}
+{% endfor %}
+{% endif %}
+{% endfor %}

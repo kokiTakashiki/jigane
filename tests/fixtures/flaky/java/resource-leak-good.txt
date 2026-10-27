@@ -1,0 +1,15 @@
+class FooTest {
+    @Test
+    void reads() throws Exception {
+        try (FileInputStream in = new FileInputStream("a.txt")) {
+            in.read();
+        }
+        try (BufferedReader r = new BufferedReader(new FileReader("b.txt"))) {
+            r.readLine();
+        }
+    }
+
+    private FileInputStream open() throws Exception {
+        return new FileInputStream("c.txt");
+    }
+}

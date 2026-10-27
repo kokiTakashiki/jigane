@@ -1,0 +1,100 @@
+{
+ "last_number": 17,
+ "groups": {
+  "macro": [
+   {
+    "id": "F15",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f7.py",
+      "start_line": 539,
+      "end_line": 565
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f3.py",
+     "start_line": 234,
+     "end_line": 234
+    },
+    "judgment_region": "text",
+    "references": [],
+    "previous": {
+     "round": 2,
+     "id": "F8"
+    },
+    "change_reason": "text",
+    "previous_verified": true,
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "must_read"
+   },
+   {
+    "id": "F16",
+    "severity": "warning",
+    "viewpoint": "M1",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f4.py",
+      "start_line": 109,
+      "end_line": 137
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f4.py",
+     "start_line": 119,
+     "end_line": 121
+    },
+    "judgment_region": "text",
+    "references": [],
+    "previous": {
+     "round": 2,
+     "id": "F7"
+    },
+    "change_reason": null,
+    "previous_verified": true,
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "must_read"
+   },
+   {
+    "id": "F17",
+    "severity": "nit",
+    "viewpoint": "M3",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.py",
+      "start_line": 364,
+      "end_line": 368
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f3.py",
+     "start_line": 356,
+     "end_line": 356
+    },
+    "judgment_region": "text",
+    "references": [],
+    "previous": null,
+    "change_reason": null,
+    "previous_verified": null,
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

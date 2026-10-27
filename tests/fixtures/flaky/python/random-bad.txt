@@ -1,0 +1,5 @@
+import random
+
+
+def test_a():
+    assert random.randint(1, 3)

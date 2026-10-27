@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Runs()
+    {
+        await Task.Run(() => Work());
+        var task = Task.Run(() => Work());
+        await task;
+        service.Start();
+    }
+}

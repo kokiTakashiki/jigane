@@ -1,0 +1,10 @@
+SHARED = []
+
+
+def test_a():
+    SHARED.append(1)
+
+
+def test_b():
+    global SHARED
+    SHARED = [2]

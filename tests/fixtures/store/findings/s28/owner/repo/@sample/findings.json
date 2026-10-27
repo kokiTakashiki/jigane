@@ -1,0 +1,132 @@
+{
+ "last_number": 7,
+ "groups": {
+  "macro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f7.py",
+      "start_line": 22,
+      "end_line": 43
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M4",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": null,
+    "adjudication": null
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.py",
+      "start_line": 30,
+      "end_line": 30
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F2",
+    "severity": "warning",
+    "viewpoint": "M4",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": null,
+    "adjudication": null
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f8.py",
+      "start_line": 320,
+      "end_line": 321
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "group": "macro",
+    "id": "F3",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": null,
+    "adjudication": null
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F4",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f7.py",
+      "start_line": 10,
+      "end_line": 19
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F7",
+    "severity": "nit",
+    "viewpoint": "D9",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B1",
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "other",
+     "text": "text",
+     "concern": "F4"
+    },
+    "from_concern": "F4"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F7"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

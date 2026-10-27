@@ -1,0 +1,63 @@
+{
+ "last_number": 2,
+ "groups": {
+  "macro": [
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f1.py",
+      "start_line": 123,
+      "end_line": 128
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "D10",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B1",
+    "adjudication": null
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F2"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

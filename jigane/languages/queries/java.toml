@@ -1,0 +1,35 @@
+# Java の呼び出しと遅延参照の query。capture の名前が契約で、resolve.py が読む。
+#   call      呼び出しの式の節点（method_invocation、object_creation_expression）
+#   callee    呼び出しの名前の節点。生成では生成する型
+#   receiver  受け手の式。受け手の無い呼び出しと生成では付かない
+#   arguments 引数の並び（argument_list）
+
+[[query]]
+name = "calls"
+query = '''
+(method_invocation
+  object: _ @receiver
+  name: (_) @callee
+  arguments: (_) @arguments) @call
+(method_invocation
+  !object
+  name: (_) @callee
+  arguments: (_) @arguments) @call
+(object_creation_expression
+  type: (_) @callee
+  arguments: (_) @arguments) @call
+'''
+
+# ラムダと、無名クラスと局所クラスの本体は、本体の呼び出しを図の矢印にせず、遅延参照として別に報告する。
+[[query]]
+name = "lambdas"
+query = '''
+[(lambda_expression) (class_body)] @lambda
+'''
+
+# Foo::bar、this::bar、expr::bar。参照先の名前と受け手は節点から読む。
+[[query]]
+name = "method_groups"
+query = '''
+(method_reference) @method_group
+'''

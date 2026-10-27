@@ -1,0 +1,267 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-21T02:45:45+00:00",
+    "findings": [
+     {
+      "id": "F1",
+      "severity": "warning",
+      "viewpoint": "M1",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 130,
+        "end_line": 136
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f1.md",
+       "start_line": 52,
+       "end_line": 56
+      },
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F2",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 62,
+        "end_line": 62
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f1.md",
+       "start_line": 62,
+       "end_line": 62
+      },
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F4",
+      "severity": "warning",
+      "viewpoint": "M4",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 165,
+        "end_line": 168
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f1.md",
+       "start_line": 58,
+       "end_line": 62
+      },
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F5",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "nit_reason": {
+       "kind": "not_a_contract",
+       "text": "text",
+       "concern": "text"
+      },
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     },
+     {
+      "id": "F6",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "nit_reason": {
+       "kind": "other",
+       "text": "text",
+       "concern": "text"
+      },
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     }
+    ],
+    "discard": {
+     "discovered": 7,
+     "discarded": 3
+    }
+   },
+   {
+    "ran_at": "2026-10-21T04:53:58+00:00",
+    "findings": [
+     {
+      "id": "F8",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 125,
+        "end_line": 125
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F9",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 75,
+        "end_line": 75
+       }
+      ],
+      "declaration_ref": {
+       "path": "src/f1.md",
+       "start_line": 62,
+       "end_line": 62
+      },
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "must_read"
+     },
+     {
+      "id": "F10",
+      "severity": "warning",
+      "viewpoint": "M2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f1.md",
+        "start_line": 142,
+        "end_line": 142
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "deepens": "F1",
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     },
+     {
+      "id": "F11",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "nit_reason": {
+       "kind": "settled_earlier",
+       "text": "text",
+       "concern": "text"
+      },
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     },
+     {
+      "id": "F13",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "nit_reason": {
+       "kind": "not_a_contract",
+       "text": "text",
+       "concern": "text"
+      },
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     },
+     {
+      "id": "F15",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "nit_reason": {
+       "kind": "unverifiable_from_diagram",
+       "text": "text",
+       "concern": "text"
+      },
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     }
+    ],
+    "discard": {
+     "discovered": 8,
+     "discarded": 5
+    }
+   }
+  ]
+ }
+}

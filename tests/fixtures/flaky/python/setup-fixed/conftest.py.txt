@@ -1,0 +1,8 @@
+import pytest
+from freezegun import freeze_time
+
+
+@pytest.fixture(autouse=True, scope="function")
+def _clock():
+    with freeze_time("2026-01-01"):
+        yield

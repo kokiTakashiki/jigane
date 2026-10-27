@@ -1,0 +1,11 @@
+class FooTest {
+    @Test
+    void clocks() {
+        Clock clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC);
+        LocalDate day = LocalDate.now(clock);
+        Instant at = Instant.now(fixedClock);
+        Instant held = Instant.now(this.clock);
+        Date d = new Date(0L);
+        LocalDate fixed = LocalDate.of(2024, 1, 1);
+    }
+}

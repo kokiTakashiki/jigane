@@ -1,0 +1,14 @@
+import XCTest
+
+final class OrderTests: XCTestCase {
+    static var counter = 0
+    static var log: [String] = []
+
+    func testA() {
+        OrderTests.counter += 1
+    }
+
+    func testB() {
+        Self.log.append("b")
+    }
+}

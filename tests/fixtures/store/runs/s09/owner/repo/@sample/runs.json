@@ -1,0 +1,71 @@
+{
+ "micro": {
+  "ran_at": "2026-10-20T14:57:49+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 2,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 996,
+    "cache_read_input_tokens": 13141,
+    "cache_creation_input_tokens": 7352,
+    "cost_usd": 0.042004200000000005,
+    "duration_ms": 16751,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "90426e177fc9",
+    "prompt_chars": 4319
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 963,
+    "cache_read_input_tokens": 8928,
+    "cache_creation_input_tokens": 7092,
+    "cost_usd": 0.0397916,
+    "duration_ms": 11428,
+    "num_turns": 4,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "0df5604536cf",
+    "prompt_chars": 4411
+   },
+   {
+    "role": "judge",
+    "split_index": 0,
+    "input_tokens": 2,
+    "output_tokens": 382,
+    "cache_read_input_tokens": 2821,
+    "cache_creation_input_tokens": 6141,
+    "cost_usd": 0.028952199999999997,
+    "duration_ms": 7022,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "cea7f62a1357",
+    "prompt_chars": 10057
+   }
+  ],
+  "elapsed_s": 38.4,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": null,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 2,
+  "reviewed_files": 2,
+  "budget_stops": []
+ }
+}

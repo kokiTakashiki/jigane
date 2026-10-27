@@ -1,0 +1,8 @@
+class FooTest {
+    @Test
+    void order() {
+        assertEquals(Set.of(1, 2), map.keySet());
+        assertEquals(List.of(1, 2), sortedKeys);
+        assertEquals(1, map.size());
+    }
+}

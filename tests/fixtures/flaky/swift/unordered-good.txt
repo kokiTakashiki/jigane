@@ -1,0 +1,9 @@
+import XCTest
+
+final class CollectionTests: XCTestCase {
+    func testKeys() {
+        let dict = ["a": 1, "b": 2]
+        XCTAssertEqual(Array(dict.keys).sorted(), ["a", "b"])
+        XCTAssertEqual(Set(dict.keys), ["a", "b"])
+    }
+}

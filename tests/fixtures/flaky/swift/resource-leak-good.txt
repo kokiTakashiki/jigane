@@ -1,0 +1,10 @@
+import Foundation
+import XCTest
+
+final class HandleTests: XCTestCase {
+    func testRead() throws {
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: "x"))
+        defer { try? handle.close() }
+        XCTAssertNotNil(handle.availableData)
+    }
+}

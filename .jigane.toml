@@ -1,0 +1,22 @@
+# 範囲のレビューで差分から省くファイル。指定すると既定の並びを置き換えるので、既定の並びも写す
+exclude = [
+  "*.lock",
+  "package-lock.json",
+  "*/package-lock.json",
+  "*.min.js",
+  "*.min.css",
+  "vendor/*",
+  "*/vendor/*",
+  "packages.lock.json",
+  "*/packages.lock.json",
+  "*.Designer.cs",
+  "*.g.cs",
+  "gradle.lockfile",
+  "*/gradle.lockfile",
+  "Package.resolved",
+  "*/Package.resolved",
+  "Podfile.lock",
+  "*/Podfile.lock",
+  # 保存物の読み戻しの素材。本物の置き場から写したデータで、読む中身ではない
+  "tests/fixtures/store/*/*",
+]

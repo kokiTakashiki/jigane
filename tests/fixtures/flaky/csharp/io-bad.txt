@@ -1,0 +1,10 @@
+public class FooTests
+{
+    [Fact]
+    public void Writes()
+    {
+        File.WriteAllText("/tmp/out.txt", "x");
+        File.WriteAllText(@"C:\temp\out.txt", "x");
+        Directory.CreateDirectory("/var/data");
+    }
+}

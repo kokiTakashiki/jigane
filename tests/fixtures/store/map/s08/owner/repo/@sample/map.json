@@ -1,0 +1,95 @@
+{
+ "mode": "diff",
+ "segments": [
+  {
+   "old_path": "src/f2.md",
+   "new_path": "src/f2.md",
+   "old_span": null,
+   "new_span": {
+    "start_line": 17,
+    "end_line": 17
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f3.md",
+   "old_span": null,
+   "new_span": {
+    "start_line": 1,
+    "end_line": 180
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 180,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f1.toml",
+   "new_path": "src/f1.toml",
+   "old_span": null,
+   "new_span": {
+    "start_line": 73,
+    "end_line": 76
+   },
+   "qualified_name": "",
+   "kind": "dependency_build",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 4,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  }
+ ],
+ "regions": [
+  {
+   "key": "src/f1.toml::::dependency_build",
+   "kind": "dependency_build",
+   "path": "src/f1.toml",
+   "qualified_name": "",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 73,
+    "end_line": 102
+   },
+   "line_count": 8,
+   "content_hash": "bb93c740c9d801dff79aab3b0c3e480aec1a51ff243a849c1d422fd95176115c",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J1"
+  }
+ ],
+ "line_counts": {
+  "by_kind": {
+   "comment_only": 0,
+   "format_only": 0,
+   "generated": 0,
+   "test": 0,
+   "logic": 181,
+   "sensitive_logic": 0,
+   "public_interface": 0,
+   "internal_interface": 0,
+   "dependency_build": 8,
+   "behavior_removal": 0,
+   "bot_response": 0
+  },
+  "by_level": {
+   "required": 8,
+   "confirm": 181,
+   "machine": 0
+  }
+ }
+}

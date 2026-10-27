@@ -1,0 +1,39 @@
+{
+ "last_number": 1,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.py",
+      "start_line": 250,
+      "end_line": 252
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f2.py",
+     "start_line": 208,
+     "end_line": 208
+    },
+    "judgment_region": null,
+    "references": [],
+    "out_of_scope": {
+     "paths": [],
+     "reason": "text"
+    },
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "out_of_scope"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

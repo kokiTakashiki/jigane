@@ -1,0 +1,10 @@
+public class FooTests
+{
+    [Fact]
+    public void Keys()
+    {
+        var map = new Dictionary<string, int>();
+        Assert.Equal(new List<string> { "a", "b" }, map.Keys.OrderBy(k => k).ToList());
+        Assert.Equal(new List<string> { "a" }, names.ToList());
+    }
+}

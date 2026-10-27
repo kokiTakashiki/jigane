@@ -1,0 +1,82 @@
+{
+ "last_number": 4,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "discard_kind": "text",
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   },
+   {
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "discard_kind": "text",
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "concern": "text",
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   }
+  ],
+  "micro": [
+   {
+    "id": "F4",
+    "severity": "nit",
+    "viewpoint": "D9",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f6.py",
+      "start_line": 37,
+      "end_line": 38
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [],
+     "verdict": "kept",
+     "reason": "text"
+    },
+    "group": "micro",
+    "theme": "B1",
+    "triage": "folded"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F4"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+import datetime
+import time
+from datetime import date
+
+
+def test_a():
+    a = datetime.datetime.now()
+    b = date.today()
+    c = time.time()

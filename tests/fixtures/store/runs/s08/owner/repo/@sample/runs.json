@@ -1,0 +1,72 @@
+{
+ "macro": {
+  "ran_at": "2026-10-21T07:52:14+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 1,
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 11343,
+    "cache_read_input_tokens": 2931,
+    "cache_creation_input_tokens": 22367,
+    "duration_ms": 85801,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.2034882,
+    "cost_source": "measured",
+    "prompt_version": "fe39b61af2ce",
+    "prompt_chars": 37363
+   }
+  ],
+  "discarded": [],
+  "elapsed_s": 99.0,
+  "effort": "xhigh",
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0,
+  "record_kind": "succeeded"
+ },
+ "micro": {
+  "ran_at": "2026-10-21T07:52:30+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 0,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 1511,
+    "cache_read_input_tokens": 23644,
+    "cache_creation_input_tokens": 15621,
+    "duration_ms": 14616,
+    "num_turns": 4,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "cost_usd": 0.0823308,
+    "cost_source": "measured",
+    "prompt_version": "ec22e8db28b8",
+    "prompt_chars": 25369
+   }
+  ],
+  "elapsed_s": 16.0,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": null,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 1,
+  "succeeded_shards": 1,
+  "target_files": 8,
+  "reviewed_files": 8,
+  "budget_stops": []
+ }
+}

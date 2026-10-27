@@ -1,0 +1,30 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-20T12:11:44+00:00",
+    "findings": [
+     {
+      "id": "F1",
+      "severity": "nit",
+      "viewpoint": "discarded",
+      "claim": "text",
+      "body": "",
+      "evidence": [],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": null,
+      "group": "macro",
+      "theme": null,
+      "triage": "remaining"
+     }
+    ],
+    "discard": {
+     "discovered": 3,
+     "discarded": 3
+    }
+   }
+  ]
+ }
+}

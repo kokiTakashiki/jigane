@@ -1,0 +1,39 @@
+{
+ "id": "owner/repo+sample",
+ "kind": "design_doc",
+ "mode": "feature",
+ "is_diff": false,
+ "is_pull_request": false,
+ "created_at": "2026-10-21T02:42:40+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f2.py"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "intent",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [
+  "text"
+ ],
+ "content_warnings": [
+  "text"
+ ],
+ "diff_source": null,
+ "pull_request": null,
+ "local_range": null,
+ "design_doc": {
+  "document_path": "src/f1.md",
+  "document_version": "46da6c91bb4923bea826ed653e7197ff45d8fd6e912fc8a416dbae006fb9036f",
+  "code_version": "7f0c9283de57920ac1a456c13abf7b86f44157d4",
+  "selection": [
+   "src/f2.py"
+  ]
+ },
+ "background": null
+}

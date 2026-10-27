@@ -1,0 +1,283 @@
+# flaky の型の目録。言語に依らない欄だけを持つ。言語ごとの query は queries/<言語>.toml に置く。
+# [item.equivalent.<言語>] は言語ごとの、相当する既製のリンタの規則の状態。state は found（rules と note が要る）、
+# none（確かめた結果、相当は無い。note は補足で任意）、unverified（この環境で確かめられなかった。rules と note は持たない）。jigane が自作する共通の理由は
+# docs/decisions/incoming/flaky-rules-on-tree-sitter.md に書いてあり、ここには項目ごとの違いだけを書く。
+# source の Luo らの調査は、Luo et al., "An Empirical Analysis of Flaky Tests", FSE 2014。
+
+[[item]]
+id = "FLK-ASYNC-WAIT"
+cause = "Async Wait"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Async Wait の分類です。固定時間の待ちは、非同期の処理の完了を時間で仮定します。"
+legitimate = "レート制限や再試行の間隔そのものを検査するテストで、時間の経過が検査の対象のときです。"
+concern = "固定時間の待ちは、非同期の処理が終わる時間を決め打ちしているため、環境が遅いと検査が外れます。"
+violation = "テストが sleep で処理の完了を時間で仮定していて、完了そのものを待っていません。"
+direction = "固定時間の sleep をやめ、完了を示すイベントや条件を待ってください（上限つきのポーリング、完了通知の待ち）。時間そのものを検査するなら、時計を差し替えられるようにして進めてください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff ASYNC251"]
+note = "async 関数の中の time.sleep だけを検出します。同期のテストの sleep は対象外で、jigane は両方を検出します。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-TIME"
+cause = "Time"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Time の分類です。現在時刻への依存は、実行する時刻で結果が変わります。Python の標準ライブラリの文書は datetime.now が実行時の時刻を返すと定めています。"
+legitimate = "時刻を固定する仕組み（freezegun や time-machine）の内側で呼ぶときと、経過時間の計測を検査するときです。Python で共通のセットアップの autouse の fixture が固定している場合は、検出器が警告に下げます。字面の `with freeze_time(...)` や `@freeze_time(...)` の内側は検出しません。"
+concern = "現在時刻に依存したテストは、実行する時刻によって結果が変わります。"
+violation = "テストが現在時刻を直接読んでいて、時刻を固定していません。"
+direction = "現在時刻を引数や注入した時計として受け取り、テストでは固定した時刻を渡してください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff DTZ005", "ruff DTZ002", "ruff DTZ011"]
+note = "見るのはタイムゾーンの有無で、時刻を固定しているかは見ません。固定した時刻の内側の呼び出しも当たります。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-RANDOM"
+cause = "Randomness"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Randomness の分類です。Python の標準ライブラリの文書は random モジュールを seed で再現できると定めています。"
+legitimate = "乱数の性質そのものを検査するテストで、種を別のファイルや fixture で固定しているときです。Python で共通のセットアップの autouse の fixture が種を固定している場合は、検出器が警告に下げます。"
+concern = "乱数に依存したテストは、実行のたびに入力が変わり、通ったり落ちたりします。"
+violation = "テストが乱数を使っていて、種を固定していません。"
+direction = "乱数の種をテストの中で固定するか、乱数の生成器を注入して決まった値を返すものに差し替えてください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff S311"]
+note = "暗号用途に弱い乱数生成器の使用を検出します。見るのは用途の安全性で、種を固定しているかは見ません。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+note = "SwiftLint の legacy_random は旧 API から type.random(in:) への書き換えを促す様式の規則で、再現性は見ません。相当する規則はありません。"
+
+[[item]]
+id = "FLK-NETWORK"
+cause = "Network"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Network の分類です。実際の接続は、相手の状態と経路に結果が左右されます。"
+legitimate = "結合テストとして実接続を意図し、専用の環境で実行するときです。"
+concern = "実際のネットワーク接続を使うテストは、相手の状態や経路で結果が変わります。"
+violation = "テストが外部への接続を実際に行っていて、差し替えていません。"
+direction = "テストの中で起動したサーバへループバックで接続するか、HTTP の呼び出しを差し替え可能にしてスタブを使ってください。"
+
+[item.equivalent.python]
+state = "none"
+note = "ruff の S113 は timeout の有無、S310 は URL のスキームを見る規則で、実接続そのものは検出しません。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-IO"
+cause = "IO"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の IO の分類です。固定の絶対パスは、並列の実行や前回の残りと衝突します。pytest の tmp_path が実行ごとの一時ディレクトリを与えます。"
+legitimate = "読み取り専用で、実行環境が必ず用意する固定のパスを開くときです。"
+concern = "固定の絶対パスを使うテストは、並列の実行や前回の残りと衝突して結果が変わります。"
+violation = "テストが固定の絶対パスにファイルを作っていて、実行ごとの一時ディレクトリを使っていません。"
+direction = "固定の絶対パスをやめ、実行ごとに作られる一時ディレクトリの下にファイルを作ってください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff S108"]
+note = "/tmp など固定の一時パスのリテラルだけを検出します。それ以外の固定の絶対パスは検出しません。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-UNORDERED"
+cause = "Unordered Collections"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Unordered Collections の分類です。Python の標準ライブラリの文書は set の要素の順序を定めていません。"
+legitimate = "辞書の挿入順が仕様として保証される言語の版で、順序そのものを検査するときです。"
+concern = "順序の定まらない集合の並びに頼る比較は、実行ごとに結果が変わります。"
+violation = "テストが順序を保証しない集合の要素の順序を比較しています。"
+direction = "比較の前に並べ替えて順序を決めるか、順序に依らない比較（集合どうしの比較）にしてください。"
+
+[item.equivalent.python]
+state = "none"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-FLOAT"
+cause = "Floating Point Operations"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Floating Point Operations の分類です。pytest.approx と unittest の assertAlmostEqual が許容誤差つきの比較を与えます。"
+legitimate = "計算した値ではなく、属性や名前をそのまま読んだ値とリテラルを比べるときは、検出しません。それでも当たる例は、計算の結果が厳密に決まる桁（0.5 など）を検査するときです。"
+concern = "浮動小数点の厳密な等値比較は、計算の丸めで結果が変わります。"
+violation = "テストが浮動小数点の値を許容誤差なしで等値比較しています。"
+direction = "厳密な等値の比較をやめ、許容誤差つきの比較を使ってください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff RUF069"]
+note = "preview の規則で、--preview が要ります。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-WALL-CLOCK"
+cause = "Time"
+confidence = "direct"
+source = "Luo らの 2014 年の調査の Time の分類です。実時間の経過を数の上限と比べる assert は、実行する環境の負荷で結果が変わります。Python の標準ライブラリの文書は、time.monotonic と time.perf_counter を経過時間の計測用の時計と定めています。"
+legitimate = "実時間の上限が目的で、期待値と余裕の倍率を理由に書けるときです（例 `# jigane: allow-flaky FLK-WALL-CLOCK -- 期待 0.5 秒に 4 倍の余裕`）。理由の妥当性は見ません。"
+concern = "実時間の経過を上限と比べる検査は、実行環境の負荷で結果が変わります。"
+violation = "テストが経過した実時間を数の上限と比べて assert しています。"
+direction = "経過時間の上限の assert をやめ、時計を差し替えて進めるか、呼び出し回数などの決定的な量を検査してください。実時間の上限が目的なら、期待値と余裕の倍率を理由にした allow-flaky の注釈を添えてください。"
+
+[item.equivalent.python]
+state = "none"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-SKIP-CONDITIONAL"
+cause = "Conditional Skip"
+confidence = "direct"
+source = "pytest と unittest の文書が条件付きの skip（skipif、skipIf、skipUnless、実行時の pytest.skip）を定めています。環境で検査が黙って外れ、通ったように見えます。"
+legitimate = "対応しない OS や任意の依存が無いときに、理由を明示して外すときです。"
+concern = "条件付きの skip は、環境次第で検査が黙って外れ、通ったように見えます。"
+violation = "テストが実行時の条件で skip されるため、検査が行われたか分かりません。"
+direction = "条件付きの skip をやめ、環境を満たすように整えるか、満たさない環境では失敗として見えるようにしてください。外す必要があるなら、理由を明示した無条件のマーカーにしてください。"
+
+[item.equivalent.python]
+state = "none"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-ORDER-DEPENDENCY"
+cause = "Test Order Dependency"
+confidence = "proxy"
+source = "Luo らの 2014 年の調査は、順序依存を共有状態の書き換えが原因になる型と位置づけています。静的には共有状態の書き換えしか見えないため、兆候として扱います。"
+legitimate = "テストの終わりに元へ戻す fixture の内側や、呼び出しごとに作り直す状態のときです。"
+concern = "共有状態を書き換えるテストは、他のテストとの実行順で結果が変わる恐れがあります。"
+violation = "テストが共有状態を書き換えていて、元へ戻していない可能性があります。"
+direction = "共有状態を書き換えないようにするか、fixture でテストごとに作り直して終わりに元へ戻してください。他のテストに依らず単独で通る形にしてください。"
+
+[item.equivalent.python]
+state = "none"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-RESOURCE-LEAK"
+cause = "Resource Leak"
+confidence = "proxy"
+source = "Luo らの 2014 年の調査の Resource Leak の分類です。Python の文書は with でファイルを閉じることを勧めています。閉じ忘れは静的には兆候としてしか見えません。"
+legitimate = "別の所有者が閉じる前提で、ファイルを返す補助関数のときです。"
+concern = "閉じ忘れたファイルやストリームは、後続のテストの失敗の原因になります。"
+violation = "テストが開いたファイルを、スコープを抜けるときに閉じる構文で管理していません。"
+direction = "開いたファイルやストリームを、スコープを抜けるときに必ず閉じる構文や仕組みで管理してください。"
+
+[item.equivalent.python]
+state = "found"
+rules = ["ruff SIM115"]
+note = "open など、コンテキストマネージャを使わないファイルの取得を検出します。"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"
+
+[[item]]
+id = "FLK-CONCURRENCY"
+cause = "Concurrency"
+confidence = "proxy"
+source = "Luo らの 2014 年の調査の Concurrency の分類です。スレッドの起動は、実行の順序を環境に委ねる兆候になります。"
+legitimate = "スレッドの完了を join で待ち、共有の状態を持たないときです。"
+concern = "スレッドを使うテストは、実行の順序を環境に委ねるため、結果が変わる恐れがあります。"
+violation = "テストがスレッドを起動していて、完了を待つ手段が見えません。"
+direction = "スレッドの完了を join などで待ち、共有状態を避けてください。可能ならスレッドを使わず、同期的に呼べる形でテストしてください。"
+
+[item.equivalent.python]
+state = "none"
+
+[item.equivalent.java]
+state = "unverified"
+
+[item.equivalent.csharp]
+state = "unverified"
+
+[item.equivalent.swift]
+state = "none"

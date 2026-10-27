@@ -1,0 +1,36 @@
+# 公開するまで止めている。公開時に on: を戻す。
+# 機械のゲート（make check）を GitHub がホストするランナーで走らせる。
+# 公開リポジトリは PR を受け付けない。外から届くコードは無いが、自前のホストで動かすランナーは使わない。
+name: ci
+
+# プライベートのリポジトリでは Actions の時間に料金がかかるため、どの出来事でも走らせない。
+# リリースは、署名つきのコミットを release/v<版> の枝で検査してから main へ早送りする。
+# on:
+#   push:
+#     branches: [main, "release/v*"]
+
+# 既定のトークンは読み取りだけにする。書き込みの要る手順は置かない。
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      - run: make setup
+      - run: make check
+        env:
+          JIGANE_HOME: ${{ runner.temp }}/jigane-home

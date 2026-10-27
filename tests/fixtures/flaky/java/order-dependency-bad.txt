@@ -1,0 +1,15 @@
+class FooTest {
+    static int counter = 0;
+    static List<String> seen = new ArrayList<>();
+    static int[] slots = new int[2];
+    static final Map<String, Integer> cache = new HashMap<>();
+
+    @Test
+    void a() {
+        counter++; // bad
+        counter = 5; // bad
+        slots[0] = 1; // bad
+        seen.add("x"); // bad
+        cache.put("k", 1); // bad
+    }
+}

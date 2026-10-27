@@ -1,0 +1,9 @@
+class FooTest {
+    @Test
+    void writes() throws Exception {
+        File f = new File("/tmp/out.txt"); // bad
+        Files.write(Paths.get("/var/data/x"), bytes); // bad
+        Path p = Path.of("/Users/dev/x"); // bad
+        new FileWriter("/home/ci/x.log"); // bad
+    }
+}

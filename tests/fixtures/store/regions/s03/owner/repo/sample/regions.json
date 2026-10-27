@@ -1,0 +1,10 @@
+{
+ "next_number": 5,
+ "regions": {
+  "src/f1.py::::public_interface": {
+   "id": "J1",
+   "content_hash": "b694a9c0385994661d24d4237b6e3623753936f973d8dcb7bd8f5e7bf3662359",
+   "judged": false
+  }
+ }
+}

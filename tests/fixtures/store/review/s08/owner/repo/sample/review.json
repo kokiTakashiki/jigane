@@ -1,0 +1,25 @@
+{
+ "id": "owner/repo:sample",
+ "kind": "feature",
+ "mode": "feature",
+ "is_diff": false,
+ "is_pull_request": false,
+ "created_at": "2026-10-18T17:27:35+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f1.py"
+ ],
+ "targets": [
+  "src/f1.py"
+ ],
+ "declaration": {
+  "source": "intent",
+  "intent": "text",
+  "excerpts": []
+ },
+ "warnings": [],
+ "diff_source": null,
+ "pull_request": null,
+ "background": null
+}

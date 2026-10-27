@@ -1,0 +1,13 @@
+import XCTest
+
+final class OrderTests: XCTestCase {
+    static var counter = 0
+    var local = 0
+
+    func testA() {
+        local += 1
+        var items: [Int] = []
+        items.append(1)
+        XCTAssertEqual(OrderTests.counter, 0)
+    }
+}

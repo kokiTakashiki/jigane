@@ -1,0 +1,80 @@
+{
+ "last_number": 3,
+ "groups": {
+  "macro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f1.py",
+      "start_line": 50,
+      "end_line": 50
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M1",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": null,
+    "adjudication": null
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.py",
+      "start_line": 8,
+      "end_line": 8
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F2",
+    "severity": "warning",
+    "viewpoint": "M4",
+    "claim": "text",
+    "triage": "out_of_scope",
+    "theme": null,
+    "adjudication": null,
+    "deepens": "F2",
+    "out_of_scope": {
+     "paths": [
+      "src/f3.py"
+     ],
+     "reason": "text"
+    }
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F3",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": []
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

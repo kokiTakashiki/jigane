@@ -1,0 +1,222 @@
+# 公開するまで止めている。公開時に on: を戻す（ci.yml と同じ手順）。
+# 署名つきのタグの push で PyPI へ配布する。配布の前に、タグの署名と、指す先のコミットの CI を確かめる。
+# GitHub がホストするランナーだけを使う。
+name: release
+
+# タグを push する前に配布の仕組みを動かさないため、どの出来事でも走らせない。
+# on:
+#   push:
+#     tags: ["v*"]
+
+# 既定のトークンは何も持たせない。必要な権限は各ジョブが最小で宣言する。
+permissions: {}
+
+# 同じタグの配布を重ねて走らせない。配布は途中で止めると中途半端な公開になるので、止めずに待たせる。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }} # github-release が、確かめたタグの指すコミットを取得するため
+    permissions:
+      contents: read # API 経由で pyproject.toml を読むため
+      actions: read # タグが指すコミットの ci.yml の実行結果を読むため
+    env:
+      REPOSITORY: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      # 配布してよいタグの署名者。GitHub の verified は、署名の鍵の持ち主の確かめたメールが tagger と一致することを表す。
+      RELEASE_TAGGER_EMAIL: ${{ vars.RELEASE_TAGGER_EMAIL }}
+    steps:
+      # GH_TOKEN は gh を呼ぶ段だけに渡す。タグの先のコードを走らせる監査の段には渡さない。
+      # 材料が取れない場合も、通らなかった場合も失敗させる（fail-closed）。set -e と pipefail で取得の失敗を素通りさせない。
+      - name: タグが署名つきの注釈つきタグであることを確かめる
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ref=$(gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}")
+          ref_type=$(jq -r '.object.type' <<<"$ref")
+          # 軽量のタグは署名を持てないので、ここで落とす。
+          if [ "$ref_type" != "tag" ]; then
+            echo "::error::${TAG} は注釈つきのタグではない（${ref_type}）"
+            exit 1
+          fi
+          tag_object=$(gh api "repos/${REPOSITORY}/git/tags/$(jq -r '.object.sha' <<<"$ref")")
+          verified=$(jq -r '.verification.verified' <<<"$tag_object")
+          if [ "$verified" != "true" ]; then
+            echo "::error::${TAG} の署名が GitHub に検証されていない（$(jq -r '.verification.reason' <<<"$tag_object")）"
+            exit 1
+          fi
+          tagger_email=$(jq -r '.tagger.email' <<<"$tag_object")
+          # 変数が無いときも落とす。署名が正しくても、許した署名者のタグでなければ配布しない。
+          if [ -z "$RELEASE_TAGGER_EMAIL" ] || [ "$tagger_email" != "$RELEASE_TAGGER_EMAIL" ]; then
+            echo "::error::${TAG} の tagger が配布を許した署名者（変数 RELEASE_TAGGER_EMAIL）ではない"
+            exit 1
+          fi
+          target_type=$(jq -r '.object.type' <<<"$tag_object")
+          if [ "$target_type" != "commit" ]; then
+            echo "::error::${TAG} が指す先がコミットではない（${target_type}）"
+            exit 1
+          fi
+          target_sha=$(jq -r '.object.sha' <<<"$tag_object")
+          # build は出来事の時点の GITHUB_SHA を checkout する。確かめた先と組み立てる先を一致させる。
+          if [ "$target_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::${TAG} の指す先（${target_sha}）が出来事のコミット（${GITHUB_SHA}）と異なる"
+            exit 1
+          fi
+          echo "sha=${target_sha}" >>"$GITHUB_OUTPUT"
+      - name: タグが指すコミットの CI が main で success であることを確かめる
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          total=$(gh api "repos/${REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${TAG_SHA}&status=success" --jq '.total_count // 0')
+          # 数として読めない値（null、空、文字列）では test が 2 を返す。-lt の if では偽になって通り抜けるので、通る側を -ge で書く。
+          [ "$total" -ge 1 ] 2>/dev/null || {
+            echo "::error::${TAG_SHA} は main で ci.yml が success になったコミットではない（total_count: ${total}）"
+            exit 1
+          }
+      - name: タグの名前が pyproject.toml の version と一致することを確かめる
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPOSITORY}/contents/pyproject.toml?ref=${TAG_SHA}" >pyproject.toml
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error::タグ ${TAG} と pyproject.toml の version（${version}）が一致しない"
+            exit 1
+          fi
+      # 配布するコミットの uv.lock が固定した依存に、既知の脆弱性が無いことを確かめる。見つかれば落とし、build へ進ませない。
+      # 脆弱性の情報はネットワークから引くので、make check には入れない。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.tag.outputs.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      - name: 依存に既知の脆弱性が無いことを確かめる
+        run: uv run --locked python scripts/audit_dependencies.py
+
+  build:
+    name: build
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout でソースを読むため
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      - run: uv build
+      # dev の依存は配布物に入らないので、SBOM にも入れない。
+      - run: uv export --format cyclonedx1.5 --no-dev -o sbom.cdx.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/*
+            sbom.cdx.json
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # 承認者が承認するまで止まる。id-token を持つのはこのジョブだけにする。
+    environment: pypi
+    permissions:
+      id-token: write # PyPI の信頼された発行者（OIDC）と来歴の署名のため
+      attestations: write # 来歴の証明を保存するため
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*
+            sbom.cdx.json
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          attestations: true
+
+  github-release:
+    name: github-release
+    needs: [verify, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # 検証済みのタグに GitHub のリリースを作り、ファイルを添えるため
+    env:
+      REPOSITORY: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      # 添える規約とプライバシーポリシーは、verify が確かめたタグの木のものを使う。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: artifacts
+      # publish は environment の承認で止まるため、その間にタグが動かされうる。リリースを作る前に、タグが今も verify の確かめたコミットを指すことを確かめる。
+      # GH_TOKEN はこの段だけに渡す。入力の値は env を通し、シェルの式へ直に展開しない。
+      - name: タグが今も確かめたコミットを指すことを確かめる
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ref=$(gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}")
+          ref_type=$(jq -r '.object.type' <<<"$ref")
+          # verify は注釈つきのタグだけを通した。軽量のタグに替わっていれば落とす。
+          if [ "$ref_type" != "tag" ]; then
+            echo "::error::${TAG} が注釈つきのタグではなくなった（${ref_type}）"
+            exit 1
+          fi
+          tag_object=$(gh api "repos/${REPOSITORY}/git/tags/$(jq -r '.object.sha' <<<"$ref")")
+          target_type=$(jq -r '.object.type' <<<"$tag_object")
+          if [ "$target_type" != "commit" ]; then
+            echo "::error::${TAG} が指す先がコミットではない（${target_type}）"
+            exit 1
+          fi
+          target_sha=$(jq -r '.object.sha' <<<"$tag_object")
+          if [ -z "$VERIFIED_SHA" ] || [ "$target_sha" != "$VERIFIED_SHA" ]; then
+            echo "::error::${TAG} の指す先（${target_sha}）が verify の確かめたコミット（${VERIFIED_SHA}）と異なる"
+            exit 1
+          fi
+      # GH_TOKEN はこの段だけに渡す。--verify-tag は、タグが無ければ作らずに失敗させる。
+      - name: 検証済みのタグにリリースを作り、規約とプライバシーポリシーと SBOM を添える
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$REPOSITORY" \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-from-tag \
+            TERMS.ja.md TERMS.en.md PRIVACY.ja.md PRIVACY.en.md artifacts/sbom.cdx.json

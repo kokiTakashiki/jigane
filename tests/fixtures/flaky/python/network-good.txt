@@ -1,0 +1,6 @@
+import urllib.parse
+
+
+def test_a(session):
+    session.get('http://x')
+    urllib.parse.quote('a')

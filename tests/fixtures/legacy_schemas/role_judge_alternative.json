@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "type": "object"
+    },
+    "tool_claim": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "enum": [
+            "none",
+            "docs",
+            "run"
+          ],
+          "type": "string"
+        },
+        "relies": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relies",
+        "basis",
+        "version"
+      ],
+      "type": "object"
+    },
+    "verdict": {
+      "enum": [
+        "kept",
+        "weakened",
+        "rejected"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "disclosed_at": {
+            "description": "verdict が rejected で、棄却の理由が docstring、README、設計書、決定に開示済みの既知の限界で、その開示が害や条件まで書いているときだけ書く。開示の場所（ファイルと節）を書く。複数の場所は読点で区切って並べる。",
+            "minLength": 1,
+            "type": "string"
+          },
+          "index": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/$defs/verdict"
+          }
+        },
+        "required": [
+          "index",
+          "verdict",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+import Foundation
+import XCTest
+
+final class NetworkTests: XCTestCase {
+    func testFetch() async throws {
+        let url = URL(string: "https://example.com/api")!
+        let (data, _) = try await URLSession.shared.data(from: url)
+        XCTAssertFalse(data.isEmpty)
+    }
+
+    func testTask() {
+        let url = URL(string: "https://example.com/api")!
+        URLSession.shared.dataTask(with: url) { _, _, _ in }.resume()
+    }
+}

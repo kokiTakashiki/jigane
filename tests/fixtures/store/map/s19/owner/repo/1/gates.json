@@ -1,0 +1,24 @@
+{
+ "next_violation": 2,
+ "next_warning": 1,
+ "keys": {
+  "src/f7.swift\u0000FLK-TIME\u0000759d7a65b574b965\u00001": "G1"
+ },
+ "violations": [
+  {
+   "number": "G1",
+   "id": "text",
+   "cause": "Time",
+   "confidence": "direct",
+   "path": "src/f7.swift",
+   "line": 35,
+   "excerpt": "text",
+   "reason": "",
+   "source": "text",
+   "legitimate": "text",
+   "detector_note": "text",
+   "remedy": "text"
+  }
+ ],
+ "warnings": []
+}

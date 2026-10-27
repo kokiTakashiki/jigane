@@ -1,0 +1,10 @@
+import Foundation
+import XCTest
+
+final class FileTests: XCTestCase {
+    func testWrite() throws {
+        try "x".write(toFile: "/tmp/out.txt", atomically: true, encoding: .utf8)
+        let url = URL(fileURLWithPath: "/var/tmp/data.bin")
+        XCTAssertNotNil(url)
+    }
+}

@@ -1,0 +1,8 @@
+class FooTest {
+    @Test
+    void waits() throws Exception {
+        Thread.sleep(500); // bad
+        TimeUnit.SECONDS.sleep(1); // bad
+        SECONDS.sleep(1); // bad
+    }
+}

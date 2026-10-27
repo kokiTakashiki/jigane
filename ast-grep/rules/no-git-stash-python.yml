@@ -1,0 +1,18 @@
+id: no-git-stash-python
+language: python
+severity: error
+message: 共有の git stash を使っている。worktree をまたいで共有されるため、一時のコミットで退避する。
+rule:
+  kind: string
+  any:
+    # ["git", "-C", d, "stash"] や ("git", "stash") のようにオプションを挟む形も、git の後に stash が来る並びとして拾う。
+    # 文字列の接頭辞（f、r、b など）は、正規表現の先頭で許す
+    - regex: ^[rRbBfFuU]{0,2}["']stash["']$
+      follows:
+        kind: string
+        regex: ^[rRbBfFuU]{0,2}["']git["']$
+        stopBy: end
+    # os.system("git stash") のように一つの文字列で渡す形。docstring は引数でないので拾わない
+    - regex: ^[rRbBfFuU]{0,2}["']\s*git\s.*\bstash\b
+      inside:
+        kind: argument_list

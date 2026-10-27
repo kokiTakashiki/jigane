@@ -1,0 +1,11 @@
+class FooTest {
+    @TempDir
+    Path dir;
+
+    @Test
+    void writes() throws Exception {
+        Files.write(dir.resolve("out.txt"), bytes);
+        Path t = Files.createTempFile("x", ".txt");
+        File f = new File("relative/out.txt");
+    }
+}

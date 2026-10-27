@@ -1,0 +1,9 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Waits()
+    {
+        await job.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(tasks);
+    }
+}

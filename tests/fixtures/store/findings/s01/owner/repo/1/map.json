@@ -1,0 +1,43 @@
+{
+ "mode": "diff",
+ "segments": [
+  {
+   "old_path": "src/f1.json",
+   "new_path": "src/f1.json",
+   "old_span": null,
+   "new_span": {
+    "start_line": 10,
+    "end_line": 17
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 8,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  }
+ ],
+ "regions": [],
+ "line_counts": {
+  "by_kind": {
+   "comment_only": 0,
+   "format_only": 0,
+   "generated": 0,
+   "test": 0,
+   "logic": 15,
+   "sensitive_logic": 0,
+   "public_interface": 0,
+   "internal_interface": 0,
+   "dependency_build": 0,
+   "behavior_removal": 0,
+   "bot_response": 0
+  },
+  "by_level": {
+   "required": 0,
+   "confirm": 15,
+   "machine": 0
+  }
+ }
+}

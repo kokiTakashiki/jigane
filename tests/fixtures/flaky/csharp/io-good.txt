@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public void Writes()
+    {
+        var dir = Path.GetTempPath();
+        File.WriteAllText(Path.Combine(dir, "out.txt"), "x");
+        File.WriteAllText(Path.GetTempFileName(), "x");
+        var text = File.ReadAllText("/etc/hostname");
+    }
+}

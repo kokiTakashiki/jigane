@@ -1,0 +1,14 @@
+# 定義の説明
+[entrypoints]
+summary = "x"
+
+[[task]]
+name = "lint"
+description = "検査"
+commands = ["ruff"]
+
+# 非公開の作業
+[[task]]
+name = "test"
+description = "試験"
+commands = ["pytest"]

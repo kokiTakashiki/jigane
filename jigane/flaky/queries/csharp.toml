@@ -1,0 +1,122 @@
+# C# の flaky の query。xUnit、NUnit、MSTest の書き方を拾う。
+# id は catalog.toml の項目の id。check は checks.py の名前で、query の結果に掛ける検査。
+
+[[query]]
+id = "FLK-ASYNC-WAIT"
+direction = "Thread.Sleep や Task.Delay で待たず、TaskCompletionSource か対象の操作の Task を await してください。待ちにはタイムアウトを付けてください。"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^(System[.]Threading[.])?Thread[.]Sleep$|^(System[.]Threading[.]Tasks[.])?Task[.]Delay$"))
+'''
+
+[[query]]
+id = "FLK-TIME"
+direction = "TimeProvider を注入し、テストでは Microsoft.Extensions.TimeProvider.Testing の FakeTimeProvider で時刻を固定してください。"
+check = "csharp_without_time_provider"
+query = '''
+((member_access_expression) @hit
+  (#match? @hit "^(System[.])?(DateTime|DateTimeOffset)[.](Now|UtcNow|Today)$|^(System[.])?Environment[.]TickCount(64)?$"))
+'''
+
+[[query]]
+id = "FLK-RANDOM"
+check = "csharp_random_without_seed"
+query = '''
+((object_creation_expression type: (_) @type) @hit
+  (#match? @type "^(System[.])?Random$"))
+'''
+
+[[query]]
+id = "FLK-RANDOM"
+note = "Guid.NewGuid を一意な名前の生成だけに使い、値の中身を検査しないときです。Random.Shared は、乱数の値を結果の判定に使わないときだけ許容されます。"
+query = '''
+((member_access_expression) @hit (#match? @hit "^(System[.])?Random[.]Shared$"))
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^(System[.])?Guid[.]NewGuid$"))
+'''
+
+[[query]]
+id = "FLK-NETWORK"
+check = "csharp_http_call_to_remote"
+query = '''
+((invocation_expression function: (member_access_expression name: (_) @method)) @hit
+  (#match? @method "^(Get|Post|Put|Delete|Patch|Send)(String|Stream|ByteArray|FromJson|AsJson)?Async$"))
+'''
+
+[[query]]
+id = "FLK-NETWORK"
+check = "csharp_not_localhost"
+query = '''
+((object_creation_expression type: (_) @type) @hit
+  (#match? @type "^(System[.]Net[.]Sockets[.])?(TcpClient|UdpClient)$|^(System[.]Net[.])?WebClient$"))
+'''
+
+[[query]]
+id = "FLK-IO"
+direction = "Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()) で一意なパスを作るか、テストごとの一時ディレクトリを作って Dispose で削除してください。"
+check = "csharp_fixed_absolute_path"
+note = "読み取り専用で、実行環境が必ず用意する固定のパスを開くときです。"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^(System[.]IO[.])?(File|Directory)[.](Write[A-Za-z]*|Append[A-Za-z]*|Create[A-Za-z]*|Delete|Move|Copy|Replace)$"))
+((object_creation_expression type: (_) @type) @hit
+  (#match? @type "^(System[.]IO[.])?(FileStream|StreamWriter|FileInfo|DirectoryInfo)$"))
+'''
+
+[[query]]
+id = "FLK-UNORDERED"
+check = "csharp_unordered_equality"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^(Assert|CollectionAssert)[.](Equal|AreEqual)$"))
+'''
+
+[[query]]
+id = "FLK-FLOAT"
+check = "csharp_float_equality"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^Assert[.](Equal|AreEqual)$"))
+'''
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "^(Skip[.](If|IfNot)|Assume[.]That|Assert[.](Ignore|Inconclusive))$"))
+'''
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+check = "csharp_conditional_skip_attribute"
+query = '''
+((attribute . (_) @name) @hit (#match? @name "^(Fact|Theory|SkippableFact|SkippableTheory)(Attribute)?$"))
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "csharp_static_field_mutation"
+query = '''
+(assignment_expression) @hit
+(postfix_unary_expression) @hit
+(prefix_unary_expression) @hit
+(invocation_expression) @hit
+'''
+
+[[query]]
+id = "FLK-RESOURCE-LEAK"
+direction = "using 宣言または using 文で囲み、スコープを抜けるときに確実に破棄してください。"
+check = "csharp_not_disposed"
+note = "別の所有者が破棄する前提で、ストリームを返す補助メソッドのときです。"
+query = '''
+((object_creation_expression type: (_) @type) @hit
+  (#match? @type "^(System[.]IO[.])?(FileStream|StreamReader|StreamWriter|BinaryReader|BinaryWriter)$|^SqlConnection$"))
+'''
+
+[[query]]
+id = "FLK-CONCURRENCY"
+check = "csharp_unjoined_concurrency"
+query = '''
+((invocation_expression function: (member_access_expression) @fn) @hit
+  (#match? @fn "[.]Start$|^Task[.](Run|Factory[.]StartNew)$"))
+'''

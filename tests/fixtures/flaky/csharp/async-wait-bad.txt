@@ -1,0 +1,9 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Waits()
+    {
+        Thread.Sleep(500);
+        await Task.Delay(1000);
+    }
+}

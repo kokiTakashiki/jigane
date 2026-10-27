@@ -1,0 +1,13 @@
+import Foundation
+import XCTest
+
+final class ThreadTests: XCTestCase {
+    func testThread() {
+        let thread = Thread { }
+        thread.start()
+    }
+
+    func testQueue() {
+        DispatchQueue.global().async { }
+    }
+}

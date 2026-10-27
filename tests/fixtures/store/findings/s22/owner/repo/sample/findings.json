@@ -1,0 +1,77 @@
+{
+ "last_number": 2,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M4 利用者に向けたインターフェース",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f1.py",
+      "start_line": 60,
+      "end_line": 65
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f1.py",
+       "start_line": 60,
+       "end_line": 65
+      }
+     ],
+     "verdict": "weakened",
+     "reason": "text"
+    },
+    "group": "macro",
+    "theme": null,
+    "triage": null
+   },
+   {
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "M1 宣言と実現",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f4.md",
+      "start_line": 7,
+      "end_line": 7
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f4.md",
+     "start_line": 1,
+     "end_line": 7
+    },
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f4.md",
+       "start_line": 1,
+       "end_line": 12
+      }
+     ],
+     "verdict": "kept",
+     "reason": "text"
+    },
+    "group": "macro",
+    "theme": null,
+    "triage": null
+   }
+  ]
+ }
+}

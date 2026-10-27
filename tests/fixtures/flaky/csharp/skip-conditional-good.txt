@@ -1,0 +1,8 @@
+public class FooTests
+{
+    [Fact(Skip = "tracked in issue 12")]
+    public void A() { }
+
+    [Fact]
+    public void B() { Assert.True(true); }
+}

@@ -1,0 +1,9 @@
+class FooTest {
+    @Test
+    void connects() throws Exception {
+        Socket s = new Socket("localhost", 8080);
+        Socket t = new Socket("127.0.0.1", 8080);
+        URLConnection c = new URL("http://localhost:8080/x").openConnection();
+        mockClient.verify(request);
+    }
+}

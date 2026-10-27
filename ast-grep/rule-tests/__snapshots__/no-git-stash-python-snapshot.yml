@@ -1,0 +1,72 @@
+id: no-git-stash-python
+snapshots:
+  os.system("git stash"):
+    labels:
+    - source: "\"git stash\""
+      style: primary
+      start: 10
+      end: 21
+    - source: ("git stash")
+      style: secondary
+      start: 9
+      end: 22
+  "os.system(f\"git stash {mode}\")":
+    labels:
+    - source: f"git stash {mode}"
+      style: primary
+      start: 10
+      end: 29
+    - source: (f"git stash {mode}")
+      style: secondary
+      start: 9
+      end: 30
+  os.system(r"git stash"):
+    labels:
+    - source: r"git stash"
+      style: primary
+      start: 10
+      end: 22
+    - source: (r"git stash")
+      style: secondary
+      start: 9
+      end: 23
+  "run_command((\"git\", \"stash\"))":
+    labels:
+    - source: "\"stash\""
+      style: primary
+      start: 20
+      end: 27
+    - source: "\"git\""
+      style: secondary
+      start: 13
+      end: 18
+  "run_command([\"git\", \"-C\", d, \"stash\", \"pop\"])":
+    labels:
+    - source: "\"stash\""
+      style: primary
+      start: 29
+      end: 36
+    - source: "\"git\""
+      style: secondary
+      start: 13
+      end: 18
+  "run_command([\"git\", \"stash\"])":
+    labels:
+    - source: "\"stash\""
+      style: primary
+      start: 20
+      end: 27
+    - source: "\"git\""
+      style: secondary
+      start: 13
+      end: 18
+  "run_command([f\"git\", \"stash\"])":
+    labels:
+    - source: "\"stash\""
+      style: primary
+      start: 21
+      end: 28
+    - source: f"git"
+      style: secondary
+      start: 13
+      end: 19

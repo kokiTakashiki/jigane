@@ -1,0 +1,7 @@
+import requests
+import urllib.request
+
+
+def test_a():
+    requests.get('http://x')
+    urllib.request.urlopen('http://y')

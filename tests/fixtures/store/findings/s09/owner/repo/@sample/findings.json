@@ -1,0 +1,28 @@
+{
+ "last_number": 3,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "discard_kind": "text",
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "concern": "text",
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   }
+  ],
+  "micro": []
+ },
+ "stale_groups": [],
+ "last_theme_number": 0,
+ "themes": []
+}

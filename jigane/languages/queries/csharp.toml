@@ -1,0 +1,41 @@
+# C# の呼び出しと遅延参照の query。capture の名前が契約で、resolve.py が読む。
+#   call      呼び出しの式の節点（invocation_expression、object_creation_expression）
+#   callee    呼び出しの名前の節点。生成では生成する型
+#   receiver  受け手の式。受け手の無い呼び出しと生成では付かない
+#   arguments 引数の並び（argument_list）
+
+[[query]]
+name = "calls"
+query = '''
+(invocation_expression
+  function: (member_access_expression expression: _ @receiver name: (_) @callee)
+  arguments: (_) @arguments) @call
+(invocation_expression
+  function: (identifier) @callee
+  arguments: (_) @arguments) @call
+(invocation_expression
+  function: (generic_name (identifier) @callee)
+  arguments: (_) @arguments) @call
+(invocation_expression
+  function: (conditional_access_expression
+    condition: (_) @receiver
+    (member_binding_expression name: (_) @callee))
+  arguments: (_) @arguments) @call
+(object_creation_expression type: (_) @callee) @call
+(implicit_object_creation_expression (argument_list) @arguments) @call
+'''
+
+# ラムダと匿名メソッドは、本体の呼び出しを図の矢印にせず、遅延参照として別に報告する。
+[[query]]
+name = "lambdas"
+query = '''
+[(lambda_expression) (anonymous_method_expression)] @lambda
+'''
+
+# 引数に置かれた裸の名前と a.b は、メソッド群の参照かもしれない。変数との区別は resolve.py で行う。
+[[query]]
+name = "method_groups"
+query = '''
+(argument (identifier) @method_group)
+(argument (member_access_expression expression: _ @receiver name: (_) @callee) @method_group)
+'''

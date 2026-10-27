@@ -1,0 +1,13 @@
+#!/bin/sh
+# 送る各 ref の先端のコミットが、ゲート（make check）を緑で通した印と一致するかを照らす。
+# 先端の木はゲートで確かめてあるので、途中のコミットは照らさない。
+# リモートの先端との差分が文書だけなら、文書のゲート（make docs-check）の印でも通す。
+# 消す push（local sha が 0 だけ）は照らさない。緊急のときは `git push --no-verify` で飛ばせる。
+root=$(cd "$(dirname "$0")/.." && pwd)
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    if printf '%s' "$local_sha" | grep -Eq '^0+$'; then
+        continue # 消す push には送るコミットが無い
+    fi
+    # 子が標準入力を読むと、後の行が読まれずに照合が抜けるため、標準入力を切る。
+    uv run --locked --project "$root" python "$root/scripts/gate_stamp.py" check --remote "$remote_sha" "$local_sha" < /dev/null || exit 1
+done

@@ -1,0 +1,112 @@
+{
+ "last_number": 3,
+ "groups": {
+  "macro": [],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.js",
+      "start_line": 237,
+      "end_line": 243
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "D1",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": "B1",
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f2.js",
+       "start_line": 229,
+       "end_line": 254
+      }
+     ],
+     "verdict": "kept",
+     "reason": "text",
+     "verified": true,
+     "tool_claim": {
+      "relies": false,
+      "basis": "none",
+      "version": ""
+     }
+    }
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.js",
+      "start_line": 203,
+      "end_line": 210
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "D1",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B2",
+    "adjudication": null
+   },
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.js",
+      "start_line": 18,
+      "end_line": 22
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F3",
+    "severity": "nit",
+    "viewpoint": "D6",
+    "claim": "text",
+    "triage": "folded",
+    "theme": "B2",
+    "adjudication": null
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 2,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F1"
+   ],
+   "severity": "warning",
+   "triage": "must_read"
+  },
+  {
+   "id": "B2",
+   "title": "title",
+   "finding_ids": [
+    "F2",
+    "F3"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

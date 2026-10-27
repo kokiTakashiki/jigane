@@ -1,0 +1,33 @@
+{
+ "id": "owner/repo:sample",
+ "kind": "feature",
+ "mode": "feature",
+ "is_diff": false,
+ "is_pull_request": false,
+ "created_at": "2026-10-19T10:59:13+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f1.cs"
+ ],
+ "targets": [
+  "src/f5"
+ ],
+ "declaration": {
+  "source": "excerpts",
+  "source_label": "label",
+  "intent": null,
+  "excerpts": [],
+  "warnings": [
+   "text"
+  ]
+ },
+ "warnings": [
+  "text"
+ ],
+ "content_warnings": [],
+ "diff_source": null,
+ "pull_request": null,
+ "local_range": null,
+ "background": null
+}

@@ -1,0 +1,9 @@
+import XCTest
+
+final class FloatTests: XCTestCase {
+    func testSum() {
+        let a = 0.1
+        XCTAssertEqual(a * 3, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(a, 0.1)
+    }
+}

@@ -1,0 +1,45 @@
+{
+ "id": "owner/repo@sample",
+ "kind": "range",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": false,
+ "created_at": "2026-10-20T06:38:20+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f1.py"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "intent",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "11b9cfbb32380da7aa97578cb814b751db7d18f1",
+  "head_sha": "5aa5f1dd7fb213be6998060a383f6e2f29a43fe1",
+  "merge_base": "11b9cfbb32380da7aa97578cb814b751db7d18f1",
+  "base_tree": "text"
+ },
+ "pull_request": null,
+ "local_range": {
+  "range_text": "main..HEAD",
+  "working_directory": "/tmp/sample-repo"
+ },
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_pull_requests": [],
+  "owners": [
+   {
+    "path": "src/f1.py",
+    "owners": []
+   }
+  ]
+ }
+}

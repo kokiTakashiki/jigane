@@ -1,0 +1,160 @@
+# Java の flaky の query。JUnit 4、JUnit 5、TestNG に共通する書き方を拾う。
+# id は catalog.toml の項目の id。check は checks.py の名前で、query の結果に掛ける検査。
+
+[[query]]
+id = "FLK-ASYNC-WAIT"
+query = '''
+(method_invocation object: (_) @obj name: (identifier) @n
+  (#eq? @n "sleep")
+  (#match? @obj "^(Thread|(TimeUnit[.])?(NANOSECONDS|MICROSECONDS|MILLISECONDS|SECONDS|MINUTES|HOURS|DAYS))$")) @hit
+'''
+
+[[query]]
+id = "FLK-TIME"
+direction = "java.time.Clock を注入し、テストでは Clock.fixed で時刻を固定してください。"
+query = '''
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#eq? @o "System") (#match? @n "^(currentTimeMillis|nanoTime)$")) @hit
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#eq? @o "Calendar") (#eq? @n "getInstance")) @hit
+'''
+
+[[query]]
+id = "FLK-TIME"
+direction = "java.time.Clock を注入し、テストでは Clock.fixed で時刻を固定してください。"
+check = "java_now_without_clock"
+query = '''
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#match? @o "^(LocalDate|LocalDateTime|LocalTime|Instant|ZonedDateTime|OffsetDateTime|OffsetTime|Year|YearMonth|MonthDay)$")
+  (#eq? @n "now")) @hit
+'''
+note = "Clock を引数に取る now(clock) は、時計を差し替えられるので検出しません。ゾーンだけを渡す now(zone) は現在時刻を読むので検出します。"
+
+[[query]]
+id = "FLK-TIME"
+direction = "java.time.Clock を注入し、テストでは Clock.fixed で時刻を固定してください。"
+check = "java_no_arguments"
+query = '''
+(object_creation_expression type: (type_identifier) @t (#eq? @t "Date")) @hit
+'''
+
+[[query]]
+id = "FLK-RANDOM"
+check = "java_no_arguments"
+query = '''
+(object_creation_expression type: (type_identifier) @t (#match? @t "^(Random|SecureRandom)$")) @hit
+'''
+note = "種を渡す new Random(42) は再現できるので検出しません。"
+
+[[query]]
+id = "FLK-RANDOM"
+query = '''
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#eq? @o "Math") (#eq? @n "random")) @hit
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#eq? @o "UUID") (#eq? @n "randomUUID")) @hit
+(method_invocation object: (method_invocation) @o
+  (#eq? @o "ThreadLocalRandom.current()")) @hit
+'''
+
+[[query]]
+id = "FLK-NETWORK"
+check = "java_non_local_target"
+query = '''
+(object_creation_expression type: (type_identifier) @t (#match? @t "^(Socket|DatagramSocket)$")) @hit
+(method_invocation object: (object_creation_expression type: (type_identifier) @t)
+  name: (identifier) @n
+  (#eq? @t "URL") (#match? @n "^(openConnection|openStream)$")) @hit
+(method_invocation object: (_) @o name: (identifier) @n
+  (#match? @o "(?i)client") (#match? @n "^(send|sendAsync)$")) @hit
+'''
+note = "localhost と 127.0.0.1 への接続は、同じ実行環境の中で閉じるので検出しません。"
+
+[[query]]
+id = "FLK-IO"
+direction = "JUnit 5 の @TempDir で、テストごとに用意される一時ディレクトリ配下にファイルを作ってください。"
+query = '''
+(object_creation_expression type: (type_identifier) @t
+  arguments: (argument_list . (string_literal (string_fragment) @p))
+  (#match? @t "^(File|FileWriter|FileReader|FileInputStream|FileOutputStream|PrintWriter|RandomAccessFile)$")
+  (#match? @p "^(/tmp/|/var/|/home/|/Users/|[A-Z]:[\\\\/])")) @hit
+(method_invocation object: (identifier) @o name: (identifier) @n
+  arguments: (argument_list . (string_literal (string_fragment) @p))
+  (#match? @o "^(Paths|Path)$") (#match? @n "^(get|of)$")
+  (#match? @p "^(/tmp/|/var/|/home/|/Users/|[A-Z]:[\\\\/])")) @hit
+'''
+note = "@TempDir や Files.createTempFile が返す一時パスは、固定の文字列ではないので検出しません。"
+
+[[query]]
+id = "FLK-UNORDERED"
+check = "java_unordered_list_equality"
+query = '''
+(method_invocation name: (identifier) @n (#match? @n "^(assertEquals|assertArrayEquals)$")) @hit
+'''
+note = "LinkedHashMap や TreeMap のように順序が仕様で定まる実装の keySet や values は、順序そのものを検査するなら正当です。この query はその区別を型から読めません。"
+
+[[query]]
+id = "FLK-FLOAT"
+check = "java_float_assert_equals"
+query = '''
+(method_invocation name: (identifier) @n
+  arguments: (argument_list (decimal_floating_point_literal))
+  (#match? @n "^(assertEquals|assertNotEquals)$")) @hit
+'''
+note = "第 3 引数に delta を渡す assertEquals(expected, actual, delta) は検出しません。"
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+query = '''
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#match? @o "^(Assume|Assumptions)$") (#match? @n "^assum")) @hit
+(annotation name: (identifier) @a
+  (#match? @a "^(EnabledIf|DisabledIf|EnabledOnOs|DisabledOnOs|EnabledOnJre|DisabledOnJre|EnabledForJreRange|DisabledForJreRange|EnabledIfSystemProperty|DisabledIfSystemProperty|EnabledIfEnvironmentVariable|DisabledIfEnvironmentVariable)$")) @hit
+'''
+note = "無条件の @Disabled は条件付きではないので検出しません。"
+
+[[query]]
+id = "FLK-SKIP-CONDITIONAL"
+check = "java_inside_if"
+query = '''
+(object_creation_expression type: (type_identifier) @t (#eq? @t "SkipException")) @hit
+'''
+
+[[query]]
+id = "FLK-ORDER-DEPENDENCY"
+check = "java_static_field_mutation"
+query = '''
+(assignment_expression) @hit
+(update_expression) @hit
+(method_invocation object: (_)) @hit
+'''
+note = "static final で基本型や不変の値を持つフィールドと、@BeforeEach で毎回作り直すインスタンスのフィールドは検出しません。"
+
+[[query]]
+id = "FLK-RESOURCE-LEAK"
+direction = "try-with-resources で開き、ブロックを抜けるときに確実に閉じてください。"
+check = "java_not_in_resource"
+query = '''
+(object_creation_expression type: (type_identifier) @t
+  (#match? @t "^(FileInputStream|FileOutputStream|FileReader|FileWriter|BufferedReader|BufferedWriter|PrintWriter|RandomAccessFile|ZipFile)$")) @hit
+'''
+note = "return で呼び出し元へ渡す補助メソッドは、閉じる責任が呼び出し元にあるので検出しません。"
+
+[[query]]
+id = "FLK-CONCURRENCY"
+check = "java_in_test_method"
+query = '''
+(method_invocation object: (object_creation_expression type: (type_identifier) @t)
+  name: (identifier) @n (#eq? @t "Thread") (#eq? @n "start")) @hit
+(method_invocation object: (_) @o name: (identifier) @n
+  (#match? @o "(?i)(executor|pool)") (#match? @n "^(submit|execute|invokeAll|schedule)$")) @hit
+(method_invocation object: (identifier) @o name: (identifier) @n
+  (#eq? @o "CompletableFuture") (#match? @n "^(runAsync|supplyAsync)$")) @hit
+'''
+
+[[query]]
+id = "FLK-CONCURRENCY"
+check = "java_thread_variable_start"
+query = '''
+(method_invocation object: (identifier) @o name: (identifier) @n (#eq? @n "start")) @hit
+'''

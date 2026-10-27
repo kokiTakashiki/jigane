@@ -1,0 +1,840 @@
+{
+ "mode": "diff",
+ "segments": [
+  {
+   "old_path": "src/f16.md",
+   "new_path": "src/f16.md",
+   "old_span": null,
+   "new_span": {
+    "start_line": 34,
+    "end_line": 34
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f16.md",
+   "new_path": "src/f16.md",
+   "old_span": {
+    "start_line": 66,
+    "end_line": 66
+   },
+   "new_span": {
+    "start_line": 67,
+    "end_line": 67
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 121,
+    "end_line": 123
+   },
+   "qualified_name": "Sym1",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 122,
+    "end_line": 122
+   },
+   "qualified_name": "Sym2",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 154,
+    "end_line": 154
+   },
+   "qualified_name": "Sym3",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": {
+    "start_line": 328,
+    "end_line": 328
+   },
+   "new_span": {
+    "start_line": 336,
+    "end_line": 337
+   },
+   "qualified_name": "Sym5",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 438,
+    "end_line": 439
+   },
+   "qualified_name": "Sym7",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 743,
+    "end_line": 743
+   },
+   "qualified_name": "Sym11",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f12.cs",
+   "new_path": "src/f12.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 974,
+    "end_line": 1636
+   },
+   "qualified_name": "Sym13",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 36,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f17.cs",
+   "new_path": "src/f17.cs",
+   "old_span": {
+    "start_line": 192,
+    "end_line": 192
+   },
+   "new_span": {
+    "start_line": 192,
+    "end_line": 192
+   },
+   "qualified_name": "Sym22",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 1,
+    "end_line": 198
+   },
+   "qualified_name": "",
+   "kind": "bot_response",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 23,
+   "declaration_kind": null,
+   "bot_comment_ids": [
+    4284260329
+   ],
+   "visibility": null
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 20,
+    "end_line": 21
+   },
+   "qualified_name": "Sym25",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 22,
+    "end_line": 22
+   },
+   "qualified_name": "Sym26",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 23,
+    "end_line": 194
+   },
+   "qualified_name": "Sym25",
+   "kind": "bot_response",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 46,
+   "declaration_kind": "class",
+   "bot_comment_ids": [
+    4284260329
+   ],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 26,
+    "end_line": 27
+   },
+   "qualified_name": "Sym27",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 28,
+    "end_line": 31
+   },
+   "qualified_name": "Sym27",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 4,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 74,
+    "end_line": 75
+   },
+   "qualified_name": "Sym29",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f18.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 202,
+    "end_line": 229
+   },
+   "qualified_name": "Sym35",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 10,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f19.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 1,
+    "end_line": 13
+   },
+   "qualified_name": "",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 13,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f20.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 45,
+    "end_line": 46
+   },
+   "qualified_name": "Sym46",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f22.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 29,
+    "end_line": 29
+   },
+   "qualified_name": "Sym54",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f6.cs",
+   "new_path": "src/f6.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 132,
+    "end_line": 136
+   },
+   "qualified_name": "Sym73",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 5,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f6.cs",
+   "new_path": "src/f6.cs",
+   "old_span": {
+    "start_line": 140,
+    "end_line": 140
+   },
+   "new_span": {
+    "start_line": 167,
+    "end_line": 167
+   },
+   "qualified_name": "Sym76",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f24.cs",
+   "new_path": "src/f24.cs",
+   "old_span": {
+    "start_line": 25,
+    "end_line": 25
+   },
+   "new_span": {
+    "start_line": 25,
+    "end_line": 25
+   },
+   "qualified_name": "Sym83",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f24.cs",
+   "new_path": "src/f24.cs",
+   "old_span": {
+    "start_line": 36,
+    "end_line": 40
+   },
+   "new_span": {
+    "start_line": 36,
+    "end_line": 41
+   },
+   "qualified_name": "Sym84",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 2,
+   "new_line_count": 3,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f25.cs",
+   "new_path": "src/f25.cs",
+   "old_span": {
+    "start_line": 10,
+    "end_line": 10
+   },
+   "new_span": {
+    "start_line": 10,
+    "end_line": 10
+   },
+   "qualified_name": "",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f25.cs",
+   "new_path": "src/f25.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 43,
+    "end_line": 44
+   },
+   "qualified_name": "Sym86",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f25.cs",
+   "new_path": "src/f25.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 45,
+    "end_line": 45
+   },
+   "qualified_name": "Sym87",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f25.cs",
+   "new_path": "src/f25.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 70,
+    "end_line": 70
+   },
+   "qualified_name": "Sym88",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f25.cs",
+   "new_path": "src/f25.cs",
+   "old_span": {
+    "start_line": 112,
+    "end_line": 113
+   },
+   "new_span": {
+    "start_line": 117,
+    "end_line": 118
+   },
+   "qualified_name": "",
+   "kind": "bot_response",
+   "level": "required",
+   "old_line_count": 2,
+   "new_line_count": 2,
+   "declaration_kind": null,
+   "bot_comment_ids": [
+    4284260108
+   ],
+   "visibility": null
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f27.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 16,
+    "end_line": 17
+   },
+   "qualified_name": "Sym95",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f27.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 22,
+    "end_line": 42
+   },
+   "qualified_name": "Sym95",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 7,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f27.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 24,
+    "end_line": 24
+   },
+   "qualified_name": "Sym97",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "variable",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f27.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 29,
+    "end_line": 30
+   },
+   "qualified_name": "Sym98",
+   "kind": "public_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f27.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 31,
+    "end_line": 41
+   },
+   "qualified_name": "Sym98",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 11,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "public"
+  },
+  {
+   "old_path": "src/f35.cs",
+   "new_path": "src/f35.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 58,
+    "end_line": 59
+   },
+   "qualified_name": "",
+   "kind": "bot_response",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": null,
+   "bot_comment_ids": [
+    4284260623
+   ],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f15.cs",
+   "new_path": "src/f15.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 68,
+    "end_line": 68
+   },
+   "qualified_name": "",
+   "kind": "test",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": "src/f15.cs",
+   "new_path": "src/f15.cs",
+   "old_span": {
+    "start_line": 143,
+    "end_line": 143
+   },
+   "new_span": {
+    "start_line": 144,
+    "end_line": 144
+   },
+   "qualified_name": "",
+   "kind": "test",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 1,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  },
+  {
+   "old_path": null,
+   "new_path": "src/f39.cs",
+   "old_span": null,
+   "new_span": {
+    "start_line": 1,
+    "end_line": 165
+   },
+   "qualified_name": "",
+   "kind": "test",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 165,
+   "declaration_kind": null,
+   "bot_comment_ids": [],
+   "visibility": null
+  }
+ ],
+ "regions": [
+  {
+   "key": "src/f12.cs::Sym2::internal_interface",
+   "kind": "internal_interface",
+   "path": "src/f12.cs",
+   "qualified_name": "Sym2",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 122,
+    "end_line": 122
+   },
+   "line_count": 1,
+   "content_hash": "ed7bee38401d2765417ec8bf976fb4469b2e0566703a2c737a61e666d1e65e40",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J1"
+  },
+  {
+   "key": "src/f17.cs::Sym22::internal_interface",
+   "kind": "internal_interface",
+   "path": "src/f17.cs",
+   "qualified_name": "Sym22",
+   "summary": "text",
+   "old_span": {
+    "start_line": 192,
+    "end_line": 192
+   },
+   "new_span": {
+    "start_line": 192,
+    "end_line": 192
+   },
+   "line_count": 1,
+   "content_hash": "f166cc9ff7b2ef5d5f1d2ac8dd7be0b91df1e2622e2492b33f64f3e7dfdb85f9",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J7"
+  },
+  {
+   "key": "src/f18.cs::::bot_response",
+   "kind": "bot_response",
+   "path": "src/f18.cs",
+   "qualified_name": "",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 1,
+    "end_line": 198
+   },
+   "line_count": 23,
+   "content_hash": "1d29f003a40da1641484ef177aea28a731d1e4b911f0f2bfa3744e038c2ff2b6",
+   "bot_comment_ids": [
+    4284260329
+   ],
+   "old_path": null,
+   "id": "J9"
+  },
+  {
+   "key": "src/f24.cs::Sym83::public_interface",
+   "kind": "public_interface",
+   "path": "src/f24.cs",
+   "qualified_name": "Sym83",
+   "summary": "text",
+   "old_span": {
+    "start_line": 25,
+    "end_line": 25
+   },
+   "new_span": {
+    "start_line": 25,
+    "end_line": 25
+   },
+   "line_count": 1,
+   "content_hash": "9558d08130defd3229984d29841da9cc5fc24f58ed7f303307faeb7a7ed9630f",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J29"
+  },
+  {
+   "key": "src/f25.cs::Sym87::public_interface",
+   "kind": "public_interface",
+   "path": "src/f25.cs",
+   "qualified_name": "Sym87",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 45,
+    "end_line": 45
+   },
+   "line_count": 1,
+   "content_hash": "ed7bee38401d2765417ec8bf976fb4469b2e0566703a2c737a61e666d1e65e40",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J31"
+  },
+  {
+   "key": "src/f25.cs::::bot_response",
+   "kind": "bot_response",
+   "path": "src/f25.cs",
+   "qualified_name": "",
+   "summary": "text",
+   "old_span": {
+    "start_line": 112,
+    "end_line": 113
+   },
+   "new_span": {
+    "start_line": 117,
+    "end_line": 118
+   },
+   "line_count": 2,
+   "content_hash": "be02f7a370dada7a0c161a2e93b3479c4dc9097eec15e2efa3bbf28035e82f08",
+   "bot_comment_ids": [
+    4284260108
+   ],
+   "old_path": null,
+   "id": "J32"
+  }
+ ],
+ "line_counts": {
+  "by_kind": {
+   "comment_only": 82,
+   "format_only": 0,
+   "generated": 0,
+   "test": 1354,
+   "logic": 1677,
+   "sensitive_logic": 0,
+   "public_interface": 88,
+   "internal_interface": 54,
+   "dependency_build": 0,
+   "behavior_removal": 0,
+   "bot_response": 144
+  },
+  "by_level": {
+   "required": 286,
+   "confirm": 3031,
+   "machine": 82
+  }
+ }
+}

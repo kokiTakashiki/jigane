@@ -1,0 +1,7 @@
+import threading
+
+
+def test_a():
+    t = threading.Thread(target=print)
+    t.start()
+    threading.Thread(target=print).start()

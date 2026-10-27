@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jigane.invalid/schemas/finding.schema.json",
+  "title": "Finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "severity",
+    "group",
+    "viewpoint",
+    "claim",
+    "body",
+    "evidence",
+    "declaration_ref",
+    "judgment_region",
+    "references",
+    "adjudication",
+    "theme",
+    "triage"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^F[0-9]+$" },
+    "severity": { "enum": ["critical", "warning", "nit"] },
+    "group": { "type": "string" },
+    "viewpoint": { "type": "string", "minLength": 1 },
+    "claim": { "type": "string", "minLength": 1 },
+    "body": { "type": "string" },
+    "evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/location" }
+    },
+    "declaration_ref": {
+      "oneOf": [{ "$ref": "#/$defs/location" }, { "type": "null" }]
+    },
+    "judgment_region": { "type": ["string", "null"] },
+    "references": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "adjudication": {
+      "oneOf": [
+        { "$ref": "#/$defs/rebuttal" },
+        { "$ref": "#/$defs/alternative" },
+        { "type": "null" }
+      ]
+    },
+    "theme": { "type": ["string", "null"] },
+    "nit_reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "text", "concern", "places"],
+      "properties": {
+        "kind": { "type": "string" },
+        "text": { "type": "string", "minLength": 1 },
+        "concern": { "type": ["string", "null"], "minLength": 1 },
+        "places": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "deepens": { "type": "string", "pattern": "^F[0-9]+$" },
+    "from_concern": { "type": "string", "pattern": "^F[0-9]+$" },
+    "out_of_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "reason"],
+      "properties": {
+        "paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "triage_reason": { "type": "string", "minLength": 1 },
+    "triage": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "if": {
+    "properties": { "triage": { "const": "out_of_scope" } },
+    "required": ["triage"]
+  },
+  "then": { "required": ["out_of_scope"] },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "viewpoint": { "const": "discarded" } },
+        "required": ["viewpoint"]
+      },
+      "then": {
+        "properties": { "severity": { "const": "nit" }, "evidence": { "maxItems": 0 } }
+      },
+      "else": { "properties": { "evidence": { "minItems": 1 } } }
+    }
+  ],
+  "$defs": {
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "start_line", "end_line"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?![/\\\\])(?![A-Za-z]:)" },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "verdict": { "type": "string" },
+    "tool_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relies", "basis", "version"],
+      "properties": {
+        "relies": { "type": "boolean" },
+        "basis": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "rebuttal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "challenge", "recheck", "verdict", "reason"],
+      "properties": {
+        "kind": { "const": "rebuttal" },
+        "challenge": { "type": "string" },
+        "recheck": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/location" }
+        },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "reason": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "tool_claim": { "$ref": "#/$defs/tool_claim" }
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "alternative", "defense", "verdict", "reason"],
+      "properties": {
+        "kind": { "const": "alternative" },
+        "alternative": { "type": "string" },
+        "defense": { "type": "string" },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

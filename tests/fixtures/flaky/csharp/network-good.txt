@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Calls()
+    {
+        var client = new HttpClient(handler);
+        var r = await client.GetAsync("http://localhost:5000/api");
+        var t = new TcpClient("127.0.0.1", 80);
+        var user = await repository.GetAsync(1);
+    }
+}

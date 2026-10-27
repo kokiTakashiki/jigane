@@ -1,0 +1,9 @@
+class FooTest {
+    @Test
+    void connects() throws Exception {
+        Socket s = new Socket("example.com", 80); // bad
+        URLConnection c = new URL("https://example.com").openConnection(); // bad
+        client.send(request, BodyHandlers.ofString()); // bad
+        HttpClient.newHttpClient().send(request, BodyHandlers.ofString()); // bad
+    }
+}

@@ -1,0 +1,20 @@
+{
+ "issues": [],
+ "documents": [],
+ "past_changes": [
+  {
+   "kind": "pull_request",
+   "number": 2,
+   "title": "title",
+   "files": [
+    "src/f1.md"
+   ]
+  }
+ ],
+ "owners": [
+  {
+   "path": "src/f1.md",
+   "owners": []
+  }
+ ]
+}

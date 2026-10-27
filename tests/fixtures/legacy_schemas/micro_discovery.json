@@ -1,0 +1,134 @@
+{
+  "$defs": {
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "claim": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "declaration_ref": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/location"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disclosed_at": {
+            "description": "開示済みの既知の限界を挙げるときだけ書く。開示の場所（ファイルと節）を書く。複数の場所は読点で区切って並べる。そのとき severity は nit",
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/$defs/location"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "from_concern": {
+            "pattern": "^F[0-9]+$",
+            "type": "string"
+          },
+          "in_scope": {
+            "type": "boolean"
+          },
+          "judgment_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "references": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope_reason": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "warning",
+              "nit"
+            ]
+          },
+          "viewpoint": {
+            "enum": [
+              "D1",
+              "D2",
+              "D3",
+              "D4",
+              "D6",
+              "D7",
+              "D8",
+              "D9",
+              "D10",
+              "D11",
+              "T1",
+              "T2",
+              "T3",
+              "T4"
+            ]
+          }
+        },
+        "required": [
+          "severity",
+          "viewpoint",
+          "claim",
+          "body",
+          "evidence",
+          "declaration_ref",
+          "judgment_region",
+          "references",
+          "in_scope",
+          "scope_reason"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "findings"
+  ],
+  "type": "object"
+}

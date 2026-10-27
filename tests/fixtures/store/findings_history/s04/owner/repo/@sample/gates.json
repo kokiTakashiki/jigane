@@ -1,0 +1,24 @@
+{
+ "next_violation": 2,
+ "next_warning": 1,
+ "keys": {
+  "src/f4.py\u0000FLK-ANNOTATION\u0000733effacdaf95b04\u00001": "G1"
+ },
+ "violations": [
+  {
+   "number": "G1",
+   "id": "text",
+   "path": "src/f4.py",
+   "line": 296,
+   "excerpt": "text",
+   "reason": "",
+   "cause": "Annotation",
+   "confidence": "direct",
+   "source": "text",
+   "legitimate": "",
+   "detector_note": "",
+   "remedy": "text"
+  }
+ ],
+ "warnings": []
+}

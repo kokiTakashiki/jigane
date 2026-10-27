@@ -1,0 +1,3 @@
+def test_a(d):
+    assert sorted(d.keys()) == ['a', 'b']
+    assert list(range(3)) == [0, 1, 2]

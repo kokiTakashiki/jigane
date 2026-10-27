@@ -1,0 +1,11 @@
+class FooTest {
+    @Test
+    void runs() throws Exception {
+        new Thread(() -> work()).start(); // bad
+        Thread t = new Thread(() -> work());
+        t.start(); // bad
+        executor.submit(() -> work()); // bad
+        Executors.newFixedThreadPool(2).execute(() -> work()); // bad
+        CompletableFuture.runAsync(() -> work()); // bad
+    }
+}

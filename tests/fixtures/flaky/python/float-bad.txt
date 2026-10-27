@@ -1,0 +1,4 @@
+def test_a(x):
+    assert x * 3 == 0.3
+    assert compute(x) == 0.1
+    self.assertEqual(a + b, 0.3)

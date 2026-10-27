@@ -1,0 +1,6 @@
+import datetime
+
+
+def test_a(clock):
+    a = datetime.datetime(2020, 1, 1)
+    b = clock.now()

@@ -1,0 +1,57 @@
+{
+ "id": "owner/repo#1",
+ "kind": "pull_request",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": true,
+ "created_at": "2026-10-18T12:30:43+00:00",
+ "refreshed_at": "2026-10-19T09:25:21+00:00",
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f3.md"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "pull_request",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "ce08011acf9ce0dbd8dd0b97c127e0ce76b601c6",
+  "head_sha": "b836d4e85288db11ed0abc44f1115e25d4bdb065",
+  "merge_base": "ce08011acf9ce0dbd8dd0b97c127e0ce76b601c6",
+  "base_tree": "text"
+ },
+ "pull_request": {
+  "url": "https://example.invalid/pull/1",
+  "number": 2,
+  "title": "title",
+  "linked_issues": []
+ },
+ "local_range": null,
+ "background": {
+  "issues": [],
+  "documents": [
+   "src/f1.json"
+  ],
+  "past_pull_requests": [
+   {
+    "number": 1,
+    "title": "title",
+    "files": [
+     "src/f3.md"
+    ]
+   }
+  ],
+  "owners": [
+   {
+    "path": "src/f3.md",
+    "owners": []
+   }
+  ]
+ }
+}

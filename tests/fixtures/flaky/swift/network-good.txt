@@ -1,0 +1,10 @@
+import Foundation
+import XCTest
+
+final class NetworkTests: XCTestCase {
+    func testLocalServer() async throws {
+        let url = URL(string: "http://localhost:8080/api")!
+        let (data, _) = try await URLSession.shared.data(from: url)
+        XCTAssertFalse(data.isEmpty)
+    }
+}

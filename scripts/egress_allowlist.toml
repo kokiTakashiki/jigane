@@ -1,0 +1,45 @@
+# 外への送り先と、ネットワークに触ってよい場所の許可リスト。scripts/check_egress.py が読む。
+# 足すときは docs/data-destinations.md の表「送り先」も同じ変更で直す（検査が突き合わせる）。
+
+[destinations]
+# jigane（と、jigane が起動する gh と git と取得の部品）が実際に接続する先。
+# docs/data-destinations.md の表「送り先」のホストの列と、集合として一致させる。
+hosts = [
+  "api.github.com",
+  "github.com",
+  "release-assets.githubusercontent.com",
+]
+
+[display_only]
+# 利用者に見せる案内の URL にだけ現れ、接続はしないホスト。文書の表には載せない。
+hosts = [
+  "code.claude.com",
+]
+
+[not_hosts]
+# ドメイン名の形をしているが、ホストではない文字列。コードや他言語の名前の参照で、構造では見分けられない。
+# 足すときは、その名前が接続先でないことを確かめる。
+names = [
+  "pytest.fixture",
+  "freezegun.freeze",
+  "machine.travel",
+  "monkeypatch.setattr",
+  "java.awt",
+  "javax.swing",
+  "java.applet",
+  "microsoft.aspnetcore",
+]
+
+# ネットワークに触る部品の import と、取得の呼び出しを置いてよい場所。
+# scope は関数の名前。モジュール直下の文は "<module>"。
+[[site]]
+module = "jigane.languages.grammars"
+scope = "<module>"
+
+[[site]]
+module = "jigane.languages.grammars"
+scope = "fetch"
+
+[[site]]
+module = "jigane.languages.grammars"
+scope = "_download_external"

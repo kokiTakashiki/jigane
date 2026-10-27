@@ -1,0 +1,16 @@
+class FooTest {
+    @Test
+    @EnabledOnOs(OS.LINUX) // bad
+    void a() {
+        Assume.assumeTrue(isCi()); // bad
+        Assumptions.assumeFalse(isWindows()); // bad
+    }
+
+    @Test
+    @DisabledIf("isFlaky") // bad
+    void b() {
+        if (!ready()) {
+            throw new SkipException("not ready"); // bad
+        }
+    }
+}

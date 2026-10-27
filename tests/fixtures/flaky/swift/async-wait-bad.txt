@@ -1,0 +1,10 @@
+import Foundation
+import XCTest
+
+final class WaitTests: XCTestCase {
+    func testSleeps() async throws {
+        Thread.sleep(forTimeInterval: 1)
+        usleep(500_000)
+        try await Task.sleep(nanoseconds: 1_000_000)
+    }
+}

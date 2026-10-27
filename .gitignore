@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.grimp_cache/
+.import_linter_cache/
+.rumdl_cache/
+dist/
+# 作業の役が使う git worktree の写し。リポジトリの複製なので追跡しない
+.claude/worktrees/
+.tools/
+.DS_Store

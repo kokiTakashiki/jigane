@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 脆弱性の報告
+    url: https://github.com/kokiTakashiki/jigane/security/advisories/new
+    about: 脆弱性は公開の Issue に書かず、こちらから非公開で報告してください。
+  - name: 貢献の方針
+    url: https://github.com/kokiTakashiki/jigane/blob/main/CONTRIBUTING.md
+    about: このリポジトリは Issue だけを受け付け、Pull Request は受け付けません。

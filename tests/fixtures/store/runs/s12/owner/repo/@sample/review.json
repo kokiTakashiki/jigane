@@ -1,0 +1,54 @@
+{
+ "id": "owner/repo@sample",
+ "kind": "range",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": false,
+ "created_at": "2026-10-20T14:10:29+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f1.py"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "intent",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "9909cd6108995fe86618737891204b177296c10c",
+  "head_sha": "f4d529b5221b1262e0d7a82de8493f8071d19482",
+  "merge_base": "5a02dff25393d86edbee534e766855d0367fb393",
+  "base_tree": "text"
+ },
+ "pull_request": null,
+ "local_range": {
+  "range_text": "main..HEAD",
+  "working_directory": "/tmp/sample-repo"
+ },
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_changes": [
+   {
+    "kind": "commit",
+    "sha": "ee9729304cd7aa8d4701b3e2dd719e1d396e5429",
+    "title": "title",
+    "files": [
+     "src/f1.py"
+    ]
+   }
+  ],
+  "owners": [
+   {
+    "path": "src/f1.py",
+    "owners": []
+   }
+  ]
+ }
+}

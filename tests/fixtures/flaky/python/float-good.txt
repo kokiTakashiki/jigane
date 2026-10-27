@@ -1,0 +1,11 @@
+import pytest
+
+
+def test_a(x, fake):
+    assert x == pytest.approx(0.1)
+    assert fake.budget == 1.0
+    assert limit == 2.0
+    assert compute(x) == pytest.approx(0.1)
+    assert x == 1
+    assert x > 0.5
+    self.assertEqual(fake.budget, 1.0)

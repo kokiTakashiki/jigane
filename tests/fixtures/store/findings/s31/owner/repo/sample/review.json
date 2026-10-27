@@ -1,0 +1,21 @@
+{
+ "id": "owner/repo:sample",
+ "mode": "feature",
+ "created_at": "2026-10-18T00:45:54+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f12.py"
+ ],
+ "targets": [
+  "src/f12.py"
+ ],
+ "declaration": {
+  "source": "intent",
+  "intent": "text",
+  "excerpts": []
+ },
+ "warnings": [],
+ "pull_request": null,
+ "background": null
+}

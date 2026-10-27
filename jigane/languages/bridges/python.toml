@@ -1,0 +1,18 @@
+# 橋渡しの表。エントリの項目が契約で、technology_list/bridges.py が読む。
+#   name          見つけ方の名前。via ごとに何の名前かが変わる（下記）
+#   from, to      どの技術からどの技術をつなぐか
+#   via           見つけ方。base は型が準拠するプロトコルか継承する基底の型の名前、creation は生成する型の名前、
+#                 attribute は属性の名前、modifier は修飾子の名前、import は import するモジュールの名前
+#   body_members  あれば、その名前のメンバの本体の行の数も数える（薄いラッパーかを判断する材料）
+
+[[bridge]]
+name = "ctypes"
+from = "Python"
+to = "ネイティブ"
+via = ["import"]
+
+[[bridge]]
+name = "cffi"
+from = "Python"
+to = "ネイティブ"
+via = ["import"]

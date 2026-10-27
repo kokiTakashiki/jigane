@@ -1,0 +1,54 @@
+{
+ "id": "owner/repo@sample",
+ "kind": "range",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": false,
+ "created_at": "2026-10-20T11:10:45+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f2.md"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "intent",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "f3d9459f4292b71381678eef48740d847b093513",
+  "head_sha": "85ea874ee2b846822bc91bcc74dc1b2b584ab4c8",
+  "merge_base": "f6534335c16eacdf4edf4bc86f9f5a55f3c404a9",
+  "base_tree": "text"
+ },
+ "pull_request": null,
+ "local_range": {
+  "range_text": "main..HEAD",
+  "working_directory": "/tmp/sample-repo"
+ },
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_changes": [
+   {
+    "kind": "commit",
+    "sha": "fca4831ea1fd639d427c6e092a8ae32a83d1af81",
+    "title": "title",
+    "files": [
+     "src/f1.toml"
+    ]
+   }
+  ],
+  "owners": [
+   {
+    "path": "src/f2.md",
+    "owners": []
+   }
+  ]
+ }
+}

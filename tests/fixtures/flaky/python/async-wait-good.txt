@@ -1,0 +1,6 @@
+import asyncio
+
+
+def test_a(clock):
+    clock.sleep(1)
+    asyncio.wait_for(x, 1)

@@ -1,0 +1,167 @@
+{
+ "macro": {
+  "ran_at": "2026-10-21T10:09:38+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 5,
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 11861,
+    "cache_read_input_tokens": 3012,
+    "cache_creation_input_tokens": 26428,
+    "duration_ms": 89915,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.2249284,
+    "cost_source": "measured",
+    "prompt_version": "ff0c37e5e422",
+    "prompt_chars": 46170
+   }
+  ],
+  "discarded": [
+   {
+    "source": "S1",
+    "reason": "text",
+    "kind": "not_a_contract",
+    "concern": "text"
+   },
+   {
+    "source": "S2",
+    "reason": "text",
+    "kind": "unverifiable_from_diagram",
+    "concern": "text"
+   },
+   {
+    "source": "S4",
+    "reason": "text",
+    "kind": "decided_by_declaration",
+    "concern": "text"
+   }
+  ],
+  "elapsed_s": 92.2,
+  "effort": "xhigh",
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0,
+  "record_kind": "succeeded"
+ },
+ "micro": {
+  "ran_at": "2026-10-21T10:08:42+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 1,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 6,
+    "output_tokens": 725,
+    "cache_read_input_tokens": 40493,
+    "cache_creation_input_tokens": 15562,
+    "duration_ms": 12761,
+    "num_turns": 5,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.0776086,
+    "cost_source": "measured",
+    "prompt_version": "ec22e8db28b8",
+    "prompt_chars": 16399
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 487,
+    "cache_read_input_tokens": 36604,
+    "cache_creation_input_tokens": 31895,
+    "duration_ms": 6652,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.1397788,
+    "cost_source": "measured",
+    "prompt_version": "0df5604536cf",
+    "prompt_chars": 55922
+   },
+   {
+    "role": "judge",
+    "split_index": 0,
+    "input_tokens": 2,
+    "output_tokens": 279,
+    "cache_read_input_tokens": 2821,
+    "cache_creation_input_tokens": 31632,
+    "duration_ms": 5249,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.1298862,
+    "cost_source": "measured",
+    "prompt_version": "cea7f62a1357",
+    "prompt_chars": 57180
+   }
+  ],
+  "elapsed_s": 29.9,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": null,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 3,
+  "succeeded_shards": 3,
+  "target_files": 24,
+  "reviewed_files": 24,
+  "budget_stops": []
+ },
+ "security": {
+  "ran_at": "2026-10-21T10:40:11+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 0,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 782,
+    "cache_read_input_tokens": 15816,
+    "cache_creation_input_tokens": 28429,
+    "duration_ms": 9675,
+    "num_turns": 3,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "max_budget_usd": 0.5,
+    "cost_usd": 0.12470719999999999,
+    "cost_source": "measured",
+    "prompt_version": "026a56fa1c3b",
+    "prompt_chars": 21179
+   }
+  ],
+  "elapsed_s": 20.0,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_outside_shard": 0,
+  "failed_splits": 0,
+  "launch_failures": [],
+  "unverified_candidates": 0,
+  "shards": 3,
+  "succeeded_shards": 3,
+  "target_files": 25,
+  "reviewed_files": 25,
+  "budget_stops": []
+ }
+}

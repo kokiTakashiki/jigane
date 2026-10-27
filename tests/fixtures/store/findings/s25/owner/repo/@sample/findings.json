@@ -1,0 +1,141 @@
+{
+ "last_number": 5,
+ "groups": {
+  "macro": [
+   {
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M2",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.py",
+      "start_line": 83,
+      "end_line": 83
+     }
+    ],
+    "declaration_ref": {
+     "path": "src/f2.py",
+     "start_line": 83,
+     "end_line": 83
+    },
+    "judgment_region": "text",
+    "references": [],
+    "deepens": "F1",
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   },
+   {
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "nit_reason": {
+     "kind": "settled_earlier",
+     "text": "text",
+     "concern": "text"
+    },
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   },
+   {
+    "id": "F3",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "nit_reason": {
+     "kind": "not_a_contract",
+     "text": "text",
+     "concern": null
+    },
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   },
+   {
+    "id": "F4",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    },
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": null,
+    "group": "macro",
+    "theme": null,
+    "triage": "remaining"
+   }
+  ],
+  "micro": [
+   {
+    "id": "F5",
+    "severity": "nit",
+    "viewpoint": "D8",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f3.py",
+      "start_line": 21,
+      "end_line": 23
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f3.py",
+       "start_line": 21,
+       "end_line": 23
+      }
+     ],
+     "verdict": "kept",
+     "reason": "text"
+    },
+    "group": "micro",
+    "theme": "B1",
+    "triage": "folded"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F5"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

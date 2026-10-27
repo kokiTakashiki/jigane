@@ -1,0 +1,23 @@
+id: no-claude-launch-outside-llm-runs
+valid:
+  - run_command(["git", "status"])
+  - run_command(["echo", "claude"])
+  - |
+    # claude は llm_runs から起動する
+    x = 1
+  - |
+    def f():
+        """claude を説明する docstring。"""
+  # 以下は拾えない形。文字列の連結や変数を経由すると、構文木に "claude" が現れない。
+  # 拾えない形は process.run_command と run_resolved が claude の名前を断って止める
+  - run_command([name, "-p"])
+  - run_command(["cl" + "aude", "-p"])
+invalid:
+  - run_command(["claude", "-p"])
+  - run_command(("claude", "-p"))
+  - run_command(["claude.exe", "-p"])
+  - run_command([f"claude", "-p"])
+  - binary = claude_binary()
+  - binary = claude.claude_binary()
+  - from jigane.git.process import run_claude_resolved
+  - process.run_claude_resolved(args)

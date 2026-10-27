@@ -1,0 +1,8 @@
+public class FooTests
+{
+    [Fact(Skip = IsLinux ? "linux" : null)]
+    public void A() { Skip.If(IsCi); }
+
+    [Test]
+    public void B() { Assume.That(IsCi); Assert.Ignore("no"); Assert.Inconclusive("no"); }
+}

@@ -1,0 +1,14 @@
+{
+ "next_number": 16,
+ "regions": {
+  "src/f2.py::Sym19::public_interface": {
+   "id": "J1",
+   "content_hash": "efc528ba0ce0ec5bf97db6761fff78464aa8a2f532a0e462965f1571551cfacb",
+   "gone": true
+  },
+  "src/f2.py::Sym3::public_interface": {
+   "id": "J2",
+   "content_hash": "9e27296fc9cc0d78e19fb90b9dd54b72e45c062097e5070dc433ab4616fb2f9c"
+  }
+ }
+}

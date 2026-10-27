@@ -1,0 +1,8 @@
+class FooTest {
+    @Test
+    void waits() {
+        await().atMost(Duration.ofSeconds(5)).until(() -> done.get());
+        latch.await(5, TimeUnit.SECONDS);
+        Thread.yield();
+    }
+}

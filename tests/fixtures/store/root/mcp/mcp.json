@@ -1,0 +1,20 @@
+{
+ "mcpServers": {
+  "owasp-mas": {
+   "type": "stdio",
+   "command": "/bin/sh",
+   "args": [
+    "-c"
+   ],
+   "env": {}
+  },
+  "backendsec": {
+   "type": "stdio",
+   "command": "/usr/bin/cmd",
+   "args": [
+    "/tmp/x/main.js"
+   ],
+   "env": {}
+  }
+ }
+}

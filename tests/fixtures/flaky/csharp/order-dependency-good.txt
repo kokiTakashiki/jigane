@@ -1,0 +1,19 @@
+public class FooTests
+{
+    static readonly int Limit = 3;
+    static readonly string Name = "x";
+    static readonly List<int> Items = new List<int>();
+    int instanceCounter;
+
+    [Fact]
+    public void A()
+    {
+        var local = new List<int>();
+        local.Add(1);
+        instanceCounter++;
+        var length = Name.Length + Limit + Items.Count;
+        var first = Items[0];
+    }
+
+    public static void Helper() { }
+}

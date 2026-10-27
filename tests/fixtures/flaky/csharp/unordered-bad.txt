@@ -1,0 +1,12 @@
+public class FooTests
+{
+    [Fact]
+    public void Keys()
+    {
+        var map = new Dictionary<string, int>();
+        Assert.Equal(new List<string> { "a", "b" }, map.Keys.ToList());
+        CollectionAssert.AreEqual(expected, set.ToList());
+    }
+
+    private HashSet<string> set = new();
+}

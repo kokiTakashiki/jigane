@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public void Clock()
+    {
+        var time = new FakeTimeProvider();
+        var a = time.GetUtcNow();
+        var b = DateTime.Now;
+        var c = new DateTime(2020, 1, 1);
+    }
+}

@@ -1,0 +1,9 @@
+public class FooTests
+{
+    [Fact]
+    public void Dice()
+    {
+        var a = new Random(42);
+        var b = a.Next();
+    }
+}

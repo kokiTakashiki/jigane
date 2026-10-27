@@ -1,0 +1,9 @@
+{
+ "next_number": 2,
+ "regions": {
+  "src/f1::::dependency_build": {
+   "id": "J1",
+   "content_hash": "24822f393c24e294c39e196747e306ccfebdff20d8618ead7127989eb5dbffd6"
+  }
+ }
+}

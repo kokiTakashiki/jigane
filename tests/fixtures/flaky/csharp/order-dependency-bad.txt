@@ -1,0 +1,28 @@
+public class FooTests
+{
+    static List<int> shared = new List<int>();
+    static int counter;
+    static readonly List<int> Items = new List<int>();
+    static readonly Dictionary<string, int> Map = new Dictionary<string, int>();
+
+    [Fact]
+    public void A()
+    {
+        shared.Add(1);
+        counter++;
+    }
+
+    [Test]
+    public void B()
+    {
+        counter = 5;
+    }
+
+    [Fact]
+    public void C()
+    {
+        Items.Add(1);
+        Map["a"] = 1;
+        Items.Clear();
+    }
+}

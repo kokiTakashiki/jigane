@@ -1,0 +1,100 @@
+{
+ "macro": {
+  "ran_at": "2026-10-20T23:33:28+00:00",
+  "model": "claude-sonnet-5-5",
+  "shape": "diagram",
+  "discovered": 4,
+  "invocations": [
+   {
+    "role": "diagram",
+    "split_index": null,
+    "input_tokens": 2,
+    "output_tokens": 11223,
+    "cache_read_input_tokens": 2831,
+    "cache_creation_input_tokens": 24690,
+    "cost_usd": 0.2115602,
+    "duration_ms": 84457,
+    "num_turns": 2,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "48ebd5e4b72e",
+    "prompt_chars": 42715
+   }
+  ],
+  "discarded": [
+   {
+    "source": "S1",
+    "reason": "text"
+   }
+  ],
+  "elapsed_s": 92.1,
+  "effort": "xhigh",
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "dropped_without_bot_findings": 0
+ },
+ "micro": {
+  "ran_at": "2026-10-20T23:33:59+00:00",
+  "model": "claude-sonnet-5-5",
+  "discovered": 3,
+  "invocations": [
+   {
+    "role": "discovery",
+    "split_index": 0,
+    "input_tokens": 8,
+    "output_tokens": 1679,
+    "cache_read_input_tokens": 60126,
+    "cache_creation_input_tokens": 15782,
+    "cost_usd": 0.09195919999999999,
+    "duration_ms": 15200,
+    "num_turns": 7,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "a9960d1b3ff1",
+    "prompt_chars": 21416
+   },
+   {
+    "role": "rebuttal",
+    "split_index": 0,
+    "input_tokens": 4,
+    "output_tokens": 952,
+    "cache_read_input_tokens": 36016,
+    "cache_creation_input_tokens": 34778,
+    "cost_usd": 0.15584320000000002,
+    "duration_ms": 8956,
+    "num_turns": 6,
+    "is_error": false,
+    "terminal_reason": "completed",
+    "permission_denials": 0,
+    "prompt_version": "0df5604536cf",
+    "prompt_chars": 51473
+   }
+  ],
+  "elapsed_s": 30.0,
+  "effort": null,
+  "dropped_without_evidence": 0,
+  "dropped_invalid_schema": 0,
+  "theme_bundling": null,
+  "dropped_outside_shard": 0,
+  "failed_splits": 1,
+  "launch_failures": [
+   {
+    "stage": "verification",
+    "index": 0,
+    "role": null,
+    "kind": "bad_output",
+    "reason": "text",
+    "attempt": 1,
+    "disposition": "not_rerun"
+   }
+  ],
+  "unverified_candidates": 3,
+  "shards": 3,
+  "succeeded_shards": 3,
+  "target_files": 16,
+  "reviewed_files": 16,
+  "budget_stops": []
+ }
+}

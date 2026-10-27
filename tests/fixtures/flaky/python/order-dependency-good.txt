@@ -1,0 +1,12 @@
+SHARED = []
+
+
+def helper():
+    SHARED.append(1)
+
+
+def test_a():
+    local = []
+    other = {}
+    other.update({})
+    assert local == []

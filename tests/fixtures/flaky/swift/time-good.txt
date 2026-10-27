@@ -1,0 +1,9 @@
+import Foundation
+import XCTest
+
+final class TimeTests: XCTestCase {
+    func testFixedDate() {
+        let a = Date(timeIntervalSince1970: 0)
+        XCTAssertEqual(a.timeIntervalSince1970, 0)
+    }
+}

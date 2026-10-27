@@ -1,0 +1,8 @@
+class FooTest {
+    @Test
+    void sums() {
+        assertEquals(0.3, a + b); // bad
+        assertEquals(0.5f, calc.average(xs)); // bad
+        assertEquals(total(xs), 1.5); // bad
+    }
+}

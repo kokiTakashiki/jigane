@@ -1,0 +1,4 @@
+def test_a(tmp_path):
+    (tmp_path / 'out.txt').write_text('x')
+    with open('relative.txt'):
+        pass

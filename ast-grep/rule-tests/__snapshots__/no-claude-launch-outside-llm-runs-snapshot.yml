@@ -1,0 +1,66 @@
+id: no-claude-launch-outside-llm-runs
+snapshots:
+  binary = claude.claude_binary():
+    labels:
+    - source: claude.claude_binary()
+      style: primary
+      start: 9
+      end: 31
+  binary = claude_binary():
+    labels:
+    - source: claude_binary()
+      style: primary
+      start: 9
+      end: 24
+  from jigane.git.process import run_claude_resolved:
+    labels:
+    - source: run_claude_resolved
+      style: primary
+      start: 31
+      end: 50
+  process.run_claude_resolved(args):
+    labels:
+    - source: run_claude_resolved
+      style: primary
+      start: 8
+      end: 27
+  "run_command((\"claude\", \"-p\"))":
+    labels:
+    - source: "\"claude\""
+      style: primary
+      start: 13
+      end: 21
+    - source: ("claude", "-p")
+      style: secondary
+      start: 12
+      end: 28
+  "run_command([\"claude\", \"-p\"])":
+    labels:
+    - source: "\"claude\""
+      style: primary
+      start: 13
+      end: 21
+    - source: "[\"claude\", \"-p\"]"
+      style: secondary
+      start: 12
+      end: 28
+  "run_command([\"claude.exe\", \"-p\"])":
+    labels:
+    - source: "\"claude.exe\""
+      style: primary
+      start: 13
+      end: 25
+    - source: "[\"claude.exe\", \"-p\"]"
+      style: secondary
+      start: 12
+      end: 32
+  "run_command([f\"claude\", \"-p\"])":
+    labels:
+    - source: f"claude"
+      style: primary
+      start: 13
+      end: 22
+    - source: "[f\"claude\", \"-p\"]"
+      style: secondary
+      start: 12
+      end: 29

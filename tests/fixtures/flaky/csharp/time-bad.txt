@@ -1,0 +1,11 @@
+public class FooTests
+{
+    [Fact]
+    public void Clock()
+    {
+        var a = DateTime.Now;
+        var b = DateTime.UtcNow;
+        var c = DateTimeOffset.Now;
+        var d = Environment.TickCount;
+    }
+}

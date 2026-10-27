@@ -1,0 +1,104 @@
+{
+ "last_number": 5,
+ "groups": {
+  "macro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f5.py",
+      "start_line": 223,
+      "end_line": 223
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": "text",
+    "references": [],
+    "group": "macro",
+    "id": "F1",
+    "severity": "warning",
+    "viewpoint": "M4",
+    "claim": "text",
+    "triage": "must_read",
+    "theme": null,
+    "adjudication": null
+   },
+   {
+    "body": "",
+    "evidence": [],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "macro",
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "discarded",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": null,
+    "adjudication": null,
+    "nit_reason": {
+     "kind": "unverifiable_from_diagram",
+     "text": "text",
+     "concern": "text"
+    }
+   }
+  ],
+  "micro": [
+   {
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f7.py",
+      "start_line": 229,
+      "end_line": 243
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "group": "micro",
+    "id": "F5",
+    "severity": "warning",
+    "viewpoint": "D3",
+    "claim": "text",
+    "triage": "remaining",
+    "theme": "B1",
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [
+      {
+       "path": "src/f7.py",
+       "start_line": 229,
+       "end_line": 262
+      }
+     ],
+     "verdict": "weakened",
+     "reason": "text",
+     "verified": false,
+     "tool_claim": {
+      "relies": false,
+      "basis": "none",
+      "version": ""
+     }
+    },
+    "triage_reason": "text",
+    "from_concern": "F4"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F5"
+   ],
+   "severity": "warning",
+   "triage": "remaining"
+  }
+ ]
+}

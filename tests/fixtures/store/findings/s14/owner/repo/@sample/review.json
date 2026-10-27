@@ -1,0 +1,45 @@
+{
+ "id": "owner/repo@sample",
+ "kind": "range",
+ "mode": "diff",
+ "is_diff": true,
+ "is_pull_request": false,
+ "created_at": "2026-10-19T12:28:50+00:00",
+ "refreshed_at": null,
+ "repository_root": "/tmp/sample-repo",
+ "paths": [
+  "src/f1.md"
+ ],
+ "targets": null,
+ "declaration": {
+  "source": "intent",
+  "source_label": "label",
+  "intent": "text",
+  "excerpts": [],
+  "warnings": []
+ },
+ "warnings": [],
+ "content_warnings": [],
+ "diff_source": {
+  "base_sha": "f3d67082dbbcc0ff7fd1a242954a6aeed4a65003",
+  "head_sha": "edc4bb3a84b48cc60372868919d9c0a8a7a04b85",
+  "merge_base": "f3d67082dbbcc0ff7fd1a242954a6aeed4a65003",
+  "base_tree": "text"
+ },
+ "pull_request": null,
+ "local_range": {
+  "range_text": "main..HEAD",
+  "working_directory": "/tmp/sample-repo"
+ },
+ "background": {
+  "issues": [],
+  "documents": [],
+  "past_pull_requests": [],
+  "owners": [
+   {
+    "path": "src/f1.md",
+    "owners": []
+   }
+  ]
+ }
+}

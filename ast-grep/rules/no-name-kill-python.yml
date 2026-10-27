@@ -1,0 +1,18 @@
+id: no-name-kill-python
+language: python
+severity: error
+message: 名前でプロセスを止める道具を使っている。止める対象は PID で指す。
+rule:
+  kind: string
+  # 文字列の接頭辞（f、r、b など）は、正規表現の先頭で許す
+  regex: ^[rRbBfFuU]{0,2}["']\s*(pkill|killall|pgrep)(\s.*)?["']$
+  any:
+    # os.system("pkill foo") のように一つの文字列で渡す形。docstring は引数でないので拾わない
+    - inside:
+        kind: argument_list
+    # ["pkill", "-f", name] や ("pkill", "-f", name) のように引数の列の先頭が道具の名である形
+    - nthChild: 1
+      inside:
+        any:
+          - kind: list
+          - kind: tuple

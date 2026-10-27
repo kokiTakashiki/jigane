@@ -1,0 +1,10 @@
+public class FooTests
+{
+    [Fact]
+    public async Task Opens()
+    {
+        using var fs = new FileStream(path, FileMode.Open);
+        using (var reader = new StreamReader(path)) { }
+        await using var writer = new StreamWriter(new FileStream(path, FileMode.Create));
+    }
+}

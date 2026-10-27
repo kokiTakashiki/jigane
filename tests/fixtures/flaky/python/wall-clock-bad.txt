@@ -1,0 +1,22 @@
+import time
+from time import perf_counter
+
+
+def test_a():
+    start = time.monotonic()
+    work()
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0
+
+
+def test_b():
+    t0 = perf_counter()
+    work()
+    assert perf_counter() - t0 <= 1
+
+
+def test_c():
+    start = time.time()
+    work()
+    end = time.time()
+    assert 3 > end - start

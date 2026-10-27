@@ -1,0 +1,53 @@
+# Swift の呼び出しと遅延参照の query。capture の名前は csharp.toml と揃える。
+#   call      呼び出しの式の節点（call_expression）
+#   callee    呼び出しの名前の節点
+#   receiver  受け手の式。受け手の無い呼び出しでは付かない
+#   arguments 引数の並び（call_suffix。末尾のクロージャを含む）
+# T() は構文では関数の呼び出しと区別できないので、生成の判定は解決の側で行う。
+# T.init() は swift.py が生成として報告する。
+
+[[query]]
+name = "calls"
+query = '''
+(call_expression
+  . (navigation_expression
+      target: (_) @receiver
+      suffix: (navigation_suffix suffix: (simple_identifier) @callee))
+  . (call_suffix) @arguments) @call
+(call_expression
+  . (simple_identifier) @callee
+  . (call_suffix) @arguments) @call
+(constructor_expression
+  constructed_type: (_) @callee
+  (constructor_suffix) @arguments) @call
+'''
+
+[[query]]
+name = "lambdas"
+query = '''
+(lambda_literal) @lambda
+'''
+
+# 引数に置かれた裸の名前と a.b は、関数の参照かもしれない。変数との区別は resolve.py で行う。
+# #selector(...) の中身は呼び出しではなく関数の参照で、selector_expression 全体を節点にする。
+[[query]]
+name = "method_groups"
+query = '''
+(value_argument value: (simple_identifier) @method_group)
+(value_argument
+  value: (navigation_expression
+    target: (_) @receiver
+    suffix: (navigation_suffix suffix: (simple_identifier) @callee)) @method_group)
+(selector_expression (simple_identifier) @callee) @method_group
+(selector_expression
+  (navigation_expression
+    target: (_) @receiver
+    suffix: (navigation_suffix suffix: (simple_identifier) @callee))) @method_group
+(selector_expression
+  (call_expression
+    . (navigation_expression
+        target: (_) @receiver
+        suffix: (navigation_suffix suffix: (simple_identifier) @callee)))) @method_group
+(selector_expression
+  (call_expression . (simple_identifier) @callee)) @method_group
+'''

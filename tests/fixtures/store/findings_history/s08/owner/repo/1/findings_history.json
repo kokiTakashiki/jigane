@@ -1,0 +1,444 @@
+{
+ "groups": {
+  "macro": [
+   {
+    "ran_at": "2026-10-19T09:15:37+00:00",
+    "findings": []
+   }
+  ],
+  "micro": [
+   {
+    "ran_at": "2026-10-20T08:55:40+00:00",
+    "findings": [
+     {
+      "id": "F1",
+      "severity": "warning",
+      "viewpoint": "D1",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 11,
+        "end_line": 11
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B1",
+      "triage": "must_read"
+     },
+     {
+      "id": "F2",
+      "severity": "warning",
+      "viewpoint": "D2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f3.py",
+        "start_line": 22,
+        "end_line": 32
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B2",
+      "triage": "must_read"
+     },
+     {
+      "id": "F3",
+      "severity": "warning",
+      "viewpoint": "D7",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f2.md",
+        "start_line": 12,
+        "end_line": 12
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "kept",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B3",
+      "triage": "must_read"
+     },
+     {
+      "id": "F4",
+      "severity": "warning",
+      "viewpoint": "D6",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f5.py",
+        "start_line": 15,
+        "end_line": 15
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "rejected",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": null,
+      "triage": "rejected"
+     },
+     {
+      "id": "F5",
+      "severity": "nit",
+      "viewpoint": "D6",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 78,
+        "end_line": 84
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "rejected",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": null,
+      "triage": "rejected"
+     },
+     {
+      "id": "F6",
+      "severity": "nit",
+      "viewpoint": "D9",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 113,
+        "end_line": 115
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "rejected",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": null,
+      "triage": "rejected"
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T09:13:52+00:00",
+    "findings": [
+     {
+      "id": "F7",
+      "severity": "warning",
+      "viewpoint": "D2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 146,
+        "end_line": 158
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [
+        {
+         "path": "src/f4.py",
+         "start_line": 121,
+         "end_line": 158
+        }
+       ],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B4",
+      "triage": "must_read"
+     },
+     {
+      "id": "F8",
+      "severity": "nit",
+      "viewpoint": "D6",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 96,
+        "end_line": 103
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [
+        {
+         "path": "src/f4.py",
+         "start_line": 99,
+         "end_line": 114
+        }
+       ],
+       "verdict": "kept",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B5",
+      "triage": "folded"
+     },
+     {
+      "id": "F9",
+      "severity": "nit",
+      "viewpoint": "T2",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f5.py",
+        "start_line": 187,
+        "end_line": 222
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [
+        {
+         "path": "src/f5.py",
+         "start_line": 192,
+         "end_line": 222
+        }
+       ],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B5",
+      "triage": "folded"
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T09:21:18+00:00",
+    "findings": [
+     {
+      "id": "F10",
+      "severity": "nit",
+      "viewpoint": "D3",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 138,
+        "end_line": 170
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B6",
+      "triage": "folded"
+     },
+     {
+      "id": "F11",
+      "severity": "nit",
+      "viewpoint": "D9",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 121,
+        "end_line": 132
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B6",
+      "triage": "folded"
+     },
+     {
+      "id": "F12",
+      "severity": "nit",
+      "viewpoint": "D6",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f4.py",
+        "start_line": 158,
+        "end_line": 170
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [],
+       "verdict": "rejected",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": null,
+      "triage": "rejected"
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T09:37:51+00:00",
+    "findings": [
+     {
+      "id": "F13",
+      "severity": "nit",
+      "viewpoint": "D6",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f3.py",
+        "start_line": 30,
+        "end_line": 35
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [
+        {
+         "path": "src/f3.py",
+         "start_line": 31,
+         "end_line": 34
+        }
+       ],
+       "verdict": "kept",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B7",
+      "triage": "folded"
+     },
+     {
+      "id": "F14",
+      "severity": "nit",
+      "viewpoint": "D7",
+      "claim": "text",
+      "body": "text",
+      "evidence": [
+       {
+        "path": "src/f3.py",
+        "start_line": 1,
+        "end_line": 1
+       }
+      ],
+      "declaration_ref": null,
+      "judgment_region": null,
+      "references": [],
+      "adjudication": {
+       "kind": "rebuttal",
+       "challenge": "text",
+       "recheck": [
+        {
+         "path": "src/f3.py",
+         "start_line": 1,
+         "end_line": 1
+        }
+       ],
+       "verdict": "weakened",
+       "reason": "text"
+      },
+      "group": "micro",
+      "theme": "B7",
+      "triage": "folded"
+     }
+    ]
+   },
+   {
+    "ran_at": "2026-10-20T10:21:38+00:00",
+    "findings": []
+   }
+  ]
+ }
+}

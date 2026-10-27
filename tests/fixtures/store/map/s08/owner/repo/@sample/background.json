@@ -1,0 +1,20 @@
+{
+ "issues": [],
+ "documents": [],
+ "past_changes": [
+  {
+   "kind": "commit",
+   "sha": "fca4831ea1fd639d427c6e092a8ae32a83d1af81",
+   "title": "title",
+   "files": [
+    "src/f1.toml"
+   ]
+  }
+ ],
+ "owners": [
+  {
+   "path": "src/f2.md",
+   "owners": []
+  }
+ ]
+}

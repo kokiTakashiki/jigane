@@ -1,0 +1,467 @@
+import SwiftUI
+import Combine
+
+#if canImport(UIKit)
+import UIKit
+typealias PlatformColor = UIColor
+#else
+import AppKit
+typealias PlatformColor = NSColor
+#endif
+
+public protocol Repository {
+    associatedtype Item: Identifiable & Sendable
+    func load() async throws -> [Item]
+    func save(_ item: Item) async throws
+    var count: Int { get }
+}
+
+struct Task: Identifiable, Hashable, Sendable {
+    let id: UUID
+    var title: String
+    var isDone: Bool = false
+    enum Priority: Int, CaseIterable { case low = 0, medium, high
+        case urgent }
+    var priority: Priority = .low
+}
+
+@MainActor
+final class TaskStore: ObservableObject {
+    @Published private(set) var tasks: [Task] = []
+    @Published var filter: String = ""
+    private var cancellables = Set<AnyCancellable>()
+    private let repository: any Repository
+
+    init(repository: any Repository) {
+        self.repository = repository
+        $filter
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+    }
+
+    var visible: [Task] {
+        guard !filter.isEmpty else { return tasks }
+        return tasks.filter { $0.title.localizedCaseInsensitiveContains(filter) }
+    }
+
+    func reload() async {
+        do {
+            let items = try await repository.load()
+            tasks = items.compactMap { $0 as? Task }
+        } catch {
+            print("failed: \(error)")
+        }
+    }
+
+    func toggle(_ task: Task) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        tasks[index].isDone.toggle()
+    }
+
+    subscript(id: UUID) -> Task? {
+        get { tasks.first { $0.id == id } }
+        set {
+            if let newValue, let i = tasks.firstIndex(where: { $0.id == id }) {
+                tasks[i] = newValue
+            }
+        }
+    }
+}
+
+struct Box<Value: Equatable>: Equatable where Value: Sendable {
+    var value: Value
+    static func == (lhs: Box, rhs: Box) -> Bool { lhs.value == rhs.value }
+    func map<T: Equatable & Sendable>(_ transform: (Value) -> T) -> Box<T> {
+        Box<T>(value: transform(value))
+    }
+}
+
+actor Counter {
+    private var value = 0
+    func increment() -> Int { value += 1; return value }
+}
+
+extension Array where Element == Task {
+    func done() -> [Task] { filter(\.isDone) }
+}
+
+private extension TaskStore {
+    func resetForTesting() { tasks = [] }
+}
+
+struct Row0View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper0(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row1View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper1(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row2View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper2(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row3View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper3(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row4View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper4(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row5View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper5(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row6View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper6(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row7View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper7(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row8View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper8(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row9View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper9(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row10View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper10(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+struct Row11View: View {
+    @ObservedObject var store: TaskStore
+    @State private var expanded = false
+    @Environment(\.colorScheme) private var scheme
+    var task: Task
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+            VStack(alignment: .leading) {
+                Text(task.title).font(.headline)
+                if expanded {
+                    Text("Priority \(task.priority.rawValue)")
+                }
+            }
+            Spacer()
+            Button("Toggle") { store.toggle(task) }
+        }
+        .onTapGesture { withAnimation { expanded.toggle() } }
+        .task { await store.reload() }
+        #if DEBUG
+        .border(Color.red)
+        #endif
+    }
+
+    private func helper11(_ a: Int, label b: String) -> some View {
+        Text("\(a)\(b)")
+    }
+}
+
+#Preview {
+    Row0View(store: TaskStore(repository: PreviewRepo()), task: Task(id: UUID(), title: "x"))
+}

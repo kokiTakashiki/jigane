@@ -1,0 +1,10 @@
+class FooTest {
+    @Test
+    void rolls() {
+        int a = new Random().nextInt(); // bad
+        double b = Math.random(); // bad
+        UUID id = UUID.randomUUID(); // bad
+        SecureRandom s = new SecureRandom(); // bad
+        int c = ThreadLocalRandom.current().nextInt(); // bad
+    }
+}

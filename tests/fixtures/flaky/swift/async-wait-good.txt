@@ -1,0 +1,9 @@
+import XCTest
+
+final class WaitTests: XCTestCase {
+    func testExpectation() async {
+        let done = expectation(description: "done")
+        DispatchQueue.main.async { done.fulfill() }
+        await fulfillment(of: [done], timeout: 1)
+    }
+}

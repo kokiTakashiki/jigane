@@ -1,0 +1,19 @@
+{
+ "issues": [],
+ "documents": [],
+ "past_pull_requests": [
+  {
+   "number": 25,
+   "title": "title",
+   "files": [
+    "src/f1.swift"
+   ]
+  }
+ ],
+ "owners": [
+  {
+   "path": "src/f2.md",
+   "owners": []
+  }
+ ]
+}

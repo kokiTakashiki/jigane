@@ -1,0 +1,152 @@
+{
+ "mode": "diff",
+ "segments": [
+  {
+   "old_path": "src/f4.java",
+   "new_path": "src/f4.java",
+   "old_span": null,
+   "new_span": {
+    "start_line": 40,
+    "end_line": 76
+   },
+   "qualified_name": "Sym1",
+   "kind": "comment_only",
+   "level": "machine",
+   "old_line_count": 0,
+   "new_line_count": 2,
+   "declaration_kind": "class",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f4.java",
+   "new_path": "src/f4.java",
+   "old_span": null,
+   "new_span": {
+    "start_line": 48,
+    "end_line": 48
+   },
+   "qualified_name": "Sym2",
+   "kind": "internal_interface",
+   "level": "required",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f4.java",
+   "new_path": "src/f4.java",
+   "old_span": {
+    "start_line": 61,
+    "end_line": 65
+   },
+   "new_span": {
+    "start_line": 63,
+    "end_line": 75
+   },
+   "qualified_name": "Sym2",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 5,
+   "new_line_count": 11,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  },
+  {
+   "old_path": "src/f4.java",
+   "new_path": "src/f4.java",
+   "old_span": null,
+   "new_span": {
+    "start_line": 77,
+    "end_line": 77
+   },
+   "qualified_name": "Sym3",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 1,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f1.java",
+   "new_path": "src/f1.java",
+   "old_span": {
+    "start_line": 257,
+    "end_line": 257
+   },
+   "new_span": {
+    "start_line": 257,
+    "end_line": 258
+   },
+   "qualified_name": "Sym4",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 1,
+   "new_line_count": 2,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "file"
+  },
+  {
+   "old_path": "src/f2.java",
+   "new_path": "src/f2.java",
+   "old_span": null,
+   "new_span": {
+    "start_line": 81,
+    "end_line": 90
+   },
+   "qualified_name": "Sym7",
+   "kind": "logic",
+   "level": "confirm",
+   "old_line_count": 0,
+   "new_line_count": 10,
+   "declaration_kind": "method",
+   "bot_comment_ids": [],
+   "visibility": "internal"
+  }
+ ],
+ "regions": [
+  {
+   "key": "src/f4.java::Sym2::internal_interface",
+   "kind": "internal_interface",
+   "path": "src/f4.java",
+   "qualified_name": "Sym2",
+   "summary": "text",
+   "old_span": null,
+   "new_span": {
+    "start_line": 48,
+    "end_line": 48
+   },
+   "line_count": 1,
+   "content_hash": "7147cf9126d565ba3c2d10b6c06dceeeb65efc7d26c955dd136a6bdf640c3f63",
+   "bot_comment_ids": [],
+   "old_path": null,
+   "id": "J1"
+  }
+ ],
+ "line_counts": {
+  "by_kind": {
+   "comment_only": 9,
+   "format_only": 0,
+   "generated": 0,
+   "test": 0,
+   "logic": 41,
+   "sensitive_logic": 0,
+   "public_interface": 0,
+   "internal_interface": 2,
+   "dependency_build": 0,
+   "behavior_removal": 0,
+   "bot_response": 0
+  },
+  "by_level": {
+   "required": 2,
+   "confirm": 41,
+   "machine": 9
+  }
+ }
+}

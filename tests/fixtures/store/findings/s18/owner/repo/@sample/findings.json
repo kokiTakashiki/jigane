@@ -1,0 +1,74 @@
+{
+ "last_number": 2,
+ "groups": {
+  "micro": [
+   {
+    "id": "F1",
+    "severity": "nit",
+    "viewpoint": "D9",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f1.py",
+      "start_line": 297,
+      "end_line": 324
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [],
+     "verdict": "rejected",
+     "reason": "text"
+    },
+    "group": "micro",
+    "theme": null,
+    "triage": "rejected"
+   },
+   {
+    "id": "F2",
+    "severity": "nit",
+    "viewpoint": "D6",
+    "claim": "text",
+    "body": "text",
+    "evidence": [
+     {
+      "path": "src/f2.py",
+      "start_line": 388,
+      "end_line": 409
+     }
+    ],
+    "declaration_ref": null,
+    "judgment_region": null,
+    "references": [],
+    "adjudication": {
+     "kind": "rebuttal",
+     "challenge": "text",
+     "recheck": [],
+     "verdict": "weakened",
+     "reason": "text"
+    },
+    "group": "micro",
+    "theme": "B1",
+    "triage": "folded"
+   }
+  ]
+ },
+ "stale_groups": [],
+ "last_theme_number": 1,
+ "themes": [
+  {
+   "id": "B1",
+   "title": "title",
+   "finding_ids": [
+    "F2"
+   ],
+   "severity": "nit",
+   "triage": "folded"
+  }
+ ]
+}

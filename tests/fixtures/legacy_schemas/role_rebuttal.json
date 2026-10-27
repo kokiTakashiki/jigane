@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)",
+          "type": "string"
+        },
+        "start_line": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ],
+      "type": "object"
+    },
+    "tool_claim": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "enum": [
+            "none",
+            "docs",
+            "run"
+          ],
+          "type": "string"
+        },
+        "relies": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relies",
+        "basis",
+        "version"
+      ],
+      "type": "object"
+    },
+    "verdict": {
+      "enum": [
+        "kept",
+        "weakened",
+        "rejected"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "checked": {
+            "items": {
+              "$ref": "#/$defs/location"
+            },
+            "type": "array"
+          },
+          "index": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "challenge",
+          "checked"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "type": "object"
+}
