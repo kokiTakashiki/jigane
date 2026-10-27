@@ -1,10 +1,10 @@
 # TestPyPI へ試しに公開するためのワークフロー。release.yml の publish を uv publish と attest-action に替える前に、
 # 同じ形の公開が TestPyPI で通ることを確かめる。公開リポジトリの main に置き、手で起こす。
-# 起こす前に、利用者の側で次の二つを用意する。
+# 起こす前に、利用者の側で次の二つが残っていることを確かめる（無ければ用意する）。
 #   - TestPyPI の trusted publisher の登録（Owner kokiTakashiki、Repository name jigane、このファイル名 testpypi-trial.yml、environment testpypi）
-#   - 公開リポジトリの environment testpypi の作成
+#   - 公開リポジトリの environment testpypi（承認者は持ち主、配備は main だけ）
 # TestPyPI は同じ版を二度上げられない。起こすたびに version の入力を変える。
-# 試しが済んだら、このファイルを公開リポジトリから消す。
+# 試しの間だけ置くファイル。次の公開で 4.3 の rsync --delete が消す。
 name: testpypi-trial
 
 on:
@@ -76,9 +76,10 @@ jobs:
       id-token: write # TestPyPI の信頼された発行者（OIDC）と attest-action の署名のため
       contents: read
     steps:
+      # attest-action は自身の pyproject の require-build-hashes を読むため uv 0.13.0 以上を要る。宣言の >=0.9.12 より新しい。
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.11.32"
+          version: "0.13.0"
           enable-cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
