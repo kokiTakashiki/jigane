@@ -159,6 +159,17 @@ def test_github_release_keeps_gh_token_out_of_the_job_env() -> None:
     assert any("GH_TOKEN" in step.get("env", {}) for step in job.get("steps", []))
 
 
+def test_github_release_does_not_read_the_notes_from_the_local_tag() -> None:
+    # gh は --notes-from-tag を手元の木のタグから読むため、--repo との併用を拒む。
+    assert "--notes-from-tag" not in create_step_words()
+    assert "--repo" in create_step_words()
+
+
+def test_github_release_notes_are_the_tag_name() -> None:
+    words = create_step_words()
+    assert words[words.index("--notes") + 1] == '"$TAG"'
+
+
 # 以下は、行の読み方がすり抜けた書き方を、構文木の読み方が正しく扱うことを一時の例で確かめる。
 
 

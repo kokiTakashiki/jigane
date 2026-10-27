@@ -223,5 +223,5 @@ jobs:
             --repo "$REPOSITORY" \
             --verify-tag \
             --title "$TAG" \
-            --notes-from-tag \
+            --notes "$TAG" \
             TERMS.ja.md TERMS.en.md PRIVACY.ja.md PRIVACY.en.md artifacts/sbom.cdx.json
