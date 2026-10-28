@@ -1,8 +1,10 @@
+import hashlib
 import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from importlib import metadata
 from importlib.metadata import EntryPoint
 from pathlib import Path
 
@@ -86,30 +88,199 @@ def normalize_distribution(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+class RecordError(ValueError):
+    """配布の RECORD から中身を数えられない。RECORD が無い、載るファイルが無い、読めない。"""
+
+
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+@dataclass(frozen=True)
+class FileDigest:
+    """RECORD の 1 ファイルの相対パスと、中身の sha256 の 16 進。"""
+
+    path: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ApprovedContent:
+    """承認した時点の配布の中身。files は path の順に並べる。"""
+
+    files: tuple[FileDigest, ...]
+
+
+@dataclass(frozen=True)
+class LegacyApproval:
+    """中身を記録する前の形の承認。読めるが、承認としては使わない。"""
+
+
+Approval = ApprovedContent | LegacyApproval
+# 承認の記録を（正規化した配布名, 版）ごとにまとめたもの。同じ組の承認は複数ありうる
+ApprovalsByPair = dict[tuple[str, str], set[Approval]]
+
+
+def _scan_record(dist: metadata.Distribution) -> tuple[dict[str, str], list[tuple[str, OSError]]]:
+    """RECORD に載るファイルの sha256 を数える。読めなかったファイルは出会った順に返す。"""
+    files = dist.files
+    if files is None:
+        raise RecordError("配布に RECORD が無く、中身を数えられません")
+    hashes: dict[str, str] = {}
+    failures: list[tuple[str, OSError]] = []
+    for file in files:
+        if file.name == "RECORD" and file.parent.name.endswith(".dist-info"):
+            continue
+        if file.parent.name == "__pycache__" and file.suffix == ".pyc":
+            continue
+        try:
+            body = Path(str(file.locate())).read_bytes()
+        except OSError as error:
+            failures.append((file.as_posix(), error))
+            continue
+        hashes[file.as_posix()] = hashlib.sha256(body).hexdigest()
+    return hashes, failures
+
+
+def _unreadable_message(path: str, error: OSError) -> str:
+    return f"RECORD に載る {path} を読めません: {error}"
+
+
+def read_content(dist: metadata.Distribution) -> ApprovedContent:
+    """配布の RECORD に載るファイルの相対パスと sha256 を、ディスク上の中身から数える。
+
+    RECORD が持つハッシュは書き換えられるので信じない。RECORD 自身は自分のハッシュを持てないので
+    除く。__pycache__ の pyc は import のたびに作られ、承認の後で変わるので除く。
+    """
+    hashes, failures = _scan_record(dist)
+    if failures:
+        path, error = failures[0]
+        raise RecordError(_unreadable_message(path, error)) from error
+    return ApprovedContent(
+        tuple(FileDigest(path, digest) for path, digest in sorted(hashes.items()))
+    )
+
+
+# 理由に並べるパスの上限。RECORD は外の配布が決めるので、全部は並べない
+_MAX_LISTED_PATHS = 5
+LEGACY_APPROVAL_REASON = "旧い形の承認記録です（中身の照合ができません）"
+
+
+@dataclass(frozen=True)
+class ContentChange:
+    """承認した中身と今の中身の差。パスは昇順。"""
+
+    changed: tuple[str, ...]
+    missing: tuple[str, ...]
+    added: tuple[str, ...]
+
+    def size(self) -> int:
+        return len(self.changed) + len(self.missing) + len(self.added)
+
+
+def _content_change(
+    approved: ApprovedContent, actual: dict[str, str], absent: Iterable[str]
+) -> ContentChange:
+    """absent は RECORD に載るがディスクに無いファイルで、欠けたに数える。"""
+    before = {file.path: file.sha256 for file in approved.files}
+    return ContentChange(
+        changed=tuple(sorted(p for p in before.keys() & actual.keys() if before[p] != actual[p])),
+        missing=tuple(sorted((before.keys() - actual.keys()) | set(absent))),
+        added=tuple(sorted(actual.keys() - before.keys())),
+    )
+
+
+def describe_content_change(change: ContentChange) -> str:
+    """変わった、欠けた、増えたファイルのパスを、合わせて最大 5 件まで種類つきで示す。"""
+    budget = _MAX_LISTED_PATHS
+    parts: list[str] = []
+    for label, paths in (
+        ("変わった", change.changed),
+        ("欠けた", change.missing),
+        ("増えた", change.added),
+    ):
+        shown = paths[:budget]
+        budget -= len(shown)
+        if shown:
+            parts.append(f"{label}: {', '.join(sanitize_text(p) for p in shown)}")
+    if change.size() > _MAX_LISTED_PATHS:
+        parts.append(f"ほか {change.size() - _MAX_LISTED_PATHS} 件")
+    return f"承認のあと、配布の中身が変わっています（{'／'.join(parts)}）"
+
+
+def reapproval_reason(
+    approvals: Iterable[Approval], actual: dict[str, str], absent: Iterable[str] = ()
+) -> str:
+    """承認し直しを求める理由の文。呼ぶ側は、approvals のどれも今の中身と一致しないと確かめてある。
+
+    中身つきの承認が複数あれば、差の最も少ないものと比べる。
+    """
+    recorded = [approval for approval in approvals if isinstance(approval, ApprovedContent)]
+    if not recorded:
+        return LEGACY_APPROVAL_REASON
+    absent = tuple(absent)
+    closest = min(
+        (_content_change(approved, actual, absent) for approved in recorded),
+        key=lambda change: (change.size(), change.changed, change.missing, change.added),
+    )
+    return describe_content_change(closest)
+
+
 @dataclass(frozen=True)
 class EnabledLanguage:
-    """利用者が有効にした言語。言語の名前、提供する配布の名前、承認した配布の版で承認を記録する。"""
+    """利用者が有効にした言語。言語の名前、提供する配布の名前、承認した配布の版、承認の中身で記録する。"""
 
     name: str
     distribution: str
     version: str
+    content: Approval
 
     def __post_init__(self) -> None:
         # 正規化した形で持てば、等値と重複の除去が表記の揺れに左右されない
         object.__setattr__(self, "distribution", normalize_distribution(self.distribution))
 
-    def to_json(self) -> dict[str, str]:
-        return {"name": self.name, "distribution": self.distribution, "version": self.version}
+    @classmethod
+    def approve(cls, name: str, dist: metadata.Distribution) -> "EnabledLanguage":
+        """配布の今の中身を承認した記録。RECORD から中身を数えられなければ RecordError。"""
+        return cls(name, dist.name, dist.version, read_content(dist))
+
+    def to_json(self) -> dict[str, object]:
+        body: dict[str, object] = {
+            "name": self.name,
+            "distribution": self.distribution,
+            "version": self.version,
+        }
+        if isinstance(self.content, ApprovedContent):
+            body["files"] = {file.path: file.sha256 for file in self.content.files}
+        return body
 
     @classmethod
     def from_json(cls, item: object) -> "EnabledLanguage":
         """languages.json の一件から復元する。形が違えば ValueError。"""
-        if not isinstance(item, dict) or set(item) != {"name", "distribution", "version"}:
-            raise ValueError("enabled の要素は name と distribution と version だけを持ちます")
+        legacy_keys = {"name", "distribution", "version"}
+        if not isinstance(item, dict) or set(item) not in (legacy_keys, legacy_keys | {"files"}):
+            raise ValueError(
+                "enabled の要素は name と distribution と version と files だけを持ちます"
+            )
         name, distribution, version = item["name"], item["distribution"], item["version"]
         if not all(isinstance(value, str) for value in (name, distribution, version)):
             raise ValueError("name と distribution と version は文字列でなければなりません")
-        return cls(name, distribution, version)
+        if "files" not in item:
+            # 中身を記録する前の形。読めるが、承認としては使わない
+            return cls(name, distribution, version, LegacyApproval())
+        files = item["files"]
+        if not isinstance(files, dict) or not all(
+            isinstance(path, str) and isinstance(digest, str) and _SHA256_HEX.fullmatch(digest)
+            for path, digest in files.items()
+        ):
+            raise ValueError("files は相対パスから sha256 の 16 進への対応でなければなりません")
+        return cls(
+            name,
+            distribution,
+            version,
+            ApprovedContent(
+                tuple(FileDigest(path, digest) for path, digest in sorted(files.items()))
+            ),
+        )
 
 
 def load_enabled(path: Path) -> tuple[EnabledLanguage, ...]:
@@ -124,7 +295,8 @@ def load_enabled(path: Path) -> tuple[EnabledLanguage, ...]:
         raise EnabledFileError(f"{path} は JSON ではありません: {error}") from error
     shape_error = EnabledFileError(
         f"{path} の形が違います。"
-        f'{{"enabled": [{{"name": ..., "distribution": ..., "version": ...}}]}} だけを書きます'
+        f'{{"enabled": [{{"name": ..., "distribution": ..., "version": ..., "files": {{...}}}}]}} '
+        "だけを書きます"
     )
     if (
         not isinstance(data, dict)
@@ -265,6 +437,7 @@ def _classify(
     name: str,
     entry_points: list[EntryPoint],
     approved_pairs: set[tuple[str, str]],
+    approvals: ApprovalsByPair,
     builtin_names: set[str],
 ) -> LanguagePlugin | LanguageUnavailable:
     """承認された名前一つ分の結果。load できた plugin か、使えない理由。"""
@@ -309,12 +482,58 @@ def _classify(
             ReasonKind.VALIDATION_ERROR,
             f"同じ名前の entry point が複数あります: {dists}",
         )
+    reason = _content_error(name, candidates[0], approvals)
+    if reason is not None:
+        return LanguageUnavailable(
+            name,
+            ReasonKind.VALIDATION_ERROR,
+            reason,
+            _dist_name(candidates[0]),
+            _dist_version(candidates[0]),
+        )
     return _load(candidates[0])
+
+
+def _content_error(
+    name: str,
+    entry_point: EntryPoint,
+    approvals: ApprovalsByPair,
+) -> str | None:
+    """配布の今の中身が承認時と違う理由。import の前に呼ぶ。同じなら None。"""
+    dist = entry_point.dist
+    if dist is None:
+        # 呼ぶ側が dist のある entry point だけを渡す
+        return "entry point の配布を特定できません"
+    again = f"jigane languages enable {name} で承認し直してください"
+    approvals_here = approvals[(normalize_distribution(dist.name), dist.version)]
+    if not any(isinstance(approval, ApprovedContent) for approval in approvals_here):
+        # 旧い形の記録は配布を読まずに断る。RECORD の有無や読めないファイルで理由を変えない
+        return f"{LEGACY_APPROVAL_REASON}。{again}"
+    try:
+        hashes, failures = _scan_record(dist)
+    except RecordError as no_record:
+        # RECORD の無い配布は、差を示す元の一覧が無い
+        return f"配布の中身が承認時と違います（{no_record}）。{again}"
+    unreadable = [
+        (path, error) for path, error in failures if not isinstance(error, FileNotFoundError)
+    ]
+    if unreadable:
+        # ディスクにあるのに読めないファイルは、変わった、欠けた、増えたのどれにも数えない
+        path, error = unreadable[0]
+        return f"配布の中身が承認時と違います（{_unreadable_message(path, error)}）。{again}"
+    absent = [path for path, _ in failures]
+    actual = ApprovedContent(
+        tuple(FileDigest(path, digest) for path, digest in sorted(hashes.items()))
+    )
+    if not absent and actual in approvals_here:
+        return None
+    return f"{reapproval_reason(approvals_here, hashes, absent)}。{again}"
 
 
 def _load_approved(
     by_name: dict[str, list[EntryPoint]],
     approved: dict[str, set[tuple[str, str]]],
+    approvals: dict[str, ApprovalsByPair],
     builtin_names: set[str],
 ) -> tuple[dict[str, LanguagePlugin], dict[str, LanguageUnavailable]]:
     """承認された名前の entry point を load して、使える言語と使えない言語に分ける。"""
@@ -324,7 +543,7 @@ def _load_approved(
         if name not in approved:
             # 有効でない entry point は import しない。一覧に出す分は後段で作る
             continue
-        result = _classify(name, by_name[name], approved[name], builtin_names)
+        result = _classify(name, by_name[name], approved[name], approvals[name], builtin_names)
         if isinstance(result, LanguageUnavailable):
             failures[name] = result
         else:
@@ -401,10 +620,13 @@ def discover(
     for entry_point in entry_points:
         by_name.setdefault(entry_point.name, []).append(entry_point)
     approved: dict[str, set[tuple[str, str]]] = {}
+    approvals: dict[str, ApprovalsByPair] = {}
     for item in enabled:
         approved.setdefault(item.name, set()).add((item.distribution, item.version))
+        by_pair = approvals.setdefault(item.name, {})
+        by_pair.setdefault((item.distribution, item.version), set()).add(item.content)
 
-    loaded, failures = _load_approved(by_name, approved, builtin_names)
+    loaded, failures = _load_approved(by_name, approved, approvals, builtin_names)
     _reject_overlaps(loaded, failures, builtin_suffixes)
     return (
         *(LanguageReady(plugin) for plugin in builtins),

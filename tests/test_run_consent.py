@@ -356,10 +356,10 @@ def test_consent_text_shows_past_cost_and_avoids_cap_words_in_the_totals() -> No
     )
     lines = consent_text(plan)
     assert (
-        "  方針: 発見役 1 回、検証役なし、発見役の回数 × 1 回の目安 0.5 USD、前回の実績 0.1234 USD"
+        "  方針: 発見役 1 回 × 1 回の目安 0.5 USD = 0.5 USD、検証役なし、前回の実績 0.1234 USD"
     ) in lines
     assert (
-        "  セキュリティ: 発見役 2 回、検証役は回数が未定、発見役の回数 × 1 回の目安 1 USD"
+        "  セキュリティ: 発見役 2 回 × 1 回の目安 0.5 USD = 1 USD、検証役は回数が未定"
     ) in lines
     assert "  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: 1.5 USD" in lines
     for line in lines:

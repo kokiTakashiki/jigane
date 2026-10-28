@@ -54,7 +54,14 @@ def test_build_command_without_mcp(tmp_path: Path) -> None:
         "claude",  # ast-grep-ignore: no-claude-launch-outside-llm-runs 起動ではなく期待する列
         "--restricted",
         "--settings",
-        json.dumps({"permissions": {"deny": secret_read_denials()}}),
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": secret_read_denials(),
+                    "blockReadsOutsideWorkingDirectories": True,
+                }
+            }
+        ),
         "-p",
         "--tools",
         "Read",
@@ -68,6 +75,13 @@ def test_build_command_without_mcp(tmp_path: Path) -> None:
         "0.5",
         "--strict-mcp-config",
     ]
+
+
+def test_build_command_settings_block_reads_outside_the_working_directory(tmp_path: Path) -> None:
+    command = build_command(make_invocation(tmp_path))
+    permissions = json.loads(command[command.index("--settings") + 1])["permissions"]
+    assert permissions["blockReadsOutsideWorkingDirectories"] is True
+    assert permissions["deny"] == secret_read_denials()
 
 
 def test_build_command_passes_max_turns_only_when_set(tmp_path: Path) -> None:

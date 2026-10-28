@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import EntryPoint, entry_points
@@ -20,12 +21,15 @@ from jigane.languages.plugin import Builtin, Distribution, LanguagePlugin
 from jigane.languages.plugins import (
     ENABLED_FILE,
     ENTRY_POINT_GROUP,
+    ApprovedContent,
     EnabledFileError,
     EnabledLanguage,
     LanguageNotEnabled,
     LanguageReady,
+    RecordError,
     load_enabled,
     normalize_distribution,
+    reapproval_reason,
     sanitize_text,
     save_enabled,
     validate_plugin,
@@ -300,12 +304,15 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
         )
     entry_point, dist = found[0]
     path = data_home() / ENABLED_FILE
-    entry = EnabledLanguage(name, dist.name, dist.version)
+    try:
+        entry = EnabledLanguage.approve(name, dist)
+    except RecordError as error:
+        raise ValueError(f"{name!r} を有効にできません（{dist.name}）: {error}") from error
     current = _load_for_edit(path)
     if entry in current:
         # 承認済みなので、外のコードを読み込む確認も書き直しも要らない
         return _report_enabled(entry, already=True, as_json=args.json)
-    _confirm(context, entry, dist.version)
+    _confirm(context, entry, dist.version, _reapproval_reason(current, entry))
     problem = _verify(entry_point)
     if problem is not None:
         raise ValueError(f"{name!r} を有効にできません（{dist.name}）: {sanitize_text(problem)}")
@@ -319,8 +326,27 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
     return _report_enabled(entry, already=False, as_json=args.json)
 
 
-def _confirm(context: Context, entry: EnabledLanguage, version: str) -> None:
-    """外のコードを import する前に、信頼の注意と配布を示して y か yes を得る。"""
+def _reapproval_reason(current: Sequence[EnabledLanguage], entry: EnabledLanguage) -> str | None:
+    """同じ名前と配布と版の承認が既にあり、中身だけが違うときの理由。無ければ None。"""
+    same = [
+        item.content
+        for item in current
+        if (item.name, item.distribution, item.version)
+        == (entry.name, entry.distribution, entry.version)
+    ]
+    if not same or not isinstance(entry.content, ApprovedContent):
+        # 同じ組の承認が無ければ初めての承認で、理由は要らない。approve は中身つきの承認を返す
+        return None
+    return reapproval_reason(same, {file.path: file.sha256 for file in entry.content.files})
+
+
+def _confirm(
+    context: Context, entry: EnabledLanguage, version: str, reason: str | None = None
+) -> None:
+    """外のコードを import する前に、信頼の注意と配布を示して y か yes を得る。
+
+    reason があれば、確認を取り直す理由として配布の次に示す。
+    """
     if not context.is_terminal():
         raise ConsentUnavailableError(
             "確認を得られないので外の言語を読み込みません。端末から実行してください"
@@ -330,13 +356,17 @@ def _confirm(context: Context, entry: EnabledLanguage, version: str) -> None:
         f"読み込む配布: {sanitize_text(entry.distribution)} {sanitize_text(version)}",
         file=sys.stderr,
     )
+    if reason is not None:
+        print(sanitize_text(reason), file=sys.stderr)
     if context.read_answer(f"続けますか{CONSENT_PROMPT_END}").strip().lower() not in ("y", "yes"):
         raise ConsentDeclinedError("確認が得られなかったので有効にしませんでした")
 
 
 def _report_enabled(entry: EnabledLanguage, *, already: bool, as_json: bool) -> int:
     if as_json:
-        print(json.dumps({"enabled": entry.to_json()}, ensure_ascii=False))
+        # 出力の形は中身を記録する前から変えない。files は languages.json にだけ書く
+        shown = {"name": entry.name, "distribution": entry.distribution, "version": entry.version}
+        print(json.dumps({"enabled": shown}, ensure_ascii=False))
         return EXIT_OK
     prefix = "既に有効です" if already else "有効にしました"
     lines = [f"{prefix}: {entry.name}（{entry.distribution}）"]

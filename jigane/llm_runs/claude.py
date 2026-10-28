@@ -408,9 +408,18 @@ def build_command(invocation: Invocation) -> list[str]:
     command = [
         claude_binary(),
         "--restricted",
-        # --restricted だけでは作業ディレクトリの .env を Read で読めるため、deny で塞ぐ
+        # --restricted だけでは作業ディレクトリの .env を Read で読めるため、deny で塞ぐ。
+        # deny は作業ディレクトリの下にしか当たらないので、外の読み取りは
+        # blockReadsOutsideWorkingDirectories（Claude Code 2.1.257 以降）で拒む
         "--settings",
-        json.dumps({"permissions": {"deny": secret_read_denials()}}),
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": secret_read_denials(),
+                    "blockReadsOutsideWorkingDirectories": True,
+                }
+            }
+        ),
         "-p",
         "--tools",
         ",".join(invocation.tools),

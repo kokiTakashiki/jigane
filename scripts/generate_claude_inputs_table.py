@@ -41,7 +41,7 @@ ENVIRONMENT_SENTENCE = (
     "環境変数は Claude Code のプロセスに置かれるだけです。"
     "jigane が渡す道具は Read、Grep、Glob と、"
     "MCP の資源を読む ReadMcpResourceTool、ListMcpResourcesTool だけで、"
-    "--restricted で作業ディレクトリの中に閉じるので、"
+    "--restricted と blockReadsOutsideWorkingDirectories で作業ディレクトリの中に閉じるので、"
     "モデルが環境変数を読んで送る道具は jigane からは渡りません。"
     "ただし --mcps で渡した MCP サーバは、Claude Code が起動するプロセスで、"
     "環境変数を受け継ぐことがあります。"

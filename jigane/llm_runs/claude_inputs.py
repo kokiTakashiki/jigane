@@ -324,7 +324,8 @@ class ClaudeInput(Enum):
     # test_every_launch_is_restricted_read_only_and_never_skips_permissions が守る
     TOOL_PERMISSIONS = InputSpec(
         Channel.ARGV,
-        "--restricted、--tools、--settings の秘密のファイル名の deny、--strict-mcp-config",
+        "--restricted、--tools、--settings の秘密のファイル名の deny と"
+        "作業ディレクトリの外の読み取りの拒否、--strict-mcp-config",
         (
             "jigane/llm_runs/claude.py:build_command",
             "jigane/llm_runs/claude.py:SECRET_FILE_PATTERNS",

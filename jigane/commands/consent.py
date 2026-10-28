@@ -138,8 +138,8 @@ def _group_row(item: GroupBreakdown) -> str:
     verifier = "検証役は回数が未定" if item.has_verifier else "検証役なし"
     past = "" if item.past_cost_usd is None else f"、前回の実績 {item.past_cost_usd:.4f} USD"
     return (
-        f"  {GROUP_BY_ID[item.group].label}: 発見役 {item.discovery_calls} 回、{verifier}、"
-        f"発見役の回数 × 1 回の目安 {item.known_usd:g} USD{past}"
+        f"  {GROUP_BY_ID[item.group].label}: 発見役 {item.discovery_calls} 回 × 1 回の目安 "
+        f"{item.per_call_usd:g} USD = {item.known_usd:g} USD、{verifier}{past}"
     )
 
 

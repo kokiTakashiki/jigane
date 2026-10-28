@@ -1,8 +1,8 @@
 """外の言語の試験の支え。偽の言語を site に置く fixture と、発見の結果を引く関数を持つ。"""
 
 import sys
-from collections.abc import Callable, Iterator
-from importlib.metadata import EntryPoint, distributions
+from collections.abc import Callable, Iterator, Mapping
+from importlib.metadata import EntryPoint, distribution, distributions
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ from jigane.languages.plugins import (
     EnabledLanguage,
     LanguageReady,
     LanguageUnavailable,
+    LegacyApproval,
     discover,
 )
 
@@ -48,6 +49,8 @@ _RETURN = """return LanguagePlugin(
         grammar={spec_expr},
         data={data_expr},
     )"""
+
+_INFO_FILES = ("METADATA", "entry_points.txt")
 
 Installer = Callable[..., Path]
 
@@ -107,6 +110,11 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Install
         (info / "entry_points.txt").write_text(
             f"[jigane.languages]\n{name} = {module}:make\n", encoding="utf-8"
         )
+        # RECORD のハッシュ欄は空にする。jigane は RECORD のハッシュを信じず、中身から数える
+        record = [f"{module}.py,,", *(f"{info.name}/{n},," for n in _INFO_FILES)]
+        (info / "RECORD").write_text(
+            "\n".join([*record, f"{info.name}/RECORD,,"]) + "\n", encoding="utf-8"
+        )
         return marker
 
     yield _install
@@ -124,8 +132,18 @@ def entry_points_in(tmp_path: Path) -> list[EntryPoint]:
     ]
 
 
+def approved(name: str, dist: str | None = None) -> EnabledLanguage:
+    """site に置いた配布の今の中身を承認した記録。配布が無ければ PackageNotFoundError。"""
+    return EnabledLanguage.approve(name, distribution(dist or f"fakelang_{name}-dist"))
+
+
+def legacy_record(name: str, dist: str | None = None, version: str = "1.0") -> EnabledLanguage:
+    """中身を記録する前の形の承認。配布が入っているかは問わない。"""
+    return EnabledLanguage(name, dist or f"fakelang_{name}-dist", version, LegacyApproval())
+
+
 def enabled_of(*names: str) -> tuple[EnabledLanguage, ...]:
-    return tuple(EnabledLanguage(name, f"fakelang_{name}-dist", "1.0") for name in names)
+    return tuple(approved(name) for name in names)
 
 
 def states_of(tmp_path: Path, names: tuple[str, ...]) -> dict[str, object]:
@@ -133,7 +151,7 @@ def states_of(tmp_path: Path, names: tuple[str, ...]) -> dict[str, object]:
     return {(s.plugin.adapter.name if isinstance(s, LanguageReady) else s.name): s for s in states}
 
 
-def failure_of(states: dict[str, object], name: str) -> LanguageUnavailable:
+def failure_of(states: Mapping[str, object], name: str) -> LanguageUnavailable:
     state = states[name]
     assert isinstance(state, LanguageUnavailable)
     return state

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import tree_sitter_language_pack
-from language_plugin_support import Installer
+from language_plugin_support import Installer, approved
 from test_grammars import _fake_library
 
 from jigane import commands
@@ -49,10 +49,7 @@ def _enable_zig(
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     (home / "languages.json").write_text(
-        json.dumps(
-            {"enabled": [{"name": "zig", "distribution": "fakelang_zig-dist", "version": "1.0"}]}
-        ),
-        encoding="utf-8",
+        json.dumps({"enabled": [approved("zig").to_json()]}), encoding="utf-8"
     )
 
 
@@ -370,10 +367,7 @@ def test_load_queries_checks_the_grammar_by_the_declared_target(
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     (home / "languages.json").write_text(
-        json.dumps(
-            {"enabled": [{"name": "zig", "distribution": "fakelang_zig-dist", "version": "1.0"}]}
-        ),
-        encoding="utf-8",
+        json.dumps({"enabled": [approved("zig").to_json()]}), encoding="utf-8"
     )
     _fake_library(store, "zig", b"zig-library")
     queries._load.cache_clear()

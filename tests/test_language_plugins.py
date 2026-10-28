@@ -5,20 +5,26 @@ from pathlib import Path
 import pytest
 from language_plugin_support import (
     Installer,
+    approved,
     enabled_of,
     entry_points_in,
     failure_of,
+    legacy_record,
     states_of,
 )
 
 from jigane.languages import registry
 from jigane.languages.plugins import (
+    ApprovedContent,
     EnabledFileError,
     EnabledLanguage,
+    FileDigest,
     LanguageNotEnabled,
     LanguageReady,
     LanguageUnavailable,
+    LegacyApproval,
     ReasonKind,
+    RecordError,
     discover,
     load_enabled,
     sanitize_text,
@@ -135,7 +141,10 @@ def test_load_exception_fails_with_load_error(install: Installer, tmp_path: Path
 
 def test_enabled_name_without_entry_point_fails(tmp_path: Path) -> None:
     (tmp_path / "site").mkdir()
-    failure = failure_of(states_of(tmp_path, ("ghost",)), "ghost")
+    states = discover([], [legacy_record("ghost")], registry.builtin_plugins())
+    failure = failure_of(
+        {s.name: s for s in states if isinstance(s, LanguageUnavailable)}, "ghost"
+    )
     assert failure.reason_kind is ReasonKind.ENTRY_POINT_MISSING
     assert failure.detail == "対応する entry point がありません"
 
@@ -152,8 +161,8 @@ def test_enabled_file_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "data" / "languages.json"
     assert load_enabled(path) == ()
     enabled = (
-        EnabledLanguage("kotlin", "jigane-language-kotlin", "1.0"),
-        EnabledLanguage("go", "g", "2"),
+        legacy_record("kotlin", "jigane-language-kotlin"),
+        legacy_record("go", "g", "2"),
     )
     save_enabled(path, enabled)
     assert json.loads(path.read_text(encoding="utf-8")) == {
@@ -178,12 +187,12 @@ def test_duplicate_enabled_pairs_are_collapsed(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert load_enabled(path) == (EnabledLanguage("kotlin", "jigane-language-kotlin", "1.0"),)
+    assert load_enabled(path) == (legacy_record("kotlin", "jigane-language-kotlin"),)
 
 
 def test_duplicate_enabled_pairs_yield_one_state(install: Installer, tmp_path: Path) -> None:
     install("kotlin")
-    pair = EnabledLanguage("kotlin", "fakelang_kotlin-dist", "1.0")
+    pair = approved("kotlin")
     states = discover(entry_points_in(tmp_path), [pair, pair], registry.builtin_plugins())
     kotlin = [
         s
@@ -198,7 +207,7 @@ def test_distribution_names_are_compared_after_pep503_normalisation(
     install: Installer, tmp_path: Path
 ) -> None:
     install("kotlin", dist="Fake_Lang.Kotlin")
-    enabled = (EnabledLanguage("kotlin", "fake-lang-kotlin", "1.0"),)
+    enabled = (approved("kotlin", "fake-lang-kotlin"),)
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     assert any(isinstance(s, LanguageReady) and s.plugin.adapter.name == "kotlin" for s in states)
 
@@ -207,7 +216,7 @@ def test_same_name_from_another_distribution_is_not_imported(
     install: Installer, tmp_path: Path
 ) -> None:
     marker = install("kotlin", dist="evil-kotlin")
-    enabled = (EnabledLanguage("kotlin", "jigane-language-kotlin", "1.0"),)
+    enabled = (legacy_record("kotlin", "jigane-language-kotlin"),)
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     failures = [s for s in states if isinstance(s, LanguageUnavailable)]
     assert [f.name for f in failures] == ["kotlin"]
@@ -285,20 +294,32 @@ def test_sanitize_text_removes_terminal_controls_and_keeps_newline_and_tab() -> 
 
 
 def test_enabled_language_json_round_trip() -> None:
-    pair = EnabledLanguage("kotlin", "Fake_Kotlin", "3.1")
+    pair = legacy_record("kotlin", "Fake_Kotlin", "3.1")
     assert pair.to_json() == {"name": "kotlin", "distribution": "fake-kotlin", "version": "3.1"}
     assert EnabledLanguage.from_json(pair.to_json()) == pair
-    with pytest.raises(ValueError, match="name と distribution と version だけ"):
+    with pytest.raises(ValueError, match="name と distribution と version と files だけ"):
         EnabledLanguage.from_json({"name": "kotlin"})
     with pytest.raises(ValueError, match="文字列"):
         EnabledLanguage.from_json({"name": 1, "distribution": "x", "version": "1"})
+
+
+def test_enabled_language_with_files_json_round_trip() -> None:
+    digest = "a" * 64
+    content = ApprovedContent((FileDigest("pkg/a.py", digest), FileDigest("pkg/b.py", digest)))
+    entry = EnabledLanguage("kotlin", "Fake_Kotlin", "3.1", content)
+    assert entry.to_json()["files"] == {"pkg/a.py": digest, "pkg/b.py": digest}
+    assert EnabledLanguage.from_json(entry.to_json()) == entry
+    body = entry.to_json()
+    for bad in ({"pkg/a.py": "xyz"}, {"pkg/a.py": 1}, ["pkg/a.py"]):
+        with pytest.raises(ValueError, match="files は"):
+            EnabledLanguage.from_json({**body, "files": bad})
 
 
 def test_other_version_than_the_approved_one_is_not_imported(
     install: Installer, tmp_path: Path
 ) -> None:
     marker = install("kotlin")
-    enabled = (EnabledLanguage("kotlin", "fakelang_kotlin-dist", "0.9"),)
+    enabled = (legacy_record("kotlin", "fakelang_kotlin-dist", "0.9"),)
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     failures = [s for s in states if isinstance(s, LanguageUnavailable)]
     assert [f.name for f in failures] == ["kotlin"]
@@ -330,3 +351,155 @@ def test_two_entry_points_of_the_approved_distribution_fail(
     assert failure.detail == (
         "同じ名前の entry point が複数あります: Fakelang.Kotlin-Dist, fakelang_kotlin-dist"
     )
+
+
+def _site_module(tmp_path: Path, name: str) -> Path:
+    return tmp_path / "site" / f"fakelang_{name}.py"
+
+
+def test_changed_content_with_the_same_version_is_not_imported(
+    install: Installer, tmp_path: Path
+) -> None:
+    marker = install("kotlin")
+    enabled = enabled_of("kotlin")
+    with _site_module(tmp_path, "kotlin").open("a", encoding="utf-8") as module:
+        module.write("# 差し替え\n")
+    states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
+    failure = failure_of(
+        {s.name: s for s in states if isinstance(s, LanguageUnavailable)}, "kotlin"
+    )
+    assert failure.reason_kind is ReasonKind.VALIDATION_ERROR
+    assert "承認のあと、配布の中身が変わっています" in failure.detail
+    assert "jigane languages enable kotlin" in failure.detail
+    assert not marker.exists()
+
+
+def test_missing_file_is_not_imported(install: Installer, tmp_path: Path) -> None:
+    marker = install("kotlin")
+    enabled = enabled_of("kotlin")
+    _site_module(tmp_path, "kotlin").unlink()
+    states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
+    failures = [s for s in states if isinstance(s, LanguageUnavailable)]
+    assert [f.name for f in failures] == ["kotlin"]
+    assert "承認のあと、配布の中身が変わっています" in failures[0].detail
+    assert not marker.exists()
+
+
+def test_added_file_is_not_imported(install: Installer, tmp_path: Path) -> None:
+    marker = install("kotlin")
+    enabled = enabled_of("kotlin")
+    record = tmp_path / "site" / "fakelang_kotlin_dist-1.0.dist-info" / "RECORD"
+    (tmp_path / "site" / "extra.py").write_text("", encoding="utf-8")
+    record.write_text(record.read_text(encoding="utf-8") + "extra.py,,\n", encoding="utf-8")
+    states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
+    failures = [s for s in states if isinstance(s, LanguageUnavailable)]
+    assert [f.name for f in failures] == ["kotlin"]
+    assert "承認のあと、配布の中身が変わっています" in failures[0].detail
+    assert not marker.exists()
+
+
+def test_approval_without_files_is_read_but_not_imported(
+    install: Installer, tmp_path: Path
+) -> None:
+    marker = install("kotlin")
+    path = tmp_path / "languages.json"
+    path.write_text(
+        json.dumps(
+            {
+                "enabled": [
+                    {"name": "kotlin", "distribution": "fakelang_kotlin-dist", "version": "1.0"}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    states = discover(entry_points_in(tmp_path), load_enabled(path), registry.builtin_plugins())
+    failures = [s for s in states if isinstance(s, LanguageUnavailable)]
+    assert [f.name for f in failures] == ["kotlin"]
+    assert failures[0].reason_kind is ReasonKind.VALIDATION_ERROR
+    assert "旧い形" in failures[0].detail
+    assert "jigane languages enable kotlin" in failures[0].detail
+    assert not marker.exists()
+
+
+_STORED_FILE = """\
+{
+  "enabled": [
+    {
+      "name": "kotlin",
+      "distribution": "fakelang-kotlin-dist",
+      "version": "1.0",
+      "files": {
+        "fakelang_kotlin.py": "%(digest)s",
+        "fakelang_kotlin_dist-1.0.dist-info/METADATA": "%(digest)s"
+      }
+    },
+    {
+      "name": "go",
+      "distribution": "g",
+      "version": "2"
+    }
+  ]
+}
+"""
+
+
+def test_stored_file_is_written_back_unchanged(tmp_path: Path) -> None:
+    # 保存の形（キーと値）は、中身を記録する型を足す前から変えない
+    text = _STORED_FILE % {"digest": "a" * 64}
+    source = tmp_path / "in.json"
+    source.write_text(text, encoding="utf-8")
+    loaded = load_enabled(source)
+    assert [type(entry.content) for entry in loaded] == [ApprovedContent, LegacyApproval]
+    target = tmp_path / "out.json"
+    save_enabled(target, loaded)
+    assert target.read_text(encoding="utf-8") == text
+
+
+def test_discover_tells_current_legacy_and_changed_content_apart(
+    install: Installer, tmp_path: Path
+) -> None:
+    install("kotlin")
+    install("go", suffixes=(".go",))
+    install("zig", suffixes=(".zig",))
+    kotlin = approved("kotlin").to_json()
+    changed = approved("zig").to_json()
+    files = changed["files"]
+    assert isinstance(files, dict)
+    changed["files"] = dict.fromkeys(files, "0" * 64)
+    legacy = {"name": "go", "distribution": "fakelang-go-dist", "version": "1.0"}
+    path = tmp_path / "languages.json"
+    path.write_text(json.dumps({"enabled": [kotlin, legacy, changed]}), encoding="utf-8")
+    states = discover(entry_points_in(tmp_path), load_enabled(path), registry.builtin_plugins())
+    by_name = {
+        (s.plugin.adapter.name if isinstance(s, LanguageReady) else s.name): s for s in states
+    }
+    assert isinstance(by_name["kotlin"], LanguageReady)
+    assert "旧い形" in failure_of(by_name, "go").detail
+    assert "承認のあと、配布の中身が変わっています" in failure_of(by_name, "zig").detail
+
+
+def test_distribution_without_record_cannot_be_approved(
+    install: Installer, tmp_path: Path
+) -> None:
+    install("kotlin")
+    (tmp_path / "site" / "fakelang_kotlin_dist-1.0.dist-info" / "RECORD").unlink()
+    with pytest.raises(RecordError, match="RECORD が無く"):
+        approved("kotlin")
+
+
+def test_matching_content_is_imported(install: Installer, tmp_path: Path) -> None:
+    marker = install("kotlin")
+    # 承認の後に pyc ができても、中身は変わらない
+    pycache = tmp_path / "site" / "__pycache__"
+    enabled = enabled_of("kotlin")
+    pycache.mkdir()
+    (pycache / "fakelang_kotlin.cpython-312.pyc").write_bytes(b"x")
+    record = tmp_path / "site" / "fakelang_kotlin_dist-1.0.dist-info" / "RECORD"
+    record.write_text(
+        record.read_text(encoding="utf-8") + "__pycache__/fakelang_kotlin.cpython-312.pyc,,\n",
+        encoding="utf-8",
+    )
+    states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
+    assert any(isinstance(s, LanguageReady) and s.plugin.adapter.name == "kotlin" for s in states)
+    assert marker.exists()

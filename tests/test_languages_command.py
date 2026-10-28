@@ -1,12 +1,14 @@
+import hashlib
 import io
 import json
 from pathlib import Path
 
 import pytest
-from language_plugin_support import Installer
+from language_plugin_support import Installer, approved, legacy_record
 
 from jigane import commands
 from jigane.languages import registry
+from jigane.languages.plugins import EnabledLanguage
 from jigane.skills.policy_figures import REGISTRY, LanguageAgnostic
 
 NOTICE_TRUST = (
@@ -20,11 +22,21 @@ def _languages_file(tmp_path: Path) -> Path:
     return tmp_path / "home" / "languages.json"
 
 
-def _write_enabled(tmp_path: Path, *pairs: tuple[str, str]) -> None:
+def _write_records(tmp_path: Path, records: list[EnabledLanguage]) -> None:
     path = _languages_file(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    entries = [{"name": name, "distribution": dist, "version": "1.0"} for name, dist in pairs]
+    entries = [record.to_json() for record in records]
     path.write_text(json.dumps({"enabled": entries}), encoding="utf-8")
+
+
+def _write_enabled(tmp_path: Path, *pairs: tuple[str, str]) -> None:
+    """site に入っている配布を、今の中身で承認した languages.json を書く。"""
+    _write_records(tmp_path, [approved(name, dist) for name, dist in pairs])
+
+
+def _write_not_installed(tmp_path: Path, *pairs: tuple[str, str]) -> None:
+    """site に入っていない配布の、旧い形の承認を書く。"""
+    _write_records(tmp_path, [legacy_record(name, dist) for name, dist in pairs])
 
 
 def _enable(argv: list[str], answer: str = "y", *, terminal: bool = True) -> int:
@@ -126,9 +138,16 @@ def test_enable_writes_after_validation_and_prints_notices(
     assert "fakelang-zig-dist 1.0" in captured.err
     assert NOTICE_GRAMMAR in captured.out
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
-    assert saved == {
-        "enabled": [{"name": "zig", "distribution": "fakelang-zig-dist", "version": "1.0"}]
-    }
+    assert saved == {"enabled": [approved("zig", "fakelang-zig-dist").to_json()]}
+    (entry,) = saved["enabled"]
+    # RECORD 自身は含めず、含める中身は承認の時にディスクから数えた sha256
+    assert sorted(entry["files"]) == [
+        "fakelang_zig.py",
+        "fakelang_zig_dist-1.0.dist-info/METADATA",
+        "fakelang_zig_dist-1.0.dist-info/entry_points.txt",
+    ]
+    module = tmp_path / "site" / "fakelang_zig.py"
+    assert entry["files"]["fakelang_zig.py"] == hashlib.sha256(module.read_bytes()).hexdigest()
 
 
 def test_enable_does_not_write_when_validation_fails(
@@ -166,19 +185,33 @@ def test_enable_requires_distribution_when_several_provide_the_name(
     assert not _languages_file(tmp_path).exists()
     assert _enable(["languages", "enable", "zig", "--distribution", "Second_Dist"]) == 0
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
-    assert saved == {"enabled": [{"name": "zig", "distribution": "second-dist", "version": "1.0"}]}
+    assert saved == {"enabled": [approved("zig", "second-dist").to_json()]}
+
+
+def test_enable_json_output_has_only_the_three_keys(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    assert _enable(["languages", "enable", "zig", "--json"]) == 0
+    printed = json.loads(capsys.readouterr().out)
+    # 中身（files）は languages.json にだけ書き、標準出力の形には出さない
+    assert printed == {
+        "enabled": {"name": "zig", "distribution": "fakelang-zig-dist", "version": "1.0"}
+    }
+    saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
+    assert "files" in saved["enabled"][0]
 
 
 def test_enable_keeps_existing_entries(install: Installer, tmp_path: Path) -> None:
     install("zig")
-    _write_enabled(tmp_path, ("other", "other-dist"))
+    _write_not_installed(tmp_path, ("other", "other-dist"))
     assert _enable(["languages", "enable", "zig"]) == 0
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
     assert [entry["name"] for entry in saved["enabled"]] == ["other", "zig"]
 
 
 def test_disable_removes_the_pair(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _write_enabled(tmp_path, ("zig", "zig-dist"), ("go", "go-dist"))
+    _write_not_installed(tmp_path, ("zig", "zig-dist"), ("go", "go-dist"))
     assert commands.main(["languages", "disable", "zig"]) == 0
     assert "外しました" in capsys.readouterr().out
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
@@ -227,9 +260,7 @@ def test_enable_again_does_not_import_or_duplicate(
     assert _enable(["languages", "enable", "zig"], terminal=False) == 0
     assert "既に有効" in capsys.readouterr().out
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
-    assert saved == {
-        "enabled": [{"name": "zig", "distribution": "fakelang-zig-dist", "version": "1.0"}]
-    }
+    assert saved == {"enabled": [approved("zig", "fakelang-zig-dist").to_json()]}
 
 
 def test_enable_adds_another_distribution_with_the_same_name(
@@ -258,7 +289,51 @@ def test_enable_after_an_upgrade_asks_again_and_replaces_the_old_version(
     assert _enable(["languages", "enable", "zig"]) == 0
     assert "fakelang-zig-dist 1.0" in capsys.readouterr().err
     saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved == {"enabled": [{**old, "version": "1.0"}]}
+    assert saved == {"enabled": [approved("zig", "fakelang-zig-dist").to_json()]}
+
+
+def test_enable_after_the_content_changes_asks_again_and_replaces_the_files(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    path = _languages_file(tmp_path)
+    _write_enabled(tmp_path, ("zig", "fakelang-zig-dist"))
+    old = json.loads(path.read_text(encoding="utf-8"))
+    module = tmp_path / "site" / "fakelang_zig.py"
+    module.write_text(module.read_text(encoding="utf-8") + "# 改変\n", encoding="utf-8")
+    # 名前も版も同じでも、中身が違う承認は有効な承認に数えず、断れば記録は変わらない
+    assert _enable(["languages", "enable", "zig"], "n") != 0
+    assert json.loads(path.read_text(encoding="utf-8")) == old
+    capsys.readouterr()
+    assert _enable(["languages", "enable", "zig"]) == 0
+    captured = capsys.readouterr()
+    assert "既に有効" not in captured.out
+    assert NOTICE_TRUST in captured.err
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved == {"enabled": [approved("zig", "fakelang-zig-dist").to_json()]}
+    (entry,) = saved["enabled"]
+    assert entry["files"]["fakelang_zig.py"] == hashlib.sha256(module.read_bytes()).hexdigest()
+    assert entry["files"] != old["enabled"][0]["files"]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_enable_without_a_record_fails_before_asking_or_importing(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str], *, existing: bool
+) -> None:
+    marker = install("zig")
+    path = _languages_file(tmp_path)
+    if existing:
+        _write_not_installed(tmp_path, ("other", "other-dist"))
+    before = path.read_bytes() if existing else None
+    (tmp_path / "site" / "fakelang_zig_dist-1.0.dist-info" / "RECORD").unlink()
+    # y と答える端末で走らせる。確認まで進めば NOTICE_TRUST が出るので、手前で止まったことが分かる
+    assert _enable(["languages", "enable", "zig"]) != 0
+    captured = capsys.readouterr()
+    assert "RECORD" in captured.err
+    assert NOTICE_TRUST not in captured.err
+    assert not marker.exists()
+    assert (path.read_bytes() if existing else None) == before
+    assert path.exists() == existing
 
 
 @pytest.mark.parametrize("answer", ["n", "", "no", "yes please"])
@@ -310,7 +385,9 @@ def test_enable_accepts_yes_answers(install: Installer, answer: str) -> None:
 def test_disable_requires_distribution_when_several_are_enabled(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write_enabled(tmp_path, ("zig", "first-dist"), ("zig", "second-dist"), ("go", "go-dist"))
+    _write_not_installed(
+        tmp_path, ("zig", "first-dist"), ("zig", "second-dist"), ("go", "go-dist")
+    )
     assert commands.main(["languages", "disable", "zig"]) != 0
     err = capsys.readouterr().err
     assert "first-dist" in err
@@ -328,7 +405,7 @@ def test_disable_requires_distribution_when_several_are_enabled(
 def test_disable_with_an_unmatched_distribution_changes_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write_enabled(tmp_path, ("zig", "zig-dist"))
+    _write_not_installed(tmp_path, ("zig", "zig-dist"))
     assert commands.main(["languages", "disable", "zig", "--distribution", "other"]) == 0
     assert "有効にしていません" in capsys.readouterr().out
     assert len(json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))["enabled"]) == 1
@@ -349,7 +426,7 @@ def test_unavailable_row_names_the_approved_distribution_as_owner(
 def test_unavailable_row_without_entry_point_uses_the_recorded_distribution(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write_enabled(tmp_path, ("ghost", "ghost-dist"))
+    _write_not_installed(tmp_path, ("ghost", "ghost-dist"))
     row = _rows(capsys)["ghost"]
     assert row["reason_kind"] == "entry_point_missing"
     assert row["distribution"] == "ghost-dist"
@@ -478,3 +555,37 @@ def test_table_lists_supported_and_unsupported_figures_with_one_notice(
     ready_count = len(registry.adapters())
     assert out.count("対応する図:") == ready_count
     assert out.count("対応外の図:") == ready_count
+
+
+def test_enable_confirmation_shows_the_changed_files_when_only_the_content_differs(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    _write_enabled(tmp_path, ("zig", "fakelang-zig-dist"))
+    module = tmp_path / "site" / "fakelang_zig.py"
+    module.write_text(module.read_text(encoding="utf-8") + "# 改変\n", encoding="utf-8")
+    capsys.readouterr()
+    assert _enable(["languages", "enable", "zig"]) == 0
+    err = capsys.readouterr().err
+    assert "承認のあと、配布の中身が変わっています（変わった: fakelang_zig.py）" in err
+
+
+def test_enable_confirmation_says_why_for_a_record_in_the_old_form(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    _write_records(tmp_path, [legacy_record("zig", "fakelang-zig-dist")])
+    capsys.readouterr()
+    assert _enable(["languages", "enable", "zig"]) == 0
+    assert "旧い形の承認記録です（中身の照合ができません）" in capsys.readouterr().err
+
+
+def test_enable_confirmation_for_a_new_approval_shows_no_reason(
+    install: Installer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    capsys.readouterr()
+    assert _enable(["languages", "enable", "zig"]) == 0
+    err = capsys.readouterr().err
+    assert "承認のあと" not in err
+    assert "旧い形" not in err
