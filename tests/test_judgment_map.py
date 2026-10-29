@@ -7,10 +7,13 @@ from jigane.judgment_map.classification import (
     BotTouch,
     ChangeKind,
     FilePair,
+    FindingTouch,
     JudgmentMap,
     Segment,
     apply_bot_touches,
+    apply_static_findings,
     build_judgment_map,
+    build_regions,
     classify,
     file_line_counts,
 )
@@ -467,9 +470,35 @@ def test_public_interface_summary_for_each_declaration_kind(tmp_path: Path) -> N
         same("a.py"),
     )
     summaries = {r.qualified_name: r.summary for r in result.regions}
-    assert summaries["D"] == "公開のクラス `D` を追加"
+    assert summaries["D"] == "公開の型 `D` を追加"
     assert summaries["D.m"] == "公開のメソッド `m` を追加"
     assert summaries["V"] == "公開の変数 `V` を追加"
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "types"),
+    [
+        (
+            "a.swift",
+            "public enum E {\n    case a\n}\n\npublic struct S {}\n\npublic actor A {}\n",
+            ["E", "S", "A"],
+        ),
+        ("E.java", "public enum E {\n    A;\n}\n", ["E"]),
+        (
+            "a.cs",
+            "public enum E {\n    A\n}\n\npublic struct S {}\n\npublic record R(int X);\n",
+            ["E", "S", "R"],
+        ),
+    ],
+)
+def test_every_type_declaration_is_summarized_as_a_type(
+    tmp_path: Path, name: str, source: str, types: list[str]
+) -> None:
+    # 宣言の種別 class は、enum、struct、actor、record を含む型の宣言のすべてを指す
+    result = build(tmp_path, {name: ""}, {name: source}, same(name))
+    summaries = {r.qualified_name: r.summary for r in result.regions}
+    for type_name in types:
+        assert summaries[type_name] == f"公開の型 `{type_name}` を追加"
 
 
 def test_appending_an_element_to_an_existing_variable_is_a_change(tmp_path: Path) -> None:
@@ -1080,7 +1109,9 @@ def test_map_v1_upgrade_fills_change_kind_from_the_spans(
 
     upgraded = _upgrade_v1(old_map)
 
-    assert Segment.from_dict(upgraded["segments"][0]).change_kind is expected
+    # static_finding_ids は版 4 の欄で、版 1 の移しの範囲ではない
+    segment = {**upgraded["segments"][0], "static_finding_ids": []}
+    assert Segment.from_dict(segment).change_kind is expected
 
 
 def test_comment_added_outside_any_declaration_is_comment_only(tmp_path: Path) -> None:
@@ -1130,3 +1161,105 @@ def test_two_declarations_are_classified_apart(tmp_path: Path) -> None:
         (Kind.LOGIC, "f"),
         (Kind.COMMENT_ONLY, "g"),
     ]
+
+
+def finding(
+    finding_id: str, path: str, start: int, end: int, *, raises: bool = True
+) -> FindingTouch:
+    return FindingTouch(finding_id, path, start, end, raises)
+
+
+def test_apply_static_findings_raises_confirm_for_error_and_warning() -> None:
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.LOGIC)], [finding("S1", "a.py", 5, 9)]
+    )
+    assert overlay.segments[0].kind == Kind.STATIC_FINDING
+    assert overlay.segments[0].level == Level.REQUIRED
+    assert overlay.segments[0].static_finding_ids == ("S1",)
+    assert overlay.outside_count == 0
+
+
+def test_apply_static_findings_only_labels_for_note_and_none() -> None:
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.LOGIC)], [finding("S1", "a.py", 4, 4, raises=False)]
+    )
+    assert overlay.segments[0].kind == Kind.LOGIC
+    assert overlay.segments[0].level == Level.CONFIRM
+    assert overlay.segments[0].static_finding_ids == ("S1",)
+    assert overlay.outside_count == 0
+
+
+def test_apply_static_findings_raises_when_any_finding_raises() -> None:
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.LOGIC)],
+        [finding("S2", "a.py", 4, 4, raises=False), finding("S1", "a.py", 3, 3)],
+    )
+    assert overlay.segments[0].kind == Kind.STATIC_FINDING
+    assert overlay.segments[0].static_finding_ids == ("S1", "S2")
+
+
+def test_apply_static_findings_orders_ids_by_number() -> None:
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.LOGIC)],
+        [finding("S10", "a.py", 3, 3), finding("S2", "a.py", 4, 4)],
+    )
+    assert overlay.segments[0].static_finding_ids == ("S2", "S10")
+
+
+def test_apply_static_findings_keeps_kind_of_required_segment() -> None:
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.SENSITIVE_LOGIC)], [finding("S1", "a.py", 3, 3)]
+    )
+    assert overlay.segments[0].kind == Kind.SENSITIVE_LOGIC
+    assert overlay.segments[0].static_finding_ids == ("S1",)
+
+
+def test_apply_static_findings_counts_findings_outside_the_diff() -> None:
+    segments = [segment_at("a.py", 3, 5, Kind.LOGIC)]
+    overlay = apply_static_findings(
+        segments,
+        [
+            finding("S1", "b.py", 4, 4),
+            finding("S2", "a.py", 6, 8),
+            finding("S3", "a.py", 1, 2),
+            finding("S4", "a.py", 5, 5),
+        ],
+    )
+    assert overlay.outside_count == 3
+    assert overlay.segments[0].static_finding_ids == ("S4",)
+
+
+def test_apply_static_findings_counts_a_finding_over_two_segments_once() -> None:
+    segments = [segment_at("a.py", 3, 4, Kind.LOGIC), segment_at("a.py", 7, 8, Kind.LOGIC)]
+    overlay = apply_static_findings(segments, [finding("S1", "a.py", 1, 20)])
+    assert overlay.outside_count == 0
+    assert [s.static_finding_ids for s in overlay.segments] == [("S1",), ("S1",)]
+
+
+def test_static_finding_line_counts_not_doubled() -> None:
+    segments = [
+        segment_at("a.py", 3, 5, Kind.LOGIC, count=2),
+        segment_at("a.py", 9, 9, Kind.SENSITIVE_LOGIC),
+    ]
+    overlay = apply_static_findings(
+        segments,
+        [finding("S1", "a.py", 4, 4), finding("S2", "a.py", 3, 5), finding("S3", "a.py", 9, 9)],
+    )
+    counts = JudgmentMap(StoredMode.DIFF, list(overlay.segments)).line_counts()
+    assert counts.by_kind["static_finding"] == 2
+    assert counts.by_kind["logic"] == 0
+    assert counts.by_kind["sensitive_logic"] == 1
+    assert sum(counts.by_kind.values()) == 3
+    assert sum(counts.by_level.values()) == 3
+
+
+def test_region_summary_for_policy_lists_only_the_finding_count(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x\n" * 6, encoding="utf-8")
+    overlay = apply_static_findings(
+        [segment_at("a.py", 3, 5, Kind.LOGIC)],
+        [finding("S1", "a.py", 4, 4), finding("S2", "a.py", 5, 5)],
+    )
+    regions = build_regions(overlay.segments, tmp_path, tmp_path)
+    assert regions[0].kind == Kind.STATIC_FINDING
+    assert regions[0].summary == "静的検査の指摘 2 件（`f`）"
+    assert "S1" not in json.dumps(regions[0].to_dict(), ensure_ascii=False)

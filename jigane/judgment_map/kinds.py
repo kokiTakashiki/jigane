@@ -13,6 +13,7 @@ class Kind(StrEnum):
     DEPENDENCY_BUILD = "dependency_build"
     BEHAVIOR_REMOVAL = "behavior_removal"
     BOT_RESPONSE = "bot_response"
+    STATIC_FINDING = "static_finding"
 
 
 class StoredMode(StrEnum):
@@ -41,6 +42,7 @@ LEVEL_OF_KIND: dict[Kind, Level] = {
     Kind.BEHAVIOR_REMOVAL: Level.REQUIRED,
     Kind.SENSITIVE_LOGIC: Level.REQUIRED,
     Kind.BOT_RESPONSE: Level.REQUIRED,
+    Kind.STATIC_FINDING: Level.REQUIRED,
     Kind.TEST: Level.CONFIRM,
     Kind.LOGIC: Level.CONFIRM,
     Kind.COMMENT_ONLY: Level.MACHINE,

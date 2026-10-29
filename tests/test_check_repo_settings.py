@@ -164,8 +164,6 @@ TAG_RULES = "repos/o/r/rules/tags"
 TAG_SCOPE = "repos/o/r/rulesets/tag-scope"
 ENVIRONMENT = "repos/o/r/environments/pypi"
 ENVIRONMENT_POLICIES = "repos/o/r/environments/pypi/deployment-branch-policies"
-TESTPYPI_ENVIRONMENT = "repos/o/r/environments/testpypi"
-TESTPYPI_ENVIRONMENT_POLICIES = "repos/o/r/environments/testpypi/deployment-branch-policies"
 
 
 @pytest.mark.parametrize("missing", ["creation", "update", "deletion"])
@@ -203,8 +201,9 @@ def test_pypi_environment_expects_reviewers_and_no_admin_bypass() -> None:
     assert_environment_expects_reviewers_and_no_admin_bypass(ENVIRONMENT)
 
 
-def test_testpypi_environment_expects_reviewers_and_no_admin_bypass() -> None:
-    assert_environment_expects_reviewers_and_no_admin_bypass(TESTPYPI_ENVIRONMENT)
+def test_public_does_not_expect_testpypi_environment() -> None:
+    # environment testpypi は配布の方式を替える試しの間だけ作り、試しの後に消す
+    assert not any("environments/testpypi" in endpoint for endpoint in SETTINGS["public"])
 
 
 def assert_environment_expects_reviewers_and_no_admin_bypass(endpoint: str) -> None:
@@ -237,27 +236,6 @@ def test_pypi_deployment_must_be_tag_v_star_only(policies: list[dict[str, str]])
     differences = checker.find_differences(SETTINGS["public"], "o/r", reader(responses))
     assert differences != []
     assert all(difference.startswith(f"{ENVIRONMENT_POLICIES}: ") for difference in differences)
-
-
-@pytest.mark.parametrize(
-    "policies",
-    [
-        [{"name": "main", "type": "branch"}, {"name": "v*", "type": "tag"}],
-        [{"name": "v*", "type": "tag"}],
-        [{"name": "*", "type": "branch"}],
-    ],
-)
-def test_testpypi_deployment_must_be_main_branch_only(policies: list[dict[str, str]]) -> None:
-    responses = build_responses("public")
-    responses[TESTPYPI_ENVIRONMENT_POLICIES] = {
-        "total_count": len(policies),
-        "branch_policies": policies,
-    }
-    differences = checker.find_differences(SETTINGS["public"], "o/r", reader(responses))
-    assert differences != []
-    assert all(
-        difference.startswith(f"{TESTPYPI_ENVIRONMENT_POLICIES}: ") for difference in differences
-    )
 
 
 def test_tag_scope_collects_include_and_bypass_of_active_tag_rulesets() -> None:

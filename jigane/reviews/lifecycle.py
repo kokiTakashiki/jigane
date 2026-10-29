@@ -22,6 +22,7 @@ from jigane.judgment_map.changes import CHANGES_CHAR_LIMIT, CHANGES_FILE, render
 from jigane.judgment_map.classification import (
     BotTouch,
     FilePair,
+    FindingTouch,
     JudgmentMap,
     build_judgment_map,
     file_line_counts,
@@ -61,7 +62,21 @@ from jigane.pull_request_context.fetching import (
     fetch_pull_request,
     parse_pull_request_url,
 )
-from jigane.storage.review_error import ReviewError as ReviewError  # noqa: PLC0414 他のモジュールが jigane.reviews.lifecycle から再エクスポートとして取り込む
+from jigane.static_analysis.intake import (
+    NO_STATIC,
+    STATIC_FINDINGS_FILE,
+    SarifRequest,
+    StaticFindingsStore,
+    StaticSelection,
+    import_sarif,
+    select_for_refresh,
+    static_to_save,
+    static_touches,
+    static_warnings,
+)
+from jigane.storage.review_error import (
+    ReviewError as ReviewError,  # noqa: PLC0414 他のモジュールが jigane.reviews.lifecycle から再エクスポートとして取り込む
+)
 from jigane.storage.review_error import ReviewExistsError
 from jigane.storage.store import (
     ReviewId,
@@ -738,6 +753,8 @@ class ContentBase[OriginT: ReviewOrigin]:
     background: Background | None = None
     # 作る側が種類ごとの出所の型で直接渡す
     origin: OriginT = field(kw_only=True)
+    # 一回の組み立てで使った指摘。書くかどうかは種類で決まる（static_to_save）
+    static: StaticSelection = field(default=NO_STATIC, kw_only=True)
 
     @property
     def warnings(self) -> list[str]:
@@ -793,6 +810,16 @@ def map_kind_of(content: Content) -> JudgmentMapKind:
             return DesignDocMap.of(content.section_map, content.judgment_map)
         case _:
             assert_never(origin)
+
+
+def _write_static_findings(directory: Path, store: StaticFindingsStore | None) -> None:
+    if store is None:
+        # 保存済みの指摘を重ねただけ、重ねなかった、または SARIF を渡していないので、書き換えない
+        return
+    write_text_atomic(
+        directory / STATIC_FINDINGS_FILE,
+        json.dumps(store.to_dict(), ensure_ascii=False, indent=2),
+    )
 
 
 def save_review(
@@ -861,6 +888,7 @@ def save_review(
     write_text_atomic(
         directory / MAP_FILE, json.dumps(dump_map(map_kind), ensure_ascii=False, indent=2)
     )
+    _write_static_findings(directory, static_to_save(content.static))
     if isinstance(content, PullRequestContent):
         bot_analysis = content.bot_analysis
         region_keys: dict[int, list[str]] = {}
@@ -878,25 +906,41 @@ def save_review(
     return review, region_changes
 
 
-def judge_files(root: Path, files: list[str]) -> JudgmentMap:
+def judge_files(root: Path, files: list[str], touches: Sequence[FindingTouch] = ()) -> JudgmentMap:
     """ファイル全体を判断の地図にする。機能と設計書のレビューが共有する。"""
     pairs = [FilePair(None, file) for file in files]
-    return build_judgment_map(None, root, pairs, load_config(root))
+    return build_judgment_map(None, root, pairs, load_config(root), finding_touches=touches)
+
+
+def _head_commit(root: Path) -> str:
+    """機能のレビューには変更後のコミットが無いので、HEAD を解析したコミットとみなす。"""
+    try:
+        return _git(root, "rev-parse", "HEAD").strip()
+    except process.CommandError as error:
+        raise ReviewError(f"HEAD を解けません: {root}") from error
 
 
 def _build_feature_content(
     root: Path,
     targets: list[Path],
     intent: Declaration | None,
+    static: StaticSelection = NO_STATIC,
 ) -> ReviewContent:
     files = _enumerate_files(root, targets)
     if not files:
         raise ReviewError("対象のファイルがありません")
     declaration = intent if intent is not None else extract_declaration(root, files)
-    judgment_map = judge_files(root, files)
+    judgment_map = judge_files(root, files, static_touches(static))
     relative = tuple(target.relative_to(root).as_posix() for target in targets)
     origin = FeatureOrigin(relative)
-    return ReviewContent(tuple(files), declaration, (), judgment_map, origin=origin)
+    return ReviewContent(
+        tuple(files),
+        declaration,
+        static_warnings(static),
+        judgment_map,
+        origin=origin,
+        static=static,
+    )
 
 
 def read_intent(
@@ -1032,14 +1076,44 @@ def _install_staging(staging: Path, final: Path, review_id: ReviewId) -> None:
         raise
 
 
+@dataclass(frozen=True)
+class ReviewInputs:
+    """レビューを作る入口と作り直す入口が、本体の引数のほかに受ける追加の入力。
+
+    入力を足すときはここへ欄を足す。PR の入口は意図を受けないので、この型だけを受ける。
+    """
+
+    sarif: SarifRequest | None = None
+
+
+@dataclass(frozen=True)
+class DeclaredInputs(ReviewInputs):
+    """意図の宣言を利用者の文で渡せる入口（範囲、機能、refresh）の入力。"""
+
+    intent: str | None = None
+    intent_file: Path | None = None
+
+
+@dataclass(frozen=True)
+class RefreshInputs(ReviewInputs):
+    """意図を解き終えた後の refresh の入力。declaration_override は利用者が差し替えた宣言。"""
+
+    declaration_override: Declaration | None = None
+
+
+NO_REVIEW_INPUTS = ReviewInputs()
+NO_DECLARED_INPUTS = DeclaredInputs()
+NO_REFRESH_INPUTS = RefreshInputs()
+
+
 def create_feature_review(
     working_directory: Path,
     paths: list[str],
     name: str,
-    intent: str | None = None,
-    intent_file: Path | None = None,
+    inputs: DeclaredInputs = NO_DECLARED_INPUTS,
 ) -> Review:
-    declared = read_intent(working_directory, intent, intent_file)
+    sarif = inputs.sarif
+    declared = read_intent(working_directory, inputs.intent, inputs.intent_file)
     targets = [(working_directory / path).resolve() for path in paths]
     repository = _repository_of_targets(working_directory, targets)
     review_id = _new_review_id(repository.owner, repository.repo, name, ReviewKind.FEATURE)
@@ -1047,7 +1121,8 @@ def create_feature_review(
     for target in targets:
         if not target.is_relative_to(root):
             raise ReviewError(f"対象がリポジトリの外にあります: {target}")
-    content = _build_feature_content(root, targets, declared)
+    static = import_sarif(sarif, _head_commit(root)) if sarif is not None else NO_STATIC
+    content = _build_feature_content(root, targets, declared, static)
     with _staging_directory(review_id) as staging:
         review, _ = save_review(
             review_id,
@@ -1068,9 +1143,12 @@ def _write_diff_materials(
     config: Config,
     *,
     touches: Sequence[BotTouch],
+    finding_touches: Sequence[FindingTouch] = (),
 ) -> tuple[JudgmentMap, list[str]]:
     """判断の地図を作り、changes.diff と pairs.json を書く。戻りの文字列は本文の上限の警告。"""
-    judgment_map = build_judgment_map(base_tree, head_tree, pairs, config, touches)
+    judgment_map = build_judgment_map(
+        base_tree, head_tree, pairs, config, touches, finding_touches
+    )
     changes, omitted_by_limit = render_changes(base_tree, head_tree, pairs, config)
     warnings: list[str] = []
     if omitted_by_limit:
@@ -1113,6 +1191,7 @@ def _build_pull_request_content(
     metadata: PullRequestMetadata,
     merge_base: str,
     stored_directory: Path,
+    static: StaticSelection = NO_STATIC,
 ) -> PullRequestContent:
     """二つのツリーと changes.diff を書き出し、保存する内容を組み立てる。"""
     base_tree = directory / BASE_TREE
@@ -1131,9 +1210,16 @@ def _build_pull_request_content(
     declaration = pull_request_declaration(metadata.title, metadata.body)
     warnings = bot_analysis.warnings()
     judgment_map, limit_warnings = _write_diff_materials(
-        directory, base_tree, head_tree, pairs, config, touches=bot_analysis.touches()
+        directory,
+        base_tree,
+        head_tree,
+        pairs,
+        config,
+        touches=bot_analysis.touches(),
+        finding_touches=static_touches(static),
     )
     warnings += limit_warnings
+    warnings += static_warnings(static)
     info = PullRequestInfo(
         url=metadata.url,
         number=metadata.number,
@@ -1150,18 +1236,23 @@ def _build_pull_request_content(
         background,
         bot_analysis,
         origin=PullRequestOrigin(info, source),
+        static=static,
     )
 
 
-def create_pull_request_review(url: str) -> Review:
+def create_pull_request_review(url: str, inputs: ReviewInputs = NO_REVIEW_INPUTS) -> Review:
+    sarif = inputs.sarif
     owner, repo, number = parse_pull_request_url(url)
     metadata = fetch_metadata(owner, repo, number)
     review_id = _new_review_id(owner, repo, str(number), ReviewKind.PULL_REQUEST)
     directory = review_id.directory()
     git_dir = ensure_repository_cache(owner, repo)
     merge_base = fetch_pull_request(git_dir, metadata)
+    static = import_sarif(sarif, metadata.head_sha) if sarif is not None else NO_STATIC
     with _staging_directory(review_id) as staging:
-        content = _build_pull_request_content(staging, git_dir, metadata, merge_base, directory)
+        content = _build_pull_request_content(
+            staging, git_dir, metadata, merge_base, directory, static
+        )
         review, _ = save_review(
             review_id, content, _now(), None, str(directory / HEAD_TREE), staging=staging
         )
@@ -1259,6 +1350,7 @@ def _build_range_content(
     intent: Declaration | None,
     *,
     stored_directory: Path,
+    static: StaticSelection = NO_STATIC,
 ) -> ReviewContent:
     base_tree = directory / BASE_TREE
     head_tree = directory / HEAD_TREE
@@ -1274,9 +1366,15 @@ def _build_range_content(
     )
     declaration = _range_declaration(root, resolved, intent)
     judgment_map, diff_warnings = _write_diff_materials(
-        directory, base_tree, head_tree, pairs, config, touches=()
+        directory,
+        base_tree,
+        head_tree,
+        pairs,
+        config,
+        touches=(),
+        finding_touches=static_touches(static),
     )
-    warnings = diff_warnings
+    warnings = [*diff_warnings, *static_warnings(static)]
     background = collect_range_background(root, base_tree, merge_base, pairs)
     return ReviewContent(
         tuple(pair.new_path for pair in pairs if pair.new_path is not None),
@@ -1285,6 +1383,7 @@ def _build_range_content(
         judgment_map,
         background=background,
         origin=RangeOrigin(LocalRange(range_text, str(root)), source),
+        static=static,
     )
 
 
@@ -1309,13 +1408,14 @@ def create_range_review(
     working_directory: Path,
     range_text: str,
     name: str | None = None,
-    intent: str | None = None,
-    intent_file: Path | None = None,
+    inputs: DeclaredInputs = NO_DECLARED_INPUTS,
 ) -> Review:
-    declared = read_intent(working_directory, intent, intent_file)
+    sarif = inputs.sarif
+    declared = read_intent(working_directory, inputs.intent, inputs.intent_file)
     repository = identify(working_directory)
     root = repository.root
     resolved = resolve_range(root, range_text)
+    static = import_sarif(sarif, resolved.head_sha) if sarif is not None else NO_STATIC
     resolved_name = (
         name if name is not None else default_range_name(resolved.head_name, resolved.head_sha)
     )
@@ -1323,7 +1423,13 @@ def create_range_review(
     directory = review_id.directory()
     with _staging_directory(review_id) as staging:
         content = _build_range_content(
-            root, staging, range_text, resolved, declared, stored_directory=directory
+            root,
+            staging,
+            range_text,
+            resolved,
+            declared,
+            stored_directory=directory,
+            static=static,
         )
         review, _ = save_review(
             review_id, content, _now(), None, str(directory / HEAD_TREE), staging=staging
@@ -1353,13 +1459,14 @@ def _refresh_diff_review(
     declare: Callable[[], RefreshResult],
     *,
     build_content: Callable[[], Content],
+    force_rebuild: bool = False,
 ) -> RefreshResult:
     """差分レビューの refresh の骨格。出所ごとの差は declare と build_content が持つ。
 
     declare は、ツリーが同じときに宣言などの変更を保存して返す。build_content は、
     ツリーが変わったときに全体を作り直す内容を組み立てる。
     """
-    if head_sha == source.head_sha and merge_base == source.merge_base:
+    if not force_rebuild and head_sha == source.head_sha and merge_base == source.merge_base:
         return _rebuild_stored_map(declare(), source)
     updated, region_changes = save_review(
         review.id, build_content(), review.created_at, _now(), review.repository_root
@@ -1367,7 +1474,8 @@ def _refresh_diff_review(
     return RefreshResult(updated, updated=True, region_changes=region_changes)
 
 
-def refresh_pull_request(review: Review) -> RefreshResult:
+def refresh_pull_request(review: Review, inputs: ReviewInputs = NO_REVIEW_INPUTS) -> RefreshResult:
+    sarif = inputs.sarif
     origin = review.origin
     if not isinstance(origin, PullRequestOrigin):
         raise ReviewError(f"PR の出所でない記録を PR として refresh できません: {review.id}")
@@ -1387,14 +1495,29 @@ def refresh_pull_request(review: Review) -> RefreshResult:
         merge_base,
         declare,
         build_content=lambda: _build_pull_request_content(
-            review.id.directory(), git_dir, metadata, merge_base, review.id.directory()
+            review.id.directory(),
+            git_dir,
+            metadata,
+            merge_base,
+            review.id.directory(),
+            _refresh_static(review, metadata.head_sha, sarif),
         ),
+        force_rebuild=sarif is not None,
     )
 
 
+def _refresh_static(review: Review, commit: str, sarif: SarifRequest | None) -> StaticSelection:
+    """作り直しで使う指摘。--sarif があれば置き換え、無ければ select_for_refresh に任せる。"""
+    replacement = import_sarif(sarif, commit) if sarif is not None else None
+    return select_for_refresh(review.id.directory(), commit, replacement)
+
+
 def refresh_range(
-    review: Review, declaration_override: Declaration | None = None
+    review: Review,
+    inputs: RefreshInputs = NO_REFRESH_INPUTS,
 ) -> RefreshResult:
+    declaration_override = inputs.declaration_override
+    sarif = inputs.sarif
     origin = review.origin
     if not isinstance(origin, RangeOrigin):
         raise ReviewError(f"範囲の出所でない記録を範囲として refresh できません: {review.id}")
@@ -1437,7 +1560,9 @@ def refresh_range(
             resolved,
             kept,
             stored_directory=review.id.directory(),
+            static=_refresh_static(review, resolved.head_sha, sarif),
         ),
+        force_rebuild=sarif is not None,
     )
 
 
@@ -1463,8 +1588,15 @@ def _rebuild_stored_map(refreshed: RefreshResult, source: DiffSource) -> Refresh
     bot_analysis = (
         _stored_bot_analysis(directory) if review.is_pull_request else bots.BotAnalysis()
     )
+    # 保存した指摘は、解析したコミットが変更後のコミットと同じときだけ重なる
+    static = select_for_refresh(directory, source.head_sha, None)
     judgment_map = build_judgment_map(
-        base_tree, head_tree, load_pairs(review.id), config, bot_analysis.touches()
+        base_tree,
+        head_tree,
+        load_pairs(review.id),
+        config,
+        bot_analysis.touches(),
+        static_touches(static),
     )
     gates = update_gates(
         directory,
@@ -1568,7 +1700,10 @@ def _refresh_declaration(
 
 
 def refresh_from_content(
-    review: Review, build_content: Callable[[], ReviewContent | DesignDocContent]
+    review: Review,
+    build_content: Callable[[], ReviewContent | DesignDocContent],
+    *,
+    force_save: bool = False,
 ) -> RefreshResult:
     """内容を組み立て直し、変わっていれば保存する更新の骨格。種類によらず一つだけ持つ。
 
@@ -1584,13 +1719,17 @@ def refresh_from_content(
         load_catalog(),
         renames=content.judgment_map.renames,
     )
-    if review.origin == content.origin and _same_content(
-        review,
-        content.paths,
-        content.declaration,
-        content.content_warnings,
-        map_kind_of(content),
-        gates=gates,
+    if (
+        not force_save
+        and review.origin == content.origin
+        and _same_content(
+            review,
+            content.paths,
+            content.declaration,
+            content.content_warnings,
+            map_kind_of(content),
+            gates=gates,
+        )
     ):
         return RefreshResult(review, updated=False, region_changes=RegionChanges([], [], []))
     updated, region_changes = save_review(
@@ -1600,8 +1739,11 @@ def refresh_from_content(
 
 
 def refresh_feature(
-    review: Review, declaration_override: Declaration | None = None
+    review: Review,
+    inputs: RefreshInputs = NO_REFRESH_INPUTS,
 ) -> RefreshResult:
+    declaration_override = inputs.declaration_override
+    sarif = inputs.sarif
     origin = review.origin
     if not isinstance(origin, FeatureOrigin):
         raise ReviewError(f"機能の出所でない記録を機能として refresh できません: {review.id}")
@@ -1618,7 +1760,16 @@ def refresh_feature(
             root,
             [root / target for target in targets],
             _kept_declaration(review, declaration_override),
+            _refresh_static(
+                review,
+                # 保存した指摘も SARIF も無い機能のレビューは、git の外でも作り直せる
+                _head_commit(root)
+                if sarif is not None or (review.id.directory() / STATIC_FINDINGS_FILE).is_file()
+                else "",
+                sarif,
+            ),
         ),
+        force_save=sarif is not None,
     )
 
 

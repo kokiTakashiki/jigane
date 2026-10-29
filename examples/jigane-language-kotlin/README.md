@@ -10,6 +10,16 @@ jigane に外のパッケージから言語を足す例です。Kotlin の宣言
 
 プラグインが import するのは、公開の窓口 `jigane.languages.api` だけです。jigane の内部のモジュールには依存しません。
 
+## 例で扱わないこと
+
+この例は、公開の窓口 `jigane.languages.api` の安定した口だけを使う形を示すため、次のものを持ちません。
+
+- 技術の表（`jigane technology-list`）：import の口（`ImportAdapter` の `imports` と `technology_of`）を実装していないので、Kotlin のファイルの import を読みません。Kotlin のファイルだけを変えた差分では、import が無いと出ます。この口は試験的な段（`jigane.languages.api.capabilities`）にあり、jigane の版ごとに形が変わりえます。
+- flaky の検査（`jigane flaky`）：`LanguagePlugin.data` が `None` で、型の置き場（`flaky/queries/kotlin.toml`）を持たないので、Kotlin のテストに当てる型がありません。テストのパスの判定（`test` と `androidTest`）は通りますが、検出はしません。
+- シーケンス図などの宣言の一覧以外の図：それぞれの口を実装していません。
+
+足すときは、`jigane/languages/README.md` の外の言語の節にある口と資料の置き場に従います。
+
 ## 使い方
 
 jigane と同じ Python の環境に入れます。

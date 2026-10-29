@@ -16,9 +16,9 @@ from jigane.skills.mcp import McpSelection, mcp_config_path
 def test_load_warns_when_mcp_json_is_broadly_accessible(
     caplog: pytest.LogCaptureFixture, mode: int, warning_count: int
 ) -> None:
-    write_mcp(("owasp-mas",))
+    write_mcp(("mobile-sec",))
     mcp_config_path().chmod(mode)
     with caplog.at_level(logging.WARNING, logger="jigane.skills.mcp"):
-        selection = McpSelection.load(("owasp-mas",))
-    assert selection.names == ("owasp-mas",)
+        selection = McpSelection.load(("mobile-sec",))
+    assert selection.names == ("mobile-sec",)
     assert len([m for m in caplog.messages if "権限" in m]) == warning_count

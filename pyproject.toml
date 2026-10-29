@@ -1,6 +1,6 @@
 [project]
 name = "jigane"
-version = "0.1.2"
+version = "0.1.3"
 description = "GitHub の PR のレビューを助ける CLI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -9,7 +9,8 @@ dependencies = [
     # 0.26.0 のバインディングは、行数の多いファイルで節点の位置を壊し segfault する（0.25.2 では起きない）
     # dependabot は 0.26.0 だけを上げる対象から外している（.github/dependabot.yml）
     "tree-sitter>=0.25,<0.26",
-    "tree-sitter-language-pack>=1.22,<2",
+    # 文法の sha256（jigane/languages/grammar-hashes.json）はこの版の値なので、範囲で受けずに固定する
+    "tree-sitter-language-pack==1.22.1",
     "pydantic>=2.14.1,<3",
     "pathspec>=1.1.1",
     "jinja2>=3.1.6",
@@ -203,7 +204,7 @@ containers = ["jigane"]
 # 上の層から順に並べる。同じ層の中の兄弟は `:` で繋ぎ、互いの依存を禁じない（`|` は互いを禁じる）。
 layers = [
     "commands",
-    "design : flaky : judgment_map : llm_runs : policy_materials : pull_request_context : regex : reviews : sequence : skills : technology_list : publishing",
+    "design : flaky : judgment_map : llm_runs : policy_materials : pull_request_context : regex : reviews : sequence : skills : technology_list : publishing : static_analysis",
     "storage : groups : git : preconditions : gates : markdown : findings : languages : figures",
 ]
 # 層の契約に入っていないサブパッケージを落とす。足したサブパッケージはどれかの層に入れる。
@@ -232,9 +233,10 @@ policy_materials = ["design", "judgment_map", "reviews", "sequence"]
 publishing = ["reviews"]
 pull_request_context = ["judgment_map"]
 regex = ["judgment_map"]
-reviews = ["flaky", "judgment_map", "pull_request_context"]
+reviews = ["flaky", "judgment_map", "pull_request_context", "static_analysis"]
 sequence = ["judgment_map", "reviews"]
 skills = ["design", "judgment_map", "llm_runs", "policy_materials", "pull_request_context", "regex", "reviews", "sequence", "technology_list"]
+static_analysis = ["judgment_map"]
 technology_list = ["reviews"]
 
 # BEGIN GENERATED: sibling-contracts (scripts/generate_import_contracts.py)
@@ -391,6 +393,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -408,6 +411,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -427,6 +431,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -446,6 +451,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -461,6 +467,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -479,6 +486,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -497,6 +505,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -530,6 +539,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -540,6 +550,7 @@ source_modules = ["jigane.skills"]
 forbidden_modules = [
     "jigane.flaky",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -558,6 +569,7 @@ forbidden_modules = [
     "jigane.sequence",
     "jigane.skills",
     "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 
@@ -576,6 +588,26 @@ forbidden_modules = [
     "jigane.sequence",
     "jigane.skills",
     "jigane.technology_list",
+    "jigane.static_analysis",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "static_analysis は宣言した兄弟だけを読む"
+type = "forbidden"
+source_modules = ["jigane.static_analysis"]
+forbidden_modules = [
+    "jigane.design",
+    "jigane.flaky",
+    "jigane.llm_runs",
+    "jigane.policy_materials",
+    "jigane.pull_request_context",
+    "jigane.regex",
+    "jigane.reviews",
+    "jigane.sequence",
+    "jigane.skills",
+    "jigane.technology_list",
+    "jigane.publishing",
 ]
 allow_indirect_imports = true
 

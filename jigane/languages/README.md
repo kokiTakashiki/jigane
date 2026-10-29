@@ -30,7 +30,7 @@
 
 読むサブパッケージ：`preconditions`、`storage`
 
-読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`regex`、`sequence`、`skills`、`technology_list`
+読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`regex`、`sequence`、`skills`、`static_analysis`、`technology_list`
 
 <!-- END GENERATED: dependencies -->
 
@@ -104,7 +104,7 @@ flaky の検出は、アダプタの `name` を `queries/<言語>.toml` のフ�
 - プラグインが import するのは公開の窓口 `jigane.languages.api` だけにします。jigane の内部のモジュールには依存しません。窓口の核（`LanguageAdapter`、宣言の値の型、`span_of`、`split_declaration`、`BodyBounds`、`DeclarationSpans`、`LanguagePlugin`、`GrammarSpec`、出どころ、`ApiVersion`、`PLUGIN_API_VERSION`）は、版の互換を約束します。
 - 窓口の Protocol のメソッドの引数は、すべて位置専用（`/`）です。jigane は引数を位置で渡し、名前では渡しません。実装の引数の名前は自由で、使わない引数は頭に `_` を付けてかまいません。
 - 宣言を組み立てるときは、行の範囲を自前で計算せず `span_of` と `split_declaration` を使います。`split_declaration` は節点から `span`、`signature`、`body` を一度に返し、本体を一つの節点で持つ言語は、その節点を `BodyBounds` の開きと閉じの両方に渡します。本体の無い宣言には `None` を渡します。
-- `GrammarSpec` の `pack_version` は tree-sitter-language-pack の版、`hashes` は platform の名前（`macos-arm64`、`linux-x86_64` など）から共有ライブラリの sha256 への対応です。ハッシュは、パックのリリースの `parsers-<platform>.tar.zst` をマニフェストの sha256 と照合してから展開し、取り出した共有ライブラリ（`libtree_sitter_<文法名>`）から取ります。パックの版を上げたら取り直します。文法はパックの中の名前だけを指せます。
+- `GrammarSpec` の `pack_version` は tree-sitter-language-pack の版、`hashes` は platform の名前（`macos-arm64`、`linux-x86_64` など）から共有ライブラリの sha256 への対応です。ハッシュは、パックのリリースの `parsers-<platform>.tar.zst` をマニフェストの sha256 と照合してから展開し、取り出した共有ライブラリ（`libtree_sitter_<文法名>`）から取ります。パックの版を上げたら取り直します。組み込みの文法の記録（`grammar-hashes.json`）も一つの版の値なので、`pyproject.toml` はパックを `==` で一つの版に固定し、版を上げるときは固定と記録を同じ変更で直します。文法はパックの中の名前だけを指せます。
 - 照会と flaky の型の資料は、`LanguagePlugin.data` の置き場に `languages/queries/<文法名>.toml` と `flaky/queries/<言語名>.toml` で置きます。本体と同じ名前のファイルを置くと、その外の言語ごと使えません。
 - 宣言の一覧以外の図に使う口の Protocol は `jigane.languages.api.capabilities` にあります。試験的な段で、版の約束の外にあり、jigane の版で形が変わることがあります。口を持たない言語は、その図に対応しません。
 - 契約の版は `PLUGIN_API_VERSION`（`ApiVersion(major, minor)`）です。核の型の削除と変更は major を、追加は minor を上げます。jigane は、プラグインの宣言した版の major が等しく、minor が jigane の minor 以下のときに読み込みます。

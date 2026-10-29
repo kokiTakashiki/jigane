@@ -1,14 +1,17 @@
 """レビューの概要の行。"""
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import assert_never
+from typing import Any, assert_never
 
 from jigane.design.review_documents import attachment_candidates
 from jigane.findings.records import HistoryLoad
 from jigane.gates.entry import Allowed, FlakyDetail, RegexDetail
+from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.kinds import Kind
 from jigane.judgment_map.map_kind import CodeMap, DesignDocMap
 from jigane.judgment_map.region_table import CodeRegion, SectionRegion
+from jigane.languages.plugins import one_line_text, sanitize_text
 from jigane.pull_request_context.background import OWNERLESS_TEXT, PastPullRequest, has_owners
 from jigane.pull_request_context.bots import read_bot_comments
 from jigane.reviews import selection as selection_module
@@ -19,6 +22,7 @@ from jigane.reviews.lifecycle import (
     RangeOrigin,
     Review,
 )
+from jigane.static_analysis.intake import StaticFindingsStore, read_static_findings
 
 SHORT_SHA = 7
 
@@ -37,7 +41,7 @@ def map_lines(review: Review) -> list[str]:
     lines = [f"判断の地図: 人の判断が要る行 {required} / 全体 {total}"]
     levels = counts.by_level
     lines.append(
-        f"  判断の要否: 必須 {levels['required']}、確認 {levels['confirm']}、"
+        f"  判断の要否: 重要 {levels['required']}、確認 {levels['confirm']}、"
         f"機械 {levels['machine']}"
     )
     labels = counts.section_kinds.labels if counts.section_kinds else {}
@@ -47,7 +51,7 @@ def map_lines(review: Review) -> list[str]:
     lines.append(f"判断の箇所: {len(regions)} 件")
     for region in regions:
         span = region.new_span or region.old_span
-        location = region.path
+        location = one_line_text(region.path)
         if span:
             location += f":{span.start_line}-{span.end_line}"
         match region:
@@ -58,7 +62,7 @@ def map_lines(review: Review) -> list[str]:
             case _ as unreachable:
                 assert_never(unreachable)
         lines.append(f"  {region.id} {label} {location}")
-        lines.append(f"      {region.summary}")
+        lines.append(f"      {one_line_text(region.summary)}")
     match kind:
         case DesignDocMap():
             # 設計書の地図の箇所は節で、推しのコードの箇所は「いまの形」の参考として件数だけ出す
@@ -66,7 +70,7 @@ def map_lines(review: Review) -> list[str]:
             form_levels = form.line_counts.by_level
             lines.append(
                 f"いまの形（推しのコード）: 判断の箇所 {len(form.regions)} 件、"
-                f"必須 {form_levels['required']} / 全体 {sum(form_levels.values())}"
+                f"重要 {form_levels['required']} / 全体 {sum(form_levels.values())}"
             )
         case CodeMap():
             # コードの地図に「いまの形」は無い
@@ -88,11 +92,12 @@ def _attachment_lines(review: Review, design_doc: DesignDocOrigin) -> list[str]:
     if design_doc.attachments:
         lines.append(f"  付属の文書: {len(design_doc.attachments)} 件")
         lines += [
-            f"    {item.path}（版 {item.version[:SHORT_SHA]}）" for item in design_doc.attachments
+            f"    {one_line_text(item.path)}（版 {item.version[:SHORT_SHA]}）"
+            for item in design_doc.attachments
         ]
     if candidates:
         lines.append("  付属の候補（--with で選ぶ）:")
-        lines += [f"    {path}" for path in candidates]
+        lines += [f"    {one_line_text(path)}" for path in candidates]
     return lines
 
 
@@ -111,12 +116,12 @@ def origin_lines(review: Review) -> list[str]:
         case DesignDocOrigin() as design_doc:
             return [
                 (
-                    f"設計書: {design_doc.document_path}"
+                    f"設計書: {one_line_text(design_doc.document_path)}"
                     f"（版 {design_doc.document_version[:SHORT_SHA]}）"
                 ),
                 f"  いまのコードの版 {design_doc.code_version[:SHORT_SHA]}",
                 f"  選んだファイル: {len(design_doc.selection)} 件",
-                *(f"    {path}" for path in design_doc.selection),
+                *(f"    {one_line_text(path)}" for path in design_doc.selection),
                 *_attachment_lines(review, design_doc),
             ]
         case _ as unreachable:
@@ -140,17 +145,19 @@ def background_lines(review: Review) -> list[str]:
     if background is None:
         return []
     lines = ["背景:"]
-    lines.extend(f"  参照する文書 {path}" for path in background.documents)
+    lines.extend(f"  参照する文書 {one_line_text(path)}" for path in background.documents)
     for past in background.past_changes:
         label = (
             f"過去の PR #{past.number}"
             if isinstance(past, PastPullRequest)
             else f"過去のコミット {past.sha[:SHORT_SHA]}"
         )
-        lines.append(f"  {label} {past.title}（{', '.join(past.files)}）")
+        lines.append(
+            f"  {label} {one_line_text(past.title)}（{one_line_text(', '.join(past.files))}）"
+        )
     for item in background.owners if has_owners(background) else []:
-        owners = ", ".join(item.owners) or OWNERLESS_TEXT
-        lines.append(f"  所有者 {item.path}: {owners}")
+        owners = one_line_text(", ".join(item.owners)) or OWNERLESS_TEXT
+        lines.append(f"  所有者 {one_line_text(item.path)}: {owners}")
     if len(lines) == 1:
         lines.append("  背景の材料はありません")
     return lines
@@ -172,8 +179,96 @@ def bot_lines(review: Review) -> list[str]:
         ),
         f"  指摘への対応の判断の箇所: {len(responses)} 件",
     ]
-    lines.extend(f"    {region.id} {region.path} {region.summary}" for region in responses)
+    lines.extend(
+        f"    {region.id} {one_line_text(region.path)} {one_line_text(region.summary)}"
+        for region in responses
+    )
     return lines
+
+
+@dataclass(frozen=True)
+class _StaticView:
+    store: StaticFindingsStore
+    raised_regions: int
+    # 区間と、その new_span に重なった指摘の識別子。指摘の無い区間は含めない
+    by_segment: tuple[tuple[Segment, tuple[str, ...]], ...]
+    outside_diff: tuple[str, ...]
+
+
+def _static_view(review: Review) -> _StaticView | None:
+    store = read_static_findings(review.id.directory())
+    if store is None:
+        return None
+    raised = sum(
+        isinstance(region, CodeRegion) and region.kind is Kind.STATIC_FINDING
+        for region in review.map_kind.table.regions
+    )
+    by_segment = tuple(
+        (segment, segment.static_finding_ids)
+        for segment in review.map_kind.segments
+        if segment.static_finding_ids
+    )
+    in_diff = {finding_id for _, ids in by_segment for finding_id in ids}
+    outside = tuple(item.id for item in store.findings if item.id not in in_diff)
+    return _StaticView(store, raised, by_segment, outside)
+
+
+def static_finding_lines(review: Review) -> list[str]:
+    view = _static_view(review)
+    if view is None:
+        return []
+    store = view.store
+    lines = [
+        f"静的検査の指摘: {len(store.findings)} 件",
+        f"  上げた判断の箇所: {view.raised_regions} 件、差分の外: {len(view.outside_diff)} 件",
+    ]
+    reasons = ", ".join(f"{reason} {count}" for reason, count in store.dropped.items())
+    dropped = f"  捨てた指摘: {sum(store.dropped.values())} 件"
+    lines.append(f"{dropped}（{reasons}）" if reasons else dropped)
+    by_id = {item.id: item for item in store.findings}
+    for segment, ids in view.by_segment:
+        span = segment.new_span
+        path = one_line_text(str(segment.new_path))
+        location = f"{path}:{span.start_line}-{span.end_line}" if span else ""
+        lines.append(f"  区間 {location}")
+        for finding_id in ids:
+            finding = by_id[finding_id]
+            lines.append(
+                f"    {finding.id} {one_line_text(finding.tool_name)} "
+                f"{one_line_text(finding.rule_id)} {finding.level}: "
+                # 複数行の文は字下げの階層を崩すので、概要では一行に畳む
+                f"{one_line_text(finding.message)}"
+            )
+    return lines
+
+
+def static_findings_json(review: Review) -> dict[str, Any] | None:
+    """show --json の static_findings の欄。保存した指摘が無ければ None。"""
+    view = _static_view(review)
+    if view is None:
+        return None
+    store = view.store
+    return {
+        "summary": {
+            "finding_count": len(store.findings),
+            "raised_region_count": view.raised_regions,
+            "outside_diff_count": len(view.outside_diff),
+            "dropped": dict(store.dropped),
+        },
+        "findings": [
+            {**item.model_dump(mode="json"), "message": sanitize_text(item.message)}
+            for item in store.findings
+        ],
+        "segments": [
+            {
+                "path": segment.new_path,
+                "start_line": segment.new_span.start_line if segment.new_span else None,
+                "end_line": segment.new_span.end_line if segment.new_span else None,
+                "finding_ids": list(ids),
+            }
+            for segment, ids in view.by_segment
+        ],
+    }
 
 
 def warning_lines(review: Review) -> list[str]:
@@ -185,13 +280,13 @@ def declaration_lines(review: Review) -> list[str]:
     if declaration.intent is not None:
         return [
             f"宣言（{declaration.source.label}）:",
-            *(f"  {line}" for line in declaration.intent.splitlines()),
+            *(f"  {sanitize_text(line)}" for line in declaration.intent.splitlines()),
         ]
     lines = [f"宣言（{declaration.source.label} {len(declaration.excerpts)} 件）:"]
     for excerpt in declaration.excerpts:
-        lines.append(f"  {excerpt.path}:{excerpt.start_line}-{excerpt.end_line}")
+        lines.append(f"  {one_line_text(excerpt.path)}:{excerpt.start_line}-{excerpt.end_line}")
         preview = excerpt.text.splitlines()
-        lines.extend(f"    {line}" for line in preview[:EXCERPT_PREVIEW_LINES])
+        lines.extend(f"    {sanitize_text(line)}" for line in preview[:EXCERPT_PREVIEW_LINES])
         if len(preview) > EXCERPT_PREVIEW_LINES:
             lines.append("    ...")
     return lines
@@ -205,7 +300,7 @@ def gate_lines(review: Review) -> list[str]:
     # 注記で外した札は終了コードに数えないので、違反の件数とは別に見せる
     lines = [header + (f"、外した札 {gates.allowed_count} 件" if gates.allowed_count else "")]
     for entry in [*gates.violations, *gates.warnings]:
-        head = f"  {entry.number} {entry.id} {entry.path}:{entry.line}"
+        head = f"  {entry.number} {entry.id} {one_line_text(entry.path)}:{entry.line}"
         match entry.detail:
             case RegexDetail() if isinstance(entry.state, Allowed):
                 lines.append(

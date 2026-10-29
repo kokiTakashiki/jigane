@@ -40,7 +40,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`storage`、`technology_list`
+読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`static_analysis`、`storage`、`technology_list`
 
 読まれるサブパッケージ：なし
 

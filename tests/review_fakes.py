@@ -274,6 +274,7 @@ def _segment_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "change_kind": ChangeKind.CHANGED.value,
         "bot_comment_ids": [],
         "visibility": None,
+        "static_finding_ids": [],
     }
     return {**filled, **row}
 

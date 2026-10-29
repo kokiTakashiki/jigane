@@ -63,7 +63,7 @@ def test_security_estimate_prompt_sizes_match_the_prompts_the_run_sends(
 ) -> None:
     if with_mcp:
         write_mcp()
-    mcp = McpSelection.load(("owasp-mas", "backendsec")) if with_mcp else NO_MCP
+    mcp = McpSelection.load(("mobile-sec", "server-sec")) if with_mcp else NO_MCP
     assembly, estimate = estimate_of(project, mcp)
     fake = SecurityFake(NO_FINDINGS)
 
@@ -132,13 +132,13 @@ def test_estimate_command_with_mcps_matches_the_prompts_of_the_same_run_selectio
     review = create_feature_review(project, ["src"], "p")
     write_mcp()
     without_mcp = estimate_prompt_bytes(str(review.id))
-    with_mcp = estimate_prompt_bytes(str(review.id), "owasp-mas", "backendsec")
+    with_mcp = estimate_prompt_bytes(str(review.id), "mobile-sec", "server-sec")
     fake = SecurityFake(NO_FINDINGS)
 
     security.run_security(
         AssemblyInput.load(review),
         settings_for(fake, max_budget_usd=0.5),
-        McpSelection.load(("owasp-mas", "backendsec")),
+        McpSelection.load(("mobile-sec", "server-sec")),
     )
 
     assert with_mcp == shard_prompt_sizes(fake)
@@ -150,6 +150,6 @@ def test_estimate_command_rejects_mcps_for_other_groups_like_run(
 ) -> None:
     review = create_feature_review(project, ["src"], "p")
     for group in ("micro", "macro"):
-        code = main(["estimate", str(review.id), group, "--mcps", "owasp-mas"])
+        code = main(["estimate", str(review.id), group, "--mcps", "mobile-sec"])
         assert code != EXIT_OK
         assert "--mcps はセキュリティの群だけが受け付けます" in capsys.readouterr().err

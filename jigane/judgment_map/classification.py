@@ -69,6 +69,8 @@ class Segment:
     # 触れた宣言（群）のうち最も広い可視性。要約の「公開の」「内部公開の」を選ぶ。
     # 宣言の外とアダプタの無いファイルでは None
     visibility: Visibility | None = None
+    # 変更後の範囲が、静的検査の指摘の行の範囲と交わるときの、指摘の識別子（S1 など）
+    static_finding_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """map.json の segments の一行。from_dict と対になる保存の形で、ここ一か所が持つ。"""
@@ -91,6 +93,7 @@ class Segment:
             change_kind=ChangeKind(stored["change_kind"]),
             bot_comment_ids=tuple(stored["bot_comment_ids"]),
             visibility=None if visibility is None else Visibility(visibility),
+            static_finding_ids=tuple(stored["static_finding_ids"]),
         )
 
 
@@ -107,6 +110,20 @@ class BotTouch:
     comment_id: int
     path: str
     lines: frozenset[int]
+
+
+@dataclass(frozen=True)
+class FindingTouch:
+    """静的検査の指摘一つの、変更後のファイルでの行の範囲。
+
+    raises は指摘の重さが区間を上げるか（error、warning）。note と none は識別子だけ付ける。
+    """
+
+    finding_id: str
+    path: str
+    start_line: int
+    end_line: int
+    raises: bool
 
 
 @dataclass(frozen=True)
@@ -643,7 +660,7 @@ def _plain(value: object) -> object:
 
 
 _KIND_LABEL = {
-    "class": "クラス",
+    "class": "型",
     "function": "関数",
     "method": "メソッド",
     "variable": "変数",
@@ -668,6 +685,9 @@ def _summarize(members: list[Segment], kind: Kind, *, is_feature: bool) -> str:
     if count and kind != Kind.BOT_RESPONSE:
         # 種類を変えない要判断の箇所にも、指摘の後に触れた変更を含むことを残す
         summary += f"。ボットの指摘 {count} 件の後の変更を含む"
+    finding_count = len({i for m in members for i in m.static_finding_ids})
+    if finding_count and kind != Kind.STATIC_FINDING:
+        summary += f"。静的検査の指摘 {finding_count} 件と重なる"
     return summary
 
 
@@ -741,6 +761,16 @@ def _summarize_bot_response(members: list[Segment], *, is_feature: bool) -> str:
     return summary
 
 
+def _summarize_static_finding(members: list[Segment], *, is_feature: bool) -> str:
+    # 指摘の文は方針の群へ渡る一覧に載せない。件数だけを書く
+    first = members[0]
+    count = len({i for m in members for i in m.static_finding_ids})
+    summary = f"静的検査の指摘 {count} 件"
+    if first.qualified_name and not is_feature:
+        summary += f"（`{_last_name(first.qualified_name)}`）"
+    return summary
+
+
 def _summarize_sensitive_logic(first: Segment, *, is_feature: bool) -> str:
     if first.qualified_name and not is_feature:
         return f"センシティブなパスのロジックを変更（`{_last_name(first.qualified_name)}`）"
@@ -756,6 +786,8 @@ def _summarize_kind(members: list[Segment], kind: Kind, *, is_feature: bool) -> 
         return _summarize_behavior_removal(members)
     if kind == Kind.BOT_RESPONSE:
         return _summarize_bot_response(members, is_feature=is_feature)
+    if kind == Kind.STATIC_FINDING:
+        return _summarize_static_finding(members, is_feature=is_feature)
     # 残る種類は sensitive_logic だけ
     return _summarize_sensitive_logic(members[0], is_feature=is_feature)
 
@@ -843,14 +875,71 @@ def apply_bot_touches(segments: Sequence[Segment], touches: Sequence[BotTouch]) 
     return result
 
 
+@dataclass(frozen=True)
+class StaticFindingOverlay:
+    """指摘を重ねた後の segment と、どの segment とも交わらなかった指摘（差分の外）の数。"""
+
+    segments: tuple[Segment, ...]
+    outside_count: int
+
+
+def apply_static_findings(
+    segments: Sequence[Segment], findings: Sequence[FindingTouch]
+) -> StaticFindingOverlay:
+    """変更後の行の範囲が指摘の範囲と交わる segment に、指摘の識別子を持たせる。
+
+    上げる指摘（raises）が一つでもあり、要判断でない segment は static_finding へ上げる。
+    既に要判断のものは種類を変えない。行数は segment 単位で数えるため、二重には数えない。
+    """
+    hit: set[str] = set()
+    result: list[Segment] = []
+    for segment in segments:
+        span = segment.new_span
+        touching = (
+            [
+                finding
+                for finding in findings
+                if finding.path == segment.new_path
+                and finding.start_line <= span.end_line
+                and span.start_line <= finding.end_line
+            ]
+            if span is not None
+            else []
+        )
+        if not touching:
+            result.append(segment)
+            continue
+        hit.update(finding.finding_id for finding in touching)
+        base = segment
+        if segment.level != Level.REQUIRED and any(f.raises for f in touching):
+            base = replace(
+                segment,
+                kind=Kind.STATIC_FINDING,
+                level=LEVEL_OF_KIND[Kind.STATIC_FINDING],
+            )
+        ids = {*segment.static_finding_ids, *(f.finding_id for f in touching)}
+        result.append(replace(base, static_finding_ids=tuple(sorted(ids, key=_finding_number))))
+    outside = len({finding.finding_id for finding in findings} - hit)
+    return StaticFindingOverlay(tuple(result), outside)
+
+
+def _finding_number(finding_id: str) -> tuple[int, str]:
+    # 識別子は S と連番。文字列の順では S10 が S2 より前に来るので、番号で並べる
+    digits = finding_id.lstrip("S")
+    return (int(digits), finding_id) if digits.isdigit() else (-1, finding_id)
+
+
 def build_judgment_map(
     old_root: Path | None,
     new_root: Path,
     pairs: Sequence[FilePair],
     config: Config,
     bot_touches: Sequence[BotTouch] = (),
+    finding_touches: Sequence[FindingTouch] = (),
 ) -> JudgmentMap:
-    segments = apply_bot_touches(classify(old_root, new_root, pairs, config), bot_touches)
+    botted = apply_bot_touches(classify(old_root, new_root, pairs, config), bot_touches)
+    # 差分の外の件数は、保存した指摘の識別子のうち区間に付かなかったものから数え直せる
+    segments = list(apply_static_findings(botted, finding_touches).segments)
     return JudgmentMap(
         mode=StoredMode.FEATURE if old_root is None else StoredMode.DIFF,
         segments=segments,

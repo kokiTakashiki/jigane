@@ -27,6 +27,9 @@ class Launches:
         self.commands.append(command)
         if self.raises is not None:
             raise self.raises
+        if command[1:] == ["--version"]:
+            # claude の版の確かめに、確かめを通る版で答える
+            return subprocess.CompletedProcess(command, 0, "2.1.292 (Claude Code)", "")
         return subprocess.CompletedProcess(command, 0, "{}", "")
 
 
@@ -49,6 +52,7 @@ def windows(monkeypatch: pytest.MonkeyPatch, installed: dict[str, str]) -> Launc
 
     monkeypatch.setattr(shutil, "which", which)
     monkeypatch.setattr(subprocess, "run", launches.run)
+    monkeypatch.setattr(process, "_checked_claude_binaries", set())
     return launches
 
 
@@ -160,7 +164,8 @@ def test_claude_resolves_to_exe_and_launches_by_absolute_path(
     # 空の出力は後段で失敗する。ここで見るのは起動のされ方だけ
     with pytest.raises(ClaudeInvocationError):
         run(make_invocation(tmp_path))
-    assert launches.commands[0][0] == exe
+    # 版の確かめと起動の両方が、解いた同じ絶対パスを使う
+    assert [command[0] for command in launches.commands] == [exe, exe]
 
 
 def test_claude_cmd_is_refused_because_its_json_arguments_contain_quotes(
@@ -221,7 +226,7 @@ def test_claude_launch_failure_without_filename_names_claude(
     launches.raises = FileNotFoundError(2, "The system cannot find the file specified")
     with pytest.raises(CommandError) as raised:
         run(make_invocation(tmp_path))
-    assert "コマンドを起動できませんでした: claude" in raised.value.stderr
+    assert r"コマンドを起動できませんでした: C:\bin\claude.exe" in raised.value.stderr
 
 
 def test_posix_launches_the_name_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:

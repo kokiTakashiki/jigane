@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """呼ばれたら引数と時刻を記録し、claude の失敗の形で即座に失敗する偽の claude。
 
+--version にだけは、起動の前の版の確かめを通る版を返す。
+
 JIGANE_CLAUDE_BINARY にこのファイルを向けると、確かめなどで起動の要求が
 出ても、本物の claude（LLM）は決して始まらない。標準ライブラリだけで動く。
 
@@ -16,9 +18,14 @@ from pathlib import Path
 
 LOG_ENVIRONMENT = "JIGANE_FAKE_CLAUDE_LOG"
 EXIT_CODE = 1
+VERSION = "2.1.292"
 
 
 def main(argv: list[str]) -> int:
+    if argv == ["--version"]:
+        # 起動の前の版の確かめに、確かめを通る版で答える。記録には残さない
+        sys.stdout.write(f"{VERSION} (Claude Code)\n")
+        return 0
     entry = json.dumps({"time": datetime.now(UTC).isoformat(), "argv": argv}, ensure_ascii=False)
     log_path = environ.get(LOG_ENVIRONMENT)
     if log_path:

@@ -32,6 +32,7 @@ PR または作業ツリーの変更を受け取り、レビューの材料（�
 | [`reviews`](reviews/README.md) | レビューの組み立て、保存、読み込み、更新、選別、付属の文書を受け持ちます。 |
 | [`sequence`](sequence/README.md) | レビューが変更した宣言から、変更が届く入口（根）ごとのシーケンス図を、LLM を使わずに作ります。 |
 | [`skills`](skills/README.md) | LLM に指摘を作らせるスキル群を持ちます。 |
+| [`static_analysis`](static_analysis/README.md) | 静的検査の結果（SARIF）を読み、検証して、正規化した指摘にします。 |
 | [`storage`](storage/README.md) | データの置き場の読み書き、保存物の形の検査、読み書きの失敗を受け持ちます。 |
 | [`technology_list`](technology_list/README.md) | レビューが変更したファイルの import から、使っている技術の表を LLM を使わずに作ります。 |
 
@@ -78,6 +79,7 @@ flowchart TB
         skills
         technology_list
         publishing
+        static_analysis
     end
     subgraph cli
         commands

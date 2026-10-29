@@ -31,6 +31,7 @@ from jigane.pull_request_context import background
 from jigane.pull_request_context.background import PastPullRequest, dump_background
 from jigane.reviews import lifecycle as review_module
 from jigane.reviews.lifecycle import (
+    DeclaredInputs,
     FeatureOrigin,
     PullRequestOrigin,
     Review,
@@ -312,7 +313,7 @@ def test_refresh_unchanged_writes_nothing() -> None:
 def test_refresh_intent_is_rejected_for_a_pull_request() -> None:
     review = create_pull_request_review(URL)
     with pytest.raises(ReviewError, match="PR のタイトルと本文"):
-        refresh_review(review.id, intent="x")
+        refresh_review(review.id, DeclaredInputs(intent="x"))
     assert load_review(review.id).declaration == review.declaration
 
 

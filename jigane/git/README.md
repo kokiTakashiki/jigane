@@ -17,6 +17,6 @@
 
 読むサブパッケージ：なし
 
-読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`pull_request_context`、`regex`、`reviews`、`sequence`、`skills`、`technology_list`
+読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`pull_request_context`、`regex`、`reviews`、`sequence`、`skills`、`static_analysis`、`technology_list`
 
 <!-- END GENERATED: dependencies -->

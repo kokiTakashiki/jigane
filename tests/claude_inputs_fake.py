@@ -142,6 +142,10 @@ def main() -> int:
     records = Path(sys.argv[1])
     parent: dict[str, str] = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
     argv = sys.argv[3:]
+    if argv == ["--version"]:
+        # 起動の前の版の確かめ。入力を持たないので記録しない
+        sys.stdout.write("2.1.292 (Claude Code)\n")
+        return 0
     prompt = sys.stdin.read()
     now = dict(os.environ)
     schema = json.loads(argv[argv.index("--json-schema") + 1])

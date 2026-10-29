@@ -25,6 +25,7 @@ from jigane.judgment_map.declaration import (
 from jigane.pull_request_context.background import parse_background
 from jigane.reviews import lifecycle as review_module
 from jigane.reviews.lifecycle import (
+    DeclaredInputs,
     DiffSource,
     FeatureOrigin,
     LocalRange,
@@ -93,10 +94,14 @@ def test_range_review_over_an_empty_base_tree(tmp_path: Path) -> None:
 
 
 def test_range_review_intent_and_default_name(repo: dict[str, str]) -> None:
-    review = create_range_review(Path(repo["root"]), "main..feature", intent="alpha を直す")
+    review = create_range_review(
+        Path(repo["root"]), "main..feature", inputs=DeclaredInputs(intent="alpha を直す")
+    )
     assert str(review.id) == "octo/hello@feature"
     assert (review.declaration.source, review.declaration.intent) == ("intent", "alpha を直す")
-    head_review = create_range_review(Path(repo["root"]), "main..", intent="x")
+    head_review = create_range_review(
+        Path(repo["root"]), "main..", inputs=DeclaredInputs(intent="x")
+    )
     assert head_review.id.key == repo["head"][:8]
 
 
@@ -121,7 +126,10 @@ def test_range_review_accepts_a_digits_only_name(repo: dict[str, str]) -> None:
 def test_range_review_rejects_both_intent_options(repo: dict[str, str]) -> None:
     with pytest.raises(ReviewError, match="同時に指定できません"):
         create_range_review(
-            Path(repo["root"]), "main..feature", "x", intent="a", intent_file=Path("b")
+            Path(repo["root"]),
+            "main..feature",
+            "x",
+            DeclaredInputs(intent="a", intent_file=Path("b")),
         )
 
 
@@ -389,7 +397,9 @@ def _add_commit(root: Path) -> None:
 
 def test_refresh_keeps_a_declaration_made_from_the_intent(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    review = create_range_review(root, "main..feature", "mine", intent="alpha を直す")
+    review = create_range_review(
+        root, "main..feature", "mine", DeclaredInputs(intent="alpha を直す")
+    )
     _add_commit(root)
     result = refresh_review(review.id)
     assert result.updated is True
@@ -649,7 +659,7 @@ def test_refresh_intent_replaces_the_commits_declaration_and_is_then_kept(
 ) -> None:
     created = create_range_review(Path(repo["root"]), "main..feature", name="r")
     assert created.declaration.source == "commits"
-    result = refresh_review(created.id, intent="alpha と gamma を直す")
+    result = refresh_review(created.id, DeclaredInputs(intent="alpha と gamma を直す"))
     assert result.updated is True
     assert result.review.declaration.source == "intent"
     assert load_review(created.id).declaration.intent == "alpha と gamma を直す"

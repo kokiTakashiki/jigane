@@ -16,6 +16,6 @@
 
 読むサブパッケージ：なし
 
-読まれるサブパッケージ：`commands`、`design`、`findings`、`flaky`、`judgment_map`、`languages`、`publishing`、`pull_request_context`、`reviews`、`skills`
+読まれるサブパッケージ：`commands`、`design`、`findings`、`flaky`、`judgment_map`、`languages`、`publishing`、`pull_request_context`、`reviews`、`skills`、`static_analysis`
 
 <!-- END GENERATED: dependencies -->

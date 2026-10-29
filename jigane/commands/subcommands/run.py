@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, assert_never
 
 from jigane.commands.budget_argument import add_max_budget_argument
-from jigane.commands.consent import launch_plan, require_consent
+from jigane.commands.consent import launch_plan, require_consent, require_unadapted_consent
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK
 from jigane.commands.group_argument import add_group_argument
@@ -467,4 +467,5 @@ def handle(args: argparse.Namespace, context: Context) -> int:
         is_terminal=context.is_terminal,
         read_answer=context.read_answer,
     )
+    require_unadapted_consent(review, read_answer=context.read_answer)
     return print_group_result(run_group(assembly, group, settings, mcp=mcp), as_json=args.json)

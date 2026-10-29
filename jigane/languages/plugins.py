@@ -83,6 +83,14 @@ def sanitize_text(text: str) -> str:
     return _CONTROL_CHARACTER.sub("", _ESCAPE_SEQUENCE.sub("", text))
 
 
+def one_line_text(text: str) -> str:
+    """sanitize_text に加え、改行とタブを含む空白の連なりを空白一つに畳む。
+
+    ファイル名やパスは字下げした一行の欄に出すので、改行で行を偽らせない。
+    """
+    return " ".join(sanitize_text(text).split())
+
+
 def normalize_distribution(name: str) -> str:
     """配布名の PEP 503 正規化。大文字小文字と `-`、`_`、`.` の違いを同じ配布として扱う。"""
     return re.sub(r"[-_.]+", "-", name).lower()

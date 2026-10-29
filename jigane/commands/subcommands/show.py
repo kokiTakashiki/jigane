@@ -26,6 +26,8 @@ from jigane.commands.views.review import (
     map_lines,
     selection_lines,
     source_lines,
+    static_finding_lines,
+    static_findings_json,
     warning_lines,
 )
 from jigane.findings.discard import NO_CONCERN_CLAIM, concern_with_places, places_line
@@ -356,6 +358,9 @@ def show_and_print(text: str, view: View, *, as_json: bool) -> None:
             "selection": selection_module.summary(review.id.directory(), history),
             "history_warnings": output.warnings_json(history.warnings),
         }
+        static_findings = static_findings_json(review)
+        if static_findings is not None:
+            overview["static_findings"] = static_findings
         print(json.dumps(overview, ensure_ascii=False, indent=2))
         return
     print_lines(
@@ -367,6 +372,7 @@ def show_and_print(text: str, view: View, *, as_json: bool) -> None:
         map_lines(review),
         selection_lines(review, history),
         bot_lines(review),
+        static_finding_lines(review),
         warning_lines(review),
         output.warning_lines(history.warnings),
     )

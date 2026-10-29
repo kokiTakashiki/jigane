@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from jigane.git import process
 from jigane.git.process import (
     CommandError,
     run_claude_resolved,
@@ -23,9 +24,13 @@ class Launched:
 
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
+        # claude の版の確かめ（--version）への答え
+        self.version = ""
 
     def run(self, command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
+        if command[1:] == ["--version"] and self.version:
+            return subprocess.CompletedProcess(command, 0, self.version, "")
         return subprocess.CompletedProcess(command, 0, "ok", "")
 
 
@@ -109,7 +114,19 @@ def test_listed_names_match_by_any_spelling(launched: Launched, executable: str)
     assert launched.commands == [[executable, "--version"]]
 
 
-def test_llm_runs_entrance_launches_claude(launched: Launched) -> None:
+def test_llm_runs_entrance_launches_claude(
+    launched: Launched, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in (CLAUDE, f"{CLAUDE}.exe"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+        (tmp_path / name).chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(process, "_checked_claude_binaries", set())
+    launched.version = "2.1.292 (Claude Code)"
     result = run_claude_resolved([CLAUDE, "-p"])
     assert result.stdout == "ok"
-    assert launched.commands == [[CLAUDE, "-p"]]
+    # 版を確かめた実体と同じ絶対パスで起動する
+    (version, launch) = launched.commands
+    assert Path(version[0]).parent == tmp_path
+    assert version[1:] == ["--version"]
+    assert launch == [version[0], "-p"]

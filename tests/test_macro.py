@@ -19,6 +19,7 @@ from jigane.judgment_map.declaration import demote_headings
 from jigane.llm_runs import claude
 from jigane.policy_materials import changed_files
 from jigane.reviews.lifecycle import (
+    DeclaredInputs,
     DiffSource,
     PullRequestInfo,
     PullRequestOrigin,
@@ -81,7 +82,7 @@ def test_prompt_length_stays_under_command_line_limit(project: Path) -> None:
 
 
 def test_prompt_with_intent(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p", intent="買い物を助ける")
+    review = create_feature_review(project, ["src"], "p", DeclaredInputs(intent="買い物を助ける"))
     prompt = macro.build_diagram_prompt(AssemblyInput.load(review))
     assert "買い物を助ける" in prompt
     assert "出典:" not in prompt
@@ -163,7 +164,7 @@ def test_run_files(project: Path) -> None:
 
 
 def test_estimate(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p", intent="abc")
+    review = create_feature_review(project, ["src"], "p", DeclaredInputs(intent="abc"))
     estimate = macro.estimate_macro(AssemblyInput.load(review)).to_record()
     prompt_bytes = len(macro.build_diagram_prompt(AssemblyInput.load(review)).encode("utf-8"))
     assert estimate["materials_bytes"] == prompt_bytes
@@ -513,7 +514,7 @@ def test_given_sections_are_not_rebuilt(project: Path, monkeypatch: pytest.Monke
 
 
 def test_estimated_materials_are_inside_the_real_prompt(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p", intent="abc")
+    review = create_feature_review(project, ["src"], "p", DeclaredInputs(intent="abc"))
     sections = macro.policy_sections(review)
     prompt = macro.build_diagram_prompt(AssemblyInput.load(review), sections)
     assert macro.diagram_materials_text(AssemblyInput.load(review), sections) in prompt
@@ -775,7 +776,9 @@ def test_declaration_without_headings_is_unchanged() -> None:
 
 
 def test_prompt_declaration_has_no_heading_above_the_section(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p", intent="## 目的\n本文\n### 詳細")
+    review = create_feature_review(
+        project, ["src"], "p", DeclaredInputs(intent="## 目的\n本文\n### 詳細")
+    )
     prompt = macro.build_diagram_prompt(AssemblyInput.load(review))
     start = prompt.index("### 宣言")
     body = prompt[start:].split("\n", 1)[1]

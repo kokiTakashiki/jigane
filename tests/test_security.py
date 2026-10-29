@@ -35,7 +35,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def write_mcp(servers: tuple[str, ...] = ("owasp-mas", "backendsec")) -> None:
+def write_mcp(servers: tuple[str, ...] = ("mobile-sec", "server-sec")) -> None:
     home = data_home()
     home.mkdir(parents=True, exist_ok=True)
     config = {"mcpServers": {name: {"type": "stdio", "command": "x"} for name in servers}}
@@ -119,19 +119,19 @@ def test_default_run_needs_no_mcp_json_and_passes_no_mcp_config(project: Path) -
 def test_mcps_without_mcp_json_stops_before_invoking(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
     with pytest.raises(mcp.SecurityConfigError) as raised:
-        McpSelection.load(("owasp-mas",))
+        McpSelection.load(("mobile-sec",))
     assert str(data_home() / "mcp.json") in str(raised.value)
 
 
 def test_mcps_naming_an_absent_server_stops_before_invoking(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
-    write_mcp(("owasp-mas",))
+    write_mcp(("mobile-sec",))
     with pytest.raises(mcp.SecurityConfigError) as raised:
-        McpSelection.load(("owasp-mas", "backendsec", "other"))
+        McpSelection.load(("mobile-sec", "server-sec", "other"))
     message = str(raised.value)
-    assert "backendsec" in message
+    assert "server-sec" in message
     assert "other" in message
-    assert "owasp-mas," not in message
+    assert "mobile-sec," not in message
 
 
 class ConfigCapture(SecurityFake):
@@ -152,21 +152,21 @@ class ConfigCapture(SecurityFake):
 
 def test_mcps_writes_only_the_selected_servers_to_a_temporary_file(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    write_mcp(("owasp-mas", "backendsec", "unrelated"))
+    write_mcp(("mobile-sec", "server-sec", "unrelated"))
     fake = ConfigCapture()
     security.run_security(
-        AssemblyInput.load(review), settings_for(fake), McpSelection.load(("owasp-mas",))
+        AssemblyInput.load(review), settings_for(fake), McpSelection.load(("mobile-sec",))
     )
     discovery = discovery_calls(fake)
     assert len(discovery) == 2
     assert fake.seen
     for path, content, _mode in fake.seen:
-        assert set(content["mcpServers"]) == {"owasp-mas"}
+        assert set(content["mcpServers"]) == {"mobile-sec"}
         assert path != data_home() / "mcp.json"
         assert not path.exists()
     for call in discovery:
         assert call.allowed_mcp_tools == (
-            "mcp__owasp-mas",
+            "mcp__mobile-sec",
             "ReadMcpResourceTool",
             "ListMcpResourcesTool",
         )
@@ -178,17 +178,17 @@ def test_mcps_writes_only_the_selected_servers_to_a_temporary_file(project: Path
 
 def test_run_review_passes_mcps_to_the_security_group(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    write_mcp(("owasp-mas", "backendsec"))
+    write_mcp(("mobile-sec", "server-sec"))
     fake = ConfigCapture()
-    run_review(str(review.id), SECURITY, invoke=fake, mcps=("owasp-mas", "backendsec"))
+    run_review(str(review.id), SECURITY, invoke=fake, mcps=("mobile-sec", "server-sec"))
     discovery = discovery_calls(fake)
     assert discovery
     for path, content, _mode in fake.seen:
-        assert set(content["mcpServers"]) == {"owasp-mas", "backendsec"}
+        assert set(content["mcpServers"]) == {"mobile-sec", "server-sec"}
         assert not path.exists()
     for call in discovery:
-        assert "mcp__owasp-mas" in call.allowed_mcp_tools
-        assert "mcp__backendsec" in call.allowed_mcp_tools
+        assert "mcp__mobile-sec" in call.allowed_mcp_tools
+        assert "mcp__server-sec" in call.allowed_mcp_tools
         assert "--mcp-config" in claude.build_command(call)
 
 
@@ -210,7 +210,7 @@ def test_temporary_mcp_file_is_removed_when_the_run_fails(project: Path) -> None
     fake.by_shard = {1: None, 2: None}
     with pytest.raises(Exception, match="発見役が失敗"):
         security.run_security(
-            AssemblyInput.load(review), settings_for(fake), McpSelection.load(("owasp-mas",))
+            AssemblyInput.load(review), settings_for(fake), McpSelection.load(("mobile-sec",))
         )
     assert fake.seen
     assert all(not path.exists() for path, _, _ in fake.seen)
@@ -222,7 +222,7 @@ def test_mcps_is_rejected_for_other_groups_before_invoking(
     review = create_feature_review(project, ["src"], "p")
     fake = SecurityFake({1: [], 2: []})
     for group in ("micro", "macro"):
-        code = main(["run", str(review.id), group, "--mcps", "owasp-mas"], invoke=fake)
+        code = main(["run", str(review.id), group, "--mcps", "mobile-sec"], invoke=fake)
         assert code != EXIT_OK
         assert "--mcps" in capsys.readouterr().err
     assert fake.calls == []
@@ -384,8 +384,8 @@ def test_prompt_names_no_specific_mcp_with_or_without_servers(project: Path) -> 
     servers = McpSelection.load(("refs-a", "refs-b"))
     with_servers = shard_prompt(SECURITY, assembly, shard, 1, 1, servers)
     for prompt in (without, with_servers):
-        assert "owasp-mas" not in prompt
-        assert "backendsec" not in prompt
+        assert "mobile-sec" not in prompt
+        assert "server-sec" not in prompt
         assert "$mcp_note" not in prompt
     assert "MCP は渡されていない" in without
     assert "refs-a" not in without
@@ -434,7 +434,7 @@ def test_mcps_error_stops_before_consent_and_recording(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     review = create_feature_review(project, ["src"], "p")
-    write_mcp(("owasp-mas",))
+    write_mcp(("mobile-sec",))
     fake = SecurityFake({1: [], 2: []})
     asked: list[str] = []
 

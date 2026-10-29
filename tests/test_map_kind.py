@@ -15,6 +15,7 @@ from jigane.judgment_map.map_kind import (
     MapKind,
     _upgrade_v1,
     _upgrade_v2,
+    _upgrade_v3,
     dump_map,
     load_map,
     map_kind_of_mode,
@@ -56,6 +57,7 @@ def current_map() -> dict[str, Any]:
         "change_kind": "added",
         "bot_comment_ids": [],
         "visibility": None,
+        "static_finding_ids": [],
     }
     region = {key: value for key, value in REGION_V1.items() if key != "judged"} | {
         "bot_comment_ids": [],
@@ -66,7 +68,10 @@ def current_map() -> dict[str, Any]:
         "mode": "diff",
         "segments": [segment],
         "regions": [region],
-        "line_counts": {"by_kind": {"internal_interface": 0}, "by_level": {}},
+        "line_counts": {
+            "by_kind": {"internal_interface": 0, "static_finding": 0},
+            "by_level": {},
+        },
     }
 
 
@@ -80,7 +85,7 @@ def old_map() -> dict[str, Any]:
 
 
 def test_v1_upgrade_yields_the_keys_the_current_writer_writes() -> None:
-    upgraded = _upgrade_v1(old_map())
+    upgraded = _upgrade_v3(_upgrade_v2(_upgrade_v1(old_map())))
 
     expected = {key: value for key, value in current_map().items() if key != "format"}
     assert set(upgraded) == set(expected)
@@ -120,7 +125,10 @@ def test_design_doc_map_current_form_is_upgraded_too() -> None:
     written = dump_map(kind)
     assert written["format"] == MAP_FORMAT
     assert "format" not in written["current_form"]
-    assert written["current_form"]["line_counts"]["by_kind"] == {"internal_interface": 0}
+    assert written["current_form"]["line_counts"]["by_kind"] == {
+        "internal_interface": 0,
+        "static_finding": 0,
+    }
 
 
 def test_design_doc_section_table_keeps_the_section_vocabulary_on_upgrade() -> None:
@@ -130,7 +138,10 @@ def test_design_doc_section_table_keeps_the_section_vocabulary_on_upgrade() -> N
     written = dump_map(load_map(raw))
 
     assert written["line_counts"]["by_kind"] == {"overview": 3}
-    assert written["current_form"]["line_counts"]["by_kind"] == {"internal_interface": 0}
+    assert written["current_form"]["line_counts"]["by_kind"] == {
+        "internal_interface": 0,
+        "static_finding": 0,
+    }
 
 
 def test_future_format_fails_with_a_review_error() -> None:
@@ -271,3 +282,60 @@ def test_map_kind_of_unknown_mode_is_unreadable_store(mode: str) -> None:
 def test_load_map_rejects_unknown_mode() -> None:
     with pytest.raises(ReviewError, match="mode"):
         load_map({**current_map(), "mode": "bogus"})
+
+
+def test_v3_upgrade_fills_empty_finding_ids_and_the_new_kind_count() -> None:
+    raw = {**current_map(), "format": 3}
+    for segment in raw["segments"]:
+        del segment["static_finding_ids"]
+    del raw["line_counts"]["by_kind"]["static_finding"]
+    snapshot = json.dumps(raw, sort_keys=True)
+
+    upgraded = _upgrade_v3(raw)
+
+    assert upgraded["segments"][0]["static_finding_ids"] == []
+    assert upgraded["line_counts"]["by_kind"]["static_finding"] == 0
+    assert json.dumps(raw, sort_keys=True) == snapshot
+
+
+def test_version_3_code_map_reads_and_is_written_in_version_4() -> None:
+    raw = {**current_map(), "format": 3}
+    del raw["segments"][0]["static_finding_ids"]
+
+    kind = load_map(raw)
+
+    assert isinstance(kind, CodeMap)
+    assert kind.segments[0].static_finding_ids == ()
+    written = dump_map(kind)
+    assert written["format"] == 4
+    assert written["segments"][0]["static_finding_ids"] == []
+    assert load_map(written) == kind
+
+
+def test_version_3_design_doc_map_puts_the_new_kind_count_under_current_form() -> None:
+    raw = design_doc_map_v2()
+    raw["format"] = 3
+    for segment in raw["segments"]:
+        del segment["static_finding_ids"]
+    del raw["current_form"]["line_counts"]["by_kind"]["static_finding"]
+    raw["regions"][0].pop("bot_comment_ids")
+    raw["regions"][0].pop("old_path")
+
+    kind = load_map(raw)
+
+    assert isinstance(kind, DesignDocMap)
+    written = dump_map(kind)
+    assert "static_finding" not in written["line_counts"]["by_kind"]
+    assert written["current_form"]["line_counts"]["by_kind"]["static_finding"] == 0
+
+
+def test_version_4_map_with_finding_ids_reads_back_unchanged() -> None:
+    raw = current_map()
+    raw["segments"][0] |= {"kind": "static_finding", "level": "required"}
+    raw["segments"][0]["static_finding_ids"] = ["S1", "S2"]
+
+    kind = load_map(raw)
+
+    assert isinstance(kind, CodeMap)
+    assert kind.segments[0].static_finding_ids == ("S1", "S2")
+    assert dump_map(kind) == raw

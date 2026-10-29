@@ -147,9 +147,11 @@ def test_audit_runs_later_checks_after_a_failure_and_returns_the_first_code(
     assert called == [3, 0]
 
 
-def test_audit_default_checks_are_actionlint_then_zizmor() -> None:
+def test_audit_default_checks_are_actionlint_zizmor_then_gh_lines() -> None:
     checker = load_checker()
-    assert (checker.run_actionlint, checker.run_zizmor) == checker.DEFAULT_CHECKS
+    assert (checker.run_actionlint, checker.run_zizmor, checker.run_gh_lines) == (
+        checker.DEFAULT_CHECKS
+    )
 
 
 def test_actionlint_receives_the_workflow_files_of_the_copy(
@@ -201,7 +203,7 @@ def test_actionlint_unavailable_is_not_a_finding(
         raise checker.ActionlintUnavailableError(message)
 
     monkeypatch.setattr(checker, "fetch_actionlint", unavailable)
-    assert checker.run_actionlint(tmp_path) == checker.ACTIONLINT_UNAVAILABLE_EXIT_CODE
+    assert checker.run_actionlint(tmp_path) == checker.TOOL_UNAVAILABLE_EXIT_CODE
 
 
 def fake_archive(
@@ -401,3 +403,16 @@ def test_composite_actions_skip_files_inside_the_workflows_directory(tmp_path: P
     (workflows / "action.yml").write_text(UNPINNED_COMPOSITE_ACTION, encoding="utf-8")
     composite = write_composite_action(tmp_path)
     assert checker.composite_actions(workflows) == [(composite / "action.yml").resolve()]
+
+
+def test_actionlint_extraction_failure_is_not_a_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checker = load_checker()
+
+    def unavailable() -> Path:
+        message = "no binary in the archive"
+        raise checker.ToolUnavailableError(message)
+
+    monkeypatch.setattr(checker, "fetch_actionlint", unavailable)
+    assert checker.run_actionlint(tmp_path) == checker.TOOL_UNAVAILABLE_EXIT_CODE

@@ -16,11 +16,30 @@ from jigane.commands.views.review import (
 )
 from jigane.design.review_documents import create_design_doc_review
 from jigane.reviews.lifecycle import (
+    DeclaredInputs,
     Review,
+    ReviewInputs,
     create_feature_review,
     create_pull_request_review,
     create_range_review,
 )
+from jigane.static_analysis.intake import sarif_request
+
+
+def add_sarif_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--sarif",
+        action="append",
+        type=Path,
+        metavar="ファイル",
+        help="静的検査の SARIF です。繰り返して渡せます。変更後のコミットで走らせたものを渡します",
+    )
+    parser.add_argument(
+        "--sarif-root",
+        type=Path,
+        metavar="ディレクトリ",
+        help="SARIF のパスの起点です。既定は git のリポジトリの根です",
+    )
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -33,10 +52,12 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     intent.add_argument("--intent")
     intent.add_argument("--intent-file", type=Path)
     files.add_argument("--json", action="store_true")
+    add_sarif_arguments(files)
 
     pull = new_modes.add_parser("pr", help="差分レビュー式のレビューを作ります")
     pull.add_argument("url")
     pull.add_argument("--json", action="store_true")
+    add_sarif_arguments(pull)
     range_mode = new_modes.add_parser(
         "range",
         help=(
@@ -57,6 +78,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     range_intent.add_argument("--intent")
     range_intent.add_argument("--intent-file", type=Path)
     range_mode.add_argument("--json", action="store_true")
+    add_sarif_arguments(range_mode)
     design_doc = new_modes.add_parser(
         "design-doc",
         help="設計書をレビューします。実装の前に方針の綻びを問います",
@@ -107,11 +129,19 @@ def print_new(review: Review, *, as_json: bool) -> None:
 
 def run(args: argparse.Namespace, context: Context) -> int:
     del context  # レビューの作成は Claude Code CLI を起動しない
+    sarif = (
+        sarif_request(args.sarif, args.sarif_root, Path.cwd())
+        if args.mode in ("pr", "range", "files")
+        else None
+    )
     if args.mode == "pr":
-        review = create_pull_request_review(args.url)
+        review = create_pull_request_review(args.url, ReviewInputs(sarif))
     elif args.mode == "range":
         review = create_range_review(
-            Path.cwd(), args.range, args.name, args.intent, args.intent_file
+            Path.cwd(),
+            args.range,
+            args.name,
+            DeclaredInputs(sarif, args.intent, args.intent_file),
         )
     elif args.mode == "design-doc":
         review = create_design_doc_review(
@@ -119,7 +149,10 @@ def run(args: argparse.Namespace, context: Context) -> int:
         )
     else:
         review = create_feature_review(
-            Path.cwd(), args.paths, args.name, args.intent, args.intent_file
+            Path.cwd(),
+            args.paths,
+            args.name,
+            DeclaredInputs(sarif, args.intent, args.intent_file),
         )
     print_new(review, as_json=args.json)
     return EXIT_GATE_VIOLATION if has_gate_violation(review) else EXIT_OK

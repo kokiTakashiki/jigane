@@ -27,6 +27,7 @@ from jigane.findings.records import (
     group_by_triage,
 )
 from jigane.judgment_map.region_table import CodeRegion, SectionRegion
+from jigane.languages.plugins import one_line_text
 from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review
 from jigane.skills.received_concerns import NoneReceived, NotRecorded, Received, ReceivedConcerns
@@ -36,7 +37,7 @@ WHOLE_CHANGE = "変更全体"
 
 
 def location(location: dict[str, Any]) -> str:
-    return f"{location['path']}:{location['start_line']}-{location['end_line']}"
+    return f"{one_line_text(location['path'])}:{location['start_line']}-{location['end_line']}"
 
 
 def adjudication_lines(adjudication: Adjudication) -> list[str]:

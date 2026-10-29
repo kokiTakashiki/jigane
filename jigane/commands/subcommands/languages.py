@@ -29,6 +29,7 @@ from jigane.languages.plugins import (
     RecordError,
     load_enabled,
     normalize_distribution,
+    read_content,
     reapproval_reason,
     sanitize_text,
     save_enabled,
@@ -305,14 +306,15 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
     entry_point, dist = found[0]
     path = data_home() / ENABLED_FILE
     try:
-        entry = EnabledLanguage.approve(name, dist)
+        content = read_content(dist)
     except RecordError as error:
         raise ValueError(f"{name!r} を有効にできません（{dist.name}）: {error}") from error
+    entry = EnabledLanguage(name, dist.name, dist.version, content)
     current = _load_for_edit(path)
     if entry in current:
         # 承認済みなので、外のコードを読み込む確認も書き直しも要らない
         return _report_enabled(entry, already=True, as_json=args.json)
-    _confirm(context, entry, dist.version, _reapproval_reason(current, entry))
+    _confirm(context, entry, dist.version, _reapproval_reason(current, entry, content))
     problem = _verify(entry_point)
     if problem is not None:
         raise ValueError(f"{name!r} を有効にできません（{dist.name}）: {sanitize_text(problem)}")
@@ -326,7 +328,9 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
     return _report_enabled(entry, already=False, as_json=args.json)
 
 
-def _reapproval_reason(current: Sequence[EnabledLanguage], entry: EnabledLanguage) -> str | None:
+def _reapproval_reason(
+    current: Sequence[EnabledLanguage], entry: EnabledLanguage, content: ApprovedContent
+) -> str | None:
     """同じ名前と配布と版の承認が既にあり、中身だけが違うときの理由。無ければ None。"""
     same = [
         item.content
@@ -334,10 +338,10 @@ def _reapproval_reason(current: Sequence[EnabledLanguage], entry: EnabledLanguag
         if (item.name, item.distribution, item.version)
         == (entry.name, entry.distribution, entry.version)
     ]
-    if not same or not isinstance(entry.content, ApprovedContent):
-        # 同じ組の承認が無ければ初めての承認で、理由は要らない。approve は中身つきの承認を返す
+    if not same:
+        # 同じ組の承認が無ければ初めての承認で、理由は要らない
         return None
-    return reapproval_reason(same, {file.path: file.sha256 for file in entry.content.files})
+    return reapproval_reason(same, {file.path: file.sha256 for file in content.files})
 
 
 def _confirm(

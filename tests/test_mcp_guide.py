@@ -16,13 +16,13 @@ from jigane.skills.mcp import McpSelection, McpServer, SecurityConfigError
 IOS_USE = "iOS と Android のアプリのコード"
 SERVER_USE = "サーバ、API、サーバ上で動くプラグインのコード"
 GUIDE = f"""
-[mcps.owasp-mas]
+[mcps.mobile-sec]
 use_for = "{IOS_USE}"
 
-[mcps.backendsec]
+[mcps.server-sec]
 use_for = "{SERVER_USE}"
 """
-NAMES = ("owasp-mas", "backendsec")
+NAMES = ("mobile-sec", "server-sec")
 
 
 @pytest.fixture
@@ -53,8 +53,8 @@ def test_valid_guide_adds_name_and_use_for_lines_to_the_prompt(project: Path) ->
     write_mcp()
     selection = McpSelection.load(NAMES, write_guide(project))
     prompt = prompt_of(project, selection)
-    assert f"- owasp-mas: {IOS_USE}" in prompt
-    assert f"- backendsec: {SERVER_USE}" in prompt
+    assert f"- mobile-sec: {IOS_USE}" in prompt
+    assert f"- server-sec: {SERVER_USE}" in prompt
     assert "$mcp_guide" not in prompt
 
 
@@ -86,12 +86,12 @@ def test_malformed_guide_is_an_error(project: Path, text: str) -> None:
 
 
 def test_guide_name_absent_from_mcp_json_is_an_error(project: Path) -> None:
-    write_mcp(("owasp-mas",))
-    with pytest.raises(SecurityConfigError, match="backendsec"):
+    write_mcp(("mobile-sec",))
+    with pytest.raises(SecurityConfigError, match="server-sec"):
         McpSelection.load(NAMES, write_guide(project))
 
 
-@pytest.mark.parametrize("names", [("owasp-mas",), (), (*NAMES, "extra")])
+@pytest.mark.parametrize("names", [("mobile-sec",), (), (*NAMES, "extra")])
 def test_guide_names_must_equal_the_mcps_set(project: Path, names: tuple[str, ...]) -> None:
     write_mcp((*NAMES, "extra"))
     with pytest.raises(SecurityConfigError, match="同じ集合"):
@@ -107,7 +107,7 @@ def test_run_review_with_guide_reaches_the_prompts(project: Path) -> None:
     )
     discovery = discovery_calls(fake)
     assert discovery
-    assert all(f"- owasp-mas: {IOS_USE}" in call.prompt for call in discovery)
+    assert all(f"- mobile-sec: {IOS_USE}" in call.prompt for call in discovery)
 
 
 def test_run_command_with_a_bad_guide_stops_before_invoking(project: Path) -> None:
@@ -167,7 +167,7 @@ def test_selection_servers_are_named_servers_with_use_for_only_when_guided(proje
     plain = McpSelection.load(NAMES).servers
     assert all(isinstance(server, McpServer) for server in (*guided, *plain))
     assert [(server.name, server.use_for) for server in guided] == [
-        ("owasp-mas", IOS_USE),
-        ("backendsec", SERVER_USE),
+        ("mobile-sec", IOS_USE),
+        ("server-sec", SERVER_USE),
     ]
     assert [server.use_for for server in plain] == [None, None]

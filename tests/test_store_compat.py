@@ -100,5 +100,5 @@ def test_root_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(home))
     home.mkdir()
     shutil.copy(STORE / "root" / "mcp" / "mcp.json", home)
-    selection = McpSelection.load(("owasp-mas", "backendsec"))
-    assert selection.names == ("owasp-mas", "backendsec")
+    selection = McpSelection.load(("mobile-sec", "server-sec"))
+    assert selection.names == ("mobile-sec", "server-sec")

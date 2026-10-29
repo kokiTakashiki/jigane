@@ -1,6 +1,6 @@
 {
  "mcpServers": {
-  "owasp-mas": {
+  "mobile-sec": {
    "type": "stdio",
    "command": "/bin/sh",
    "args": [
@@ -8,7 +8,7 @@
    ],
    "env": {}
   },
-  "backendsec": {
+  "server-sec": {
    "type": "stdio",
    "command": "/usr/bin/cmd",
    "args": [

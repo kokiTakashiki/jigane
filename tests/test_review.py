@@ -21,6 +21,7 @@ from jigane.reviews import lifecycle as review_module
 from jigane.reviews.lifecycle import (
     REVIEW_FILE,
     TRASH_DIRECTORY,
+    DeclaredInputs,
     FeatureOrigin,
     RangeOrigin,
     ReviewError,
@@ -80,7 +81,7 @@ def test_missing_declaration_warns_and_intent_wins(project: Path) -> None:
     warned = create_feature_review(project, ["src"], "one")
     assert warned.warnings
     assert "M1" in warned.warnings[0]
-    given = create_feature_review(project, ["src"], "two", intent="make widgets")
+    given = create_feature_review(project, ["src"], "two", DeclaredInputs(intent="make widgets"))
     assert given.warnings == []
     assert given.declaration.intent == "make widgets"
 
@@ -324,7 +325,9 @@ def test_targets_and_refreshed_at_are_saved(project: Path) -> None:
 
 
 def test_refresh_feature_re_enumerates_files(project: Path) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent="make widgets")
+    created = create_feature_review(
+        project, ["src"], "payment", DeclaredInputs(intent="make widgets")
+    )
     (project / "src" / "b.py").write_text("def other_widget():\n    return 2\n", encoding="utf-8")
     result = refresh_review(created.id)
     assert result.updated is True
@@ -406,7 +409,7 @@ def test_refresh_feature_unchanged_writes_nothing(project: Path) -> None:
 
 @pytest.mark.parametrize("intent", ["   ", "あ" * 16_001], ids=["blank", "over-limit"])
 def test_refresh_keeps_the_intent_warnings_from_creation(project: Path, intent: str) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent=intent)
+    created = create_feature_review(project, ["src"], "payment", DeclaredInputs(intent=intent))
     assert created.warnings
     result = refresh_review(created.id)
     assert result.updated is False
@@ -682,7 +685,7 @@ def test_full_id_of_another_kind_does_not_resolve_to_a_digits_only_feature(
 
 
 def test_intent_declaration_warnings_are_stored_in_the_declaration(project: Path) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent="   ")
+    created = create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="   "))
     stored = json.loads((created.id.directory() / "review.json").read_text(encoding="utf-8"))
     assert stored["declaration"]["warnings"] == list(created.declaration.warnings)
     assert created.declaration.warnings
@@ -716,41 +719,48 @@ def test_missing_declaration_warning_is_a_declaration_warning(project: Path) -> 
 def test_refresh_intent_replaces_the_feature_declaration_and_stales_results(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent="make widgets")
+    created = create_feature_review(
+        project, ["src"], "payment", DeclaredInputs(intent="make widgets")
+    )
     assert main(["run", "shop:payment", "macro"], invoke=MacroFake([discovered()])) == EXIT_OK
     capsys.readouterr()
     # 何も変えない refresh は宣言を保つ
     kept = refresh_review(created.id)
     assert (kept.updated, kept.review.declaration.intent) == (False, "make widgets")
-    result = refresh_review(created.id, intent="make widgets and gadgets")
+    result = refresh_review(created.id, DeclaredInputs(intent="make widgets and gadgets"))
     assert result.updated is True
     assert result.review.declaration.intent == "make widgets and gadgets"
     assert load_review(created.id).declaration.intent == "make widgets and gadgets"
     assert main(["show", "shop:payment", "macro", "--json"]) == EXIT_OK
     assert json.loads(capsys.readouterr().out)["stale"] is True
     # 同じ文を重ねて渡しても、変わらないので更新しない
-    assert refresh_review(created.id, intent="make widgets and gadgets").updated is False
+    assert (
+        refresh_review(created.id, DeclaredInputs(intent="make widgets and gadgets")).updated
+        is False
+    )
     # 以後の refresh は差し替えた宣言を保つ
     assert refresh_review(created.id).review.declaration.intent == "make widgets and gadgets"
 
 
 def test_refresh_intent_file_reads_relative_to_the_working_directory(project: Path) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent="old")
+    created = create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="old"))
     (project / "intent.txt").write_text("from a file", encoding="utf-8")
-    result = refresh_review(created.id, intent_file=Path("intent.txt"), working_directory=project)
+    result = refresh_review(
+        created.id, DeclaredInputs(intent_file=Path("intent.txt")), working_directory=project
+    )
     assert result.review.declaration.intent == "from a file"
 
 
 def test_refresh_rejects_both_intent_options(project: Path) -> None:
-    created = create_feature_review(project, ["src"], "payment", intent="old")
+    created = create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="old"))
     with pytest.raises(ReviewError, match="同時に指定できません"):
-        refresh_review(created.id, intent="a", intent_file=Path("b"))
+        refresh_review(created.id, DeclaredInputs(intent="a", intent_file=Path("b")))
 
 
 def test_cli_refresh_intent_replaces_the_declaration(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    create_feature_review(project, ["src"], "payment", intent="old")
+    create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="old"))
     assert main(["refresh", "shop:payment", "--intent", "new intent"]) == EXIT_OK
     assert "レビューを更新しました" in capsys.readouterr().out
     assert load_review(resolve_review("shop:payment")).declaration.intent == "new intent"
@@ -765,7 +775,7 @@ def test_cli_refresh_intent_file_replaces_the_declaration(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_feature_review(project, ["src"], "payment", intent="old")
+    create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="old"))
     monkeypatch.chdir(project)
     (project / "intent.txt").write_text("from a file", encoding="utf-8")
     assert main(["refresh", "shop:payment", "--intent-file", "intent.txt"]) == EXIT_OK
@@ -776,7 +786,7 @@ def test_cli_refresh_intent_file_replaces_the_declaration(
 def test_cli_refresh_rejects_both_intent_options(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    create_feature_review(project, ["src"], "payment", intent="old")
+    create_feature_review(project, ["src"], "payment", DeclaredInputs(intent="old"))
     with pytest.raises(SystemExit) as raised:
         main(["refresh", "shop:payment", "--intent", "a", "--intent-file", "b"])
     assert raised.value.code == 2

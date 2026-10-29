@@ -17,10 +17,10 @@ from jigane.skills.mcp import McpSelection
 
 def test_mcps_temporary_file_is_private_to_the_owner(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    write_mcp(("owasp-mas",))
+    write_mcp(("mobile-sec",))
     fake = ConfigCapture()
     security.run_security(
-        AssemblyInput.load(review), settings_for(fake), McpSelection.load(("owasp-mas",))
+        AssemblyInput.load(review), settings_for(fake), McpSelection.load(("mobile-sec",))
     )
     assert fake.seen
     for _path, _content, mode in fake.seen:

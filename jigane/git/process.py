@@ -3,9 +3,11 @@
 import errno
 import ntpath
 import os
+import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -186,15 +188,78 @@ def run_resolved(
     return _run_resolved(args, **kwargs)
 
 
+# blockReadsOutsideWorkingDirectories（jigane.llm_runs.claude の build_command）が効く最も古い版
+MINIMUM_CLAUDE_VERSION = (2, 1, 257)
+_CLAUDE_VERSION = re.compile(r"\s*(\d+)\.(\d+)\.(\d+)")
+_CLAUDE_VERSION_TIMEOUT_SECONDS = 60
+# 版を確かめ終えた claude の絶対パス。確かめは実体ごとにプロセスで一度だけ行う
+_checked_claude_binaries: set[str] = set()
+_checked_claude_lock = threading.Lock()
+
+
 def run_claude_resolved(
     args: list[str],
     **kwargs: Any,  # noqa: ANN401 subprocess.run の引数を、呼び出し側が選んだまま渡す
 ) -> subprocess.CompletedProcess[str]:
     """run_resolved の claude 用。jigane.llm_runs.claude.run だけが呼ぶ。
 
+    claude の実体を一度だけ解き、その実体の版を確かめてから、同じ実体で起動する。
     外からの呼び出しは ast-grep の規則が落とす。
     """
-    return _run_resolved(args, **kwargs)
+    launched = _resolve_claude(args, kwargs.get("env"))
+    with _checked_claude_lock:
+        if launched[0] not in _checked_claude_binaries:
+            _require_claude_version(launched[0], kwargs)
+            _checked_claude_binaries.add(launched[0])
+    return _run_resolved(launched, **kwargs)
+
+
+def _resolve_claude(args: list[str], env: dict[str, str] | None) -> list[str]:
+    """先頭を claude の実体の絶対パスにした argv。版の確かめと起動に同じ実体を使うため。"""
+    if is_windows():
+        # 引数ごと解く。cmd.exe を通る実体の断りは引数を見るため、版の確かめより先に効かせる
+        return resolve_command(args, env)
+    path = (os.environ if env is None else env).get("PATH", os.environ.get("PATH", ""))
+    found = shutil.which(args[0], path=path)
+    if found is None:
+        missing = f"実行ファイルが見つかりません: {args[0]}"
+        raise CommandError(args, missing, missing_executable=True)
+    # リンクの先ではなく、PATH で見つけた名前のまま起動する
+    return [str(Path(found).absolute()), *args[1:]]
+
+
+def _require_claude_version(binary: str, kwargs: dict[str, Any]) -> None:
+    """古い、または版を読み取れない claude を起動させない。版の文字列は claude の自己申告。"""
+    command = [binary, "--version"]
+    try:
+        completed = _run_resolved(
+            command,
+            cwd=kwargs.get("cwd"),
+            env=kwargs.get("env"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_CLAUDE_VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        completed = None
+    match = None if completed is None else _CLAUDE_VERSION.match(completed.stdout or "")
+    if completed is None or completed.returncode != 0 or match is None:
+        shown = "応答がありません" if completed is None else (completed.stdout or completed.stderr)
+        raise CommandError(
+            command,
+            f"Claude Code の版を読み取れないため起動しません（{shown.strip()[-200:]}）。"
+            "`claude --version` が版を返すことを確かめ、2.1.257 以降を入れてください",
+        )
+    version = tuple(int(part) for part in match.groups())
+    if version < MINIMUM_CLAUDE_VERSION:
+        shown = ".".join(str(part) for part in version)
+        raise CommandError(
+            command,
+            f"Claude Code {shown} は作業ディレクトリの外の読み取りを拒む設定を無視するため、"
+            "起動しません。2.1.257 以降へ上げてください",
+        )
 
 
 def _run_resolved(

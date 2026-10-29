@@ -368,9 +368,8 @@ def test_changed_content_with_the_same_version_is_not_imported(
     failure = failure_of(
         {s.name: s for s in states if isinstance(s, LanguageUnavailable)}, "kotlin"
     )
+    # 理由の文言は test_plugin_reapproval_reasons.py が同じ改変で確かめる
     assert failure.reason_kind is ReasonKind.VALIDATION_ERROR
-    assert "承認のあと、配布の中身が変わっています" in failure.detail
-    assert "jigane languages enable kotlin" in failure.detail
     assert not marker.exists()
 
 
@@ -381,7 +380,6 @@ def test_missing_file_is_not_imported(install: Installer, tmp_path: Path) -> Non
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     failures = [s for s in states if isinstance(s, LanguageUnavailable)]
     assert [f.name for f in failures] == ["kotlin"]
-    assert "承認のあと、配布の中身が変わっています" in failures[0].detail
     assert not marker.exists()
 
 
@@ -394,7 +392,6 @@ def test_added_file_is_not_imported(install: Installer, tmp_path: Path) -> None:
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     failures = [s for s in states if isinstance(s, LanguageUnavailable)]
     assert [f.name for f in failures] == ["kotlin"]
-    assert "承認のあと、配布の中身が変わっています" in failures[0].detail
     assert not marker.exists()
 
 

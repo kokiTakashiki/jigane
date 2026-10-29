@@ -18,9 +18,6 @@ from jigane.skills.language_support import support_of
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "jigane-language-kotlin"
 DISTRIBUTION = "jigane-language-kotlin"
-VERSION = tomllib.loads((EXAMPLE / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-    "version"
-]
 
 
 @pytest.fixture

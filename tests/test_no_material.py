@@ -16,7 +16,7 @@ from jigane.groups.definitions import MACRO
 from jigane.policy_materials.changed_files import PrebuiltSection
 from jigane.policy_materials.design_doc import design_materials
 from jigane.policy_materials.missing import MissingMaterial
-from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.lifecycle import DeclaredInputs, create_feature_review
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.group_result import (
@@ -116,7 +116,7 @@ def test_code_scope_without_figures_and_declaration_is_missing_material(project:
     )
     # 宣言があれば、図が空でも材料なしにしない
     assert macro.missing_material(with_declaration, empty) == ()
-    intent = create_feature_review(project, ["src"], "i", intent="買い物を助ける")
+    intent = create_feature_review(project, ["src"], "i", DeclaredInputs(intent="買い物を助ける"))
     assert macro.missing_material(intent, empty) == ()
 
 

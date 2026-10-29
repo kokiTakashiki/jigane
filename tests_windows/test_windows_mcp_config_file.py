@@ -12,7 +12,7 @@ from jigane.skills.mcp import McpSelection, McpServer
 
 
 def test_config_file_lives_under_the_user_temp_directory_and_is_removed() -> None:
-    selection = McpSelection((McpServer("owasp-mas", {"command": "x"}, None),))
+    selection = McpSelection((McpServer("mobile-sec", {"command": "x"}, None),))
 
     with selection.config_file() as path:
         assert path is not None

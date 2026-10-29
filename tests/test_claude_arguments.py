@@ -138,11 +138,14 @@ def test_security_mcp_launch_allows_only_selected_servers(tmp_path: Path) -> Non
         group,
         tmp_path,
         security.DISCOVERY_TOOLS,
-        (tmp_path / "mcp.json", McpSelection((McpServer("owasp-mas", {}, None),)).allowed_tools()),
+        (
+            tmp_path / "mcp.json",
+            McpSelection((McpServer("mobile-sec", {}, None),)).allowed_tools(),
+        ),
     )
     assert command[command.index("--mcp-config") + 1] == str(tmp_path / "mcp.json")
     allowed = command[command.index("--allowedTools") + 1].split(",")
-    assert set(allowed) == {"mcp__owasp-mas", *claude.MCP_RESOURCE_TOOLS}
+    assert set(allowed) == {"mcp__mobile-sec", *claude.MCP_RESOURCE_TOOLS}
     assert not tools_outside_allowed_list(tools_argument(command))
     assert not FORBIDDEN_FLAGS & set(command)
 

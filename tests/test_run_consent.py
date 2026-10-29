@@ -288,10 +288,10 @@ def test_consent_text_shows_the_mcp_line() -> None:
         plan.groups,
         can_increase=True,
         effort=None,
-        mcp=McpSelection((McpServer("owasp-mas", {}, None), McpServer("backendsec", {}, None))),
+        mcp=McpSelection((McpServer("mobile-sec", {}, None), McpServer("server-sec", {}, None))),
     )
     lines = consent_text(selected)
-    assert "使う MCP: owasp-mas, backendsec" in lines
+    assert "使う MCP: mobile-sec, server-sec" in lines
     assert "MCP は使いません" not in lines
     assert "これらのサーバの道具はすべて承認なしで使われます。" in lines
     assert "承認なし" not in " ".join(consent_text(plan))

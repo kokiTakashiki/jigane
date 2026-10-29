@@ -21,7 +21,7 @@
 
 読むサブパッケージ：`git`、`languages`、`markdown`、`preconditions`、`storage`
 
-読まれるサブパッケージ：`commands`、`design`、`flaky`、`policy_materials`、`pull_request_context`、`regex`、`reviews`、`sequence`、`skills`
+読まれるサブパッケージ：`commands`、`design`、`flaky`、`policy_materials`、`pull_request_context`、`regex`、`reviews`、`sequence`、`skills`、`static_analysis`
 
 <!-- END GENERATED: dependencies -->
 

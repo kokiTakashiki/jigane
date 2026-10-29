@@ -17,7 +17,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`pull_request_context`、`storage`
+読むサブパッケージ：`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`pull_request_context`、`static_analysis`、`storage`
 
 読まれるサブパッケージ：`commands`、`design`、`policy_materials`、`publishing`、`sequence`、`skills`、`technology_list`
 

@@ -38,6 +38,7 @@ _.model_config  # skills/output_models.py。pydantic がクラスの変数 model
 _.declaration_ref  # llm_runs/finding_model.py。pydantic が入力の鍵と欄を名前で突き合わせる
 _.judgment_region  # 同上
 _._check_conditions  # 同上。pydantic が model_validator の付いた関数を検証の時に呼ぶ
+_._first_location_only  # static_analysis/models.py。pydantic が field_validator の付いた関数を検証の時に呼ぶ
 _.pytest_plugins  # pytest が conftest の変数 pytest_plugins を読んでプラグインを読み込む
 
 # --- pytest の fixture。試験関数の引数の名前で注入されるので、コードに呼び出しが現れない ---

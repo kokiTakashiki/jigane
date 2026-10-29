@@ -18,7 +18,7 @@ from jigane.storage.store_format import Upgrade, upgrade_mapping
 # 地図の保存物のファイル名。保存する側（reviews）と読む側がここから読む
 MAP_FILE = "map.json"
 # map.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
-MAP_FORMAT = 3
+MAP_FORMAT = 4
 
 
 def _segments_from(stored: Mapping[str, Any]) -> list[Segment]:
@@ -230,8 +230,19 @@ def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v3(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """版 3 の map.json を次の版へ移す。区間に空の指摘の識別子を、集計に新しい種類の 0 を足す。"""
+    upgraded = copy.deepcopy(dict(raw))
+    for segment in upgraded["segments"]:
+        segment.setdefault("static_finding_ids", [])
+    # 設計書の地図の最上位の集計は節の語彙で、コードの語彙の集計は current_form の下にある
+    code_table = upgraded.get("current_form", upgraded)
+    code_table["line_counts"]["by_kind"].setdefault("static_finding", 0)
+    return upgraded
+
+
 # 保存された版から次の版への移し。load_map が MAP_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2}
+_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2, 3: _upgrade_v3}
 
 
 def load_map(raw: Mapping[str, Any]) -> JudgmentMapKind:
