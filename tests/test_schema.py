@@ -10,8 +10,8 @@ from pydantic import ValidationError
 from jigane.findings.discard import DiscardKind
 from jigane.findings.records import ToolBasis, Triage, Verdict
 from jigane.groups.definitions import GroupId
+from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.finding_model import Finding, ToolClaim
-from jigane.skills.output_models import json_schema_of
 
 
 def _values(enum: Iterable[StrEnum]) -> list[str]:

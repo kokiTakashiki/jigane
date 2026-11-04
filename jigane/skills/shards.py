@@ -115,7 +115,7 @@ class DesignFileShard(_UnitShard):
     document_path: str
     # 設計書の全文（行番号付き）
     document: str
-    # 受け持つファイルごとの、設計書が名指した節と推しの理由
+    # 受け持つファイルごとの、設計書が名指した節と候補にした理由
     selection: str
     # 付属の文書。パスは指摘の根拠に認める位置になる
     attachments: tuple[AttachmentContent, ...] = ()

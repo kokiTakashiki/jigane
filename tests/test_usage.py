@@ -15,6 +15,7 @@ from jigane.commands.subcommands.show import run_record
 from jigane.findings.records import Triage, load_history_checked
 from jigane.groups.definitions import MICRO
 from jigane.groups.policy_runs import PolicyRole
+from jigane.llm_runs import claude
 from jigane.llm_runs.usage_table import (
     INPUT_SIDE_TOKEN_FIELDS,
     UsageField,
@@ -418,7 +419,7 @@ WIDE_ONLY_NAMES = {
 COMPACT_HEADINGS = (
     "群",
     "役",
-    "プロンプト版",
+    "プロンプトの型の版",
     "起動",
     "トークン合計",
     "金額USD",
@@ -433,7 +434,7 @@ WIDE_HEADINGS = (
     "群",
     "役",
     "モデル",
-    "プロンプト版",
+    "プロンプトの型の版",
     "文字数",
     "起動",
     "ターン",
@@ -510,3 +511,66 @@ def test_shared_usage_fields_match_the_columns_the_writer_defines() -> None:
     assert {c.name for c in usage.COLUMNS} <= shared | triage_names
     for field in INPUT_SIDE_TOKEN_FIELDS:
         assert field.value in {c.name for c in usage.COLUMNS}
+
+
+def test_invocation_model_is_recorded_and_read_back() -> None:
+    row = claude.parse_record({}, 0.5, "haiku").as_row()
+    assert row["model"] == "haiku"
+    assert claude.StoredInvocationRecord.from_row(row).model == "haiku"
+    assert claude.failure_record(None, 0.5, "haiku").model == "haiku"
+
+
+def test_invocation_without_model_reads_as_none_and_writes_no_key() -> None:
+    old_row = claude.parse_record({}, 0.5, "haiku").as_row()
+    del old_row["model"]
+    old = claude.StoredInvocationRecord.from_row(old_row)
+    assert old.model is None
+    assert "model" not in old.as_row()
+    assert "model" not in claude.parse_record({}, 0.5).as_row()
+
+
+def test_usage_rows_show_the_model_of_each_invocation(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    runs = {
+        "micro": {
+            "model": "sonnet",
+            "invocations": [
+                invocation("discovery", model="sonnet"),
+                invocation("judge", model="haiku"),
+                invocation("judge", model="haiku"),
+            ],
+        }
+    }
+    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    rows = usage_json(review, capsys)
+    assert [(row["model"], row["calls"]) for row in rows[:-1]] == [("sonnet", 1), ("haiku", 2)]
+    assert rows[-1]["model"] == "sonnet, haiku"
+
+
+def test_usage_splits_one_role_by_model_and_keeps_old_records_on_the_run_model(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    runs = {
+        "micro": {
+            "model": "sonnet",
+            "invocations": [invocation("judge"), invocation("judge", model="haiku")],
+        }
+    }
+    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    rows = usage_json(review, capsys)
+    assert [(row["model"], row["calls"]) for row in rows] == [
+        ("haiku", 1),
+        ("sonnet", 1),
+        ("haiku, sonnet", 2),
+    ]
+
+
+def test_usage_of_old_records_only_keeps_the_run_model(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    write_fixture(review)
+    assert {row["model"] for row in usage_json(review, capsys)} == {"m"}

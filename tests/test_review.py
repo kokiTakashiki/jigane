@@ -576,7 +576,7 @@ def test_legacy_digits_only_feature_record_does_not_break_list_or_resolve(
 def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(project: Path) -> None:
     kept = create_feature_review(project, ["src"], "kept")
     moved = create_feature_review(project, ["src"], "moved")
-    # 識別子は範囲（@moved）を名乗るが、保存先は機能のディレクトリ名（印が無い）
+    # 識別子は範囲（@moved）を名乗るが、保存先はファイルのレビューのディレクトリ名（印が無い）
     meta_path = moved.id.directory() / REVIEW_FILE
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["id"] = f"{moved.id.owner}/{moved.id.repo}@moved"

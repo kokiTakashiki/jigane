@@ -317,6 +317,9 @@ def gh_call_error(executable: Path, arguments: list[str], home: Path) -> str | N
     for argument in arguments:
         if re.fullmatch(r"[\w.-]+(/[\w.-]+)*", argument) and not argument.startswith("-"):
             path = home / "work" / argument
+            # `..` の成分で一時の場所の外へ出る語は、外にファイルを作らないよう置かずに飛ばす
+            if not path.resolve().is_relative_to((home / "work").resolve()):
+                continue
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
                 path.touch()
@@ -348,7 +351,9 @@ def run_gh_lines(directory: Path) -> int:
         return 1
     failed = 0
     for name, arguments in calls:
-        with tempfile.TemporaryDirectory() as temporary:
+        # Windows では gh の終わった直後も別のプロセスが一時の場所を掴むことがあり、
+        # 後片付けの失敗で検査を落とさないため。残った場所は OS の一時の置き場に残るだけ
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             home = Path(temporary)
             (home / "work").mkdir()
             output = gh_call_error(executable, arguments, home)
@@ -376,7 +381,9 @@ def audit(
     directory: Path,
     checks: Sequence[Callable[[Path], int]] = DEFAULT_CHECKS,
 ) -> int:
-    with tempfile.TemporaryDirectory() as temporary:
+    # Windows では検査の外のプロセスが終わった直後も一時の場所を別のプロセスが掴むことがあり、
+    # 後片付けの失敗で検査を落とさないため。残った場所は OS の一時の置き場に残るだけ
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         # zizmor はディレクトリの名前が .github/workflows でないとワークフローとして集めない。
         # 各検査には写しの .github を渡す。zizmor は .github 配下の composite action も集める
         github = Path(temporary) / DEFAULT_DIRECTORY.parent

@@ -17,9 +17,9 @@ from jigane.findings.records import (
     load_history_checked,
 )
 from jigane.groups.definitions import GROUP_BY_ID, GroupId
-from jigane.languages.plugins import sanitize_text
 from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review
+from jigane.text.terminal import sanitize_text
 
 
 class StderrWarningHandler(logging.Handler):

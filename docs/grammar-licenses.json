@@ -1,0 +1,46 @@
+{
+  "pack": {
+    "name": "tree-sitter-language-pack",
+    "version": "1.22.1",
+    "repository": "xberg-io/tree-sitter-language-pack",
+    "spdx": "MIT",
+    "license_url": "https://github.com/xberg-io/tree-sitter-language-pack/blob/v1.22.1/LICENSE"
+  },
+  "source": {
+    "repository": "xberg-io/tree-sitter-language-pack",
+    "tag": "v1.22.1",
+    "definitions_path": "crates/ts-pack-core/language_definitions.json"
+  },
+  "languages": {
+    "python": {
+      "repository": "tree-sitter/tree-sitter-python",
+      "rev": "26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64",
+      "spdx": "MIT",
+      "license_url": "https://github.com/tree-sitter/tree-sitter-python/blob/26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64/LICENSE"
+    },
+    "java": {
+      "repository": "tree-sitter/tree-sitter-java",
+      "rev": "e10607b45ff745f5f876bfa3e94fbcc6b44bdc11",
+      "spdx": "MIT",
+      "license_url": "https://github.com/tree-sitter/tree-sitter-java/blob/e10607b45ff745f5f876bfa3e94fbcc6b44bdc11/LICENSE"
+    },
+    "swift": {
+      "repository": "alex-pinkus/tree-sitter-swift",
+      "rev": "d36d45270eae98b197cb6d8f133ae43e3586b83c",
+      "spdx": "MIT",
+      "license_url": "https://github.com/alex-pinkus/tree-sitter-swift/blob/d36d45270eae98b197cb6d8f133ae43e3586b83c/LICENSE"
+    },
+    "csharp": {
+      "repository": "tree-sitter/tree-sitter-c-sharp",
+      "rev": "8c0abe0b84a3681d3e6852ce2e2a1eecb4f731c5",
+      "spdx": "MIT",
+      "license_url": "https://github.com/tree-sitter/tree-sitter-c-sharp/blob/8c0abe0b84a3681d3e6852ce2e2a1eecb4f731c5/LICENSE"
+    },
+    "kotlin": {
+      "repository": "fwcd/tree-sitter-kotlin",
+      "rev": "1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1",
+      "spdx": "MIT",
+      "license_url": "https://github.com/fwcd/tree-sitter-kotlin/blob/1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1/LICENSE"
+    }
+  }
+}

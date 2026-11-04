@@ -1,4 +1,4 @@
-"""examples/jigane-language-kotlin を、一時の site に入れた外のパッケージとして受け入れる。
+"""examples/jigane-language-kotlin を、一時の site に入れたプラグインのパッケージとして受け入れる。
 
 Kotlin の文法での解析は、文法の取得の仕組みと合わせて別の段で試験する。
 """

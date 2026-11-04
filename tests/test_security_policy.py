@@ -10,7 +10,7 @@ HEADINGS = (
     "## 守っている前提",
     "### データと外部コマンド",
     "### レビューの入力と Claude Code",
-    "### 外の言語",
+    "### 追加の言語",
     "### 費用の上限",
 )
 # 脅威の前提として利用者に読ませる語。コードの旗や変数の名前が変わったら、文書も直す
@@ -53,7 +53,13 @@ NOTICE_HEADING = "## データの送り先と利用の条件"
 
 
 def _notice_section() -> str:
-    return section_prose(README.read_text(encoding="utf-8"), NOTICE_HEADING)
+    destinations = (ROOT / "docs" / "data-destinations.md").read_text(encoding="utf-8")
+    return "\n".join(
+        [
+            section_prose(README.read_text(encoding="utf-8"), NOTICE_HEADING),
+            section_prose(destinations, "# データの送り先"),
+        ]
+    )
 
 
 def test_readme_notice_names_destinations_and_terms() -> None:
@@ -67,5 +73,5 @@ def test_readme_notice_names_destinations_and_terms() -> None:
 
 
 def test_readme_has_external_language_section() -> None:
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## 外の言語を足す" in headings(text)
+    text = (ROOT / "docs" / "adding-languages.md").read_text(encoding="utf-8")
+    assert "# 言語を追加する" in headings(text)

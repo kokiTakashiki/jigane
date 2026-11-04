@@ -61,7 +61,7 @@ def test_external_queries_are_read_from_the_plugin_data_place(
     places = registry.query_places()
     assert places[0] == BUILTIN_QUERIES_DIR
     assert places[1:] == (data / "languages" / "queries",)
-    # 外の言語の文法は本体の文法パックに無いので、読み込みだけを python の文法で代える
+    # 追加の言語の文法は本体の文法パックに無いので、読み込みだけを python の文法で代える
     python_language = grammars.get_language(grammars.BuiltinGrammar("python"))
     monkeypatch.setattr(queries, "get_language", lambda _target: python_language)
     assert "calls" in queries.load_queries("snake", places)

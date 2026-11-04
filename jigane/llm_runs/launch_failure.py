@@ -93,6 +93,7 @@ class RunRecordKind(StrEnum):
 
 
 _KEY_CONCERNS = "concerns"
+_KEY_VIEWPOINT = "viewpoint"
 _KEY_PROMPT_VERSION = "prompt_version"
 _KEY_PROMPT_CHARS = "prompt_chars"
 # 過去に書いていた欄。読んだ行の others に残さず捨てる
@@ -122,6 +123,8 @@ class StoredInvocation:
     # 発見役でない起動と古い行は None で、欄を書かない
     concerns: ShardConcerns | None
     others: Mapping[str, Any]
+    # 原則ごとの起動が問うた原則の番号（"P1" など）。他の起動と古い行は None で、欄を書かない
+    viewpoint: str | None = None
 
     @classmethod
     def of(
@@ -168,6 +171,7 @@ class StoredInvocation:
             "cost_usd",
             "cost_source",
             _KEY_CONCERNS,
+            _KEY_VIEWPOINT,
             _KEY_RETIRED_SESSION_ID,
             *(item.name for item in fields(StoredInvocationRecord)),
         }
@@ -188,6 +192,7 @@ class StoredInvocation:
                 stored_concerns["unspecified"],
             ),
             {key: item for key, item in row.items() if key not in own},
+            row.get(_KEY_VIEWPOINT),
         )
 
     def to_json(self) -> dict[str, Any]:
@@ -203,6 +208,8 @@ class StoredInvocation:
             stored["rerun"] = self.rerun.value
         if self.budget_outcome is not None:
             stored["budget_outcome"] = self.budget_outcome.value
+        if self.viewpoint is not None:
+            stored[_KEY_VIEWPOINT] = self.viewpoint
         if self.concerns is not None:
             stored[_KEY_CONCERNS] = {
                 "passed": [

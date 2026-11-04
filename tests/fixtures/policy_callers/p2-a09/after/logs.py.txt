@@ -1,0 +1,17 @@
+import enum
+
+
+class Level(enum.Enum):
+    TRACE = 0
+    INFO = 1
+    WARNING = 2
+    ERROR = 3
+    FATAL = 4
+
+
+def emit(level, message):
+    return "[%s] %s" % (level.name, message)
+
+
+def report_failure(message):
+    return emit(Level.ERROR, message)

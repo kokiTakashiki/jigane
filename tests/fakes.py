@@ -1,6 +1,8 @@
 import json
+import ntpath
 import re
 import shlex
+import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
@@ -12,6 +14,7 @@ import pytest
 from tree_sitter import Node
 
 from jigane.findings.records import GroupResult
+from jigane.git.process import is_windows
 from jigane.groups.definitions import MACRO, Effort
 from jigane.languages import registry
 from jigane.languages.base import Declaration
@@ -59,22 +62,62 @@ def run_command_stub(handler: Callable[[list[str]], str]) -> Callable[..., str]:
 FAKE_CLAUDE_SCRIPT = Path(__file__).parent.parent / "scripts" / "fake_claude.py"
 
 
+# Windows の置き札のパス（正規化済み）から、起動の実体 [python, script, *先頭の引数] への対応
+_PLACEHOLDER_LAUNCHES: dict[str, list[str]] = {}
+
+
+def _placeholder_key(path: object) -> str:
+    return ntpath.normcase(ntpath.abspath(str(path)))
+
+
 def write_fake_claude_wrapper(
     directory: Path,
     python: str = sys.executable,
     script: Path = FAKE_CLAUDE_SCRIPT,
     leading_arguments: Sequence[str] = (),
 ) -> Path:
-    """偽の claude を起こす sh の包みを書く。
+    """偽の claude を起こす包みを書き、そのパスを返す。
 
-    shebang は空白を含むパスの解釈器を指せないため、包みの中で python と
-    スクリプトを引用して呼ぶ。leading_arguments は claude の引数の前に足す。
+    POSIX では sh の包み `fake-claude` を書く。shebang は空白を含むパスの解釈器を指せないため、
+    包みの中で python とスクリプトを引用して呼ぶ。leading_arguments は claude の引数の前に足す。
+
+    Windows では `fake-claude.exe` という置き札のファイルを書く。中身は起動されない。
+    shutil.which が PATHEXT の .EXE で見つけ、cmd.exe を通らないので特別な文字の断りも受けない。
+    起動は launching_placeholders が返す subprocess.run の包みが、python とスクリプトへ書き換える。
     """
+    if is_windows():
+        placeholder = directory / "fake-claude.exe"
+        placeholder.write_bytes(b"")
+        _PLACEHOLDER_LAUNCHES[_placeholder_key(placeholder)] = [
+            python,
+            str(script),
+            *leading_arguments,
+        ]
+        return placeholder
     wrapper = directory / "fake-claude"
     command = " ".join(shlex.quote(part) for part in (python, str(script), *leading_arguments))
     wrapper.write_text(f'#!/bin/sh\nexec {command} "$@"\n', encoding="utf-8")
     wrapper.chmod(0o755)
     return wrapper
+
+
+def launching_placeholders(
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,  # noqa: TID251 - 本物を包むために参照する
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Windows で、置き札の起動を偽のスクリプトの起動へ書き換える subprocess.run の包みを返す。
+
+    先頭が write_fake_claude_wrapper の置き札のパスなら、`[python, script, *leading_arguments,
+    *残りの引数]` にして run を呼ぶ。それ以外の起動と POSIX では run をそのまま呼ぶ。
+    """
+
+    def launch(args: Sequence[str], *rest: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:  # noqa: ANN401 - subprocess.run と同じ形
+        if is_windows() and args:
+            target = _PLACEHOLDER_LAUNCHES.get(_placeholder_key(args[0]))
+            if target is not None:
+                args = [*target, *args[1:]]
+        return run(args, *rest, **kwargs)
+
+    return launch
 
 
 def clear_policy(review: Review) -> None:
@@ -151,8 +194,29 @@ def discovered(viewpoint: str = "M2", path: str = "src/a.py") -> dict[str, Any]:
     }
 
 
+def _single_viewpoint(invocation: claude.Invocation) -> str | None:
+    """スキーマの viewpoint の enum が原則の番号一つだけなら、その番号。"""
+    schema = invocation.json_schema or {}
+    found: list[Any] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict) and isinstance(props.get("viewpoint"), dict):
+                found.append(props["viewpoint"].get("enum"))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(schema)
+    enums = [e for e in found if e and len(e) == 1 and e[0].startswith("P")]
+    return enums[0][0] if enums else None
+
+
 class MacroFake:
-    """図だけの形の一回の起動を受ける偽の起動関数。
+    """図の形の起動（図の起動と原則ごとの起動）を受ける偽の起動関数。
 
     findings は応答の指摘で、in_scope を真にして返す。output を渡すと、その辞書をそのまま返す。
     """
@@ -163,26 +227,50 @@ class MacroFake:
         *,
         fail_discovery: bool = False,
         output: dict[str, Any] | None = None,
+        fail_principles: bool = False,
     ) -> None:
         self.findings = findings
+        self.fail_principles = fail_principles
         self.fail_discovery = fail_discovery
         self.output = output
         self.calls: list[claude.Invocation] = []
 
     @property
     def prompt(self) -> str:
-        return self.calls[-1].prompt
+        return self.diagram_calls[-1].prompt
+
+    @property
+    def diagram_calls(self) -> list[claude.Invocation]:
+        """図の起動。原則ごとの起動は、観点の enum が原則の番号一つだけ。"""
+        return [call for call in self.calls if _single_viewpoint(call) is None]
+
+    @property
+    def principle_calls(self) -> list[claude.Invocation]:
+        return [call for call in self.calls if _single_viewpoint(call) is not None]
 
     def __call__(self, invocation: claude.Invocation) -> claude.InvocationResult:
         self.calls.append(invocation)
+        only = _single_viewpoint(invocation)
+        if only is not None and self.fail_principles:
+            raise claude.ClaudeInvocationError("boom", RECORD)
+        if self.fail_discovery and only is None:
+            raise claude.ClaudeInvocationError("boom", RECORD)
         if self.fail_discovery:
             raise claude.ClaudeInvocationError("boom", RECORD)
-        if self.output is not None:
+        if self.output is not None and only is None:
             return claude.InvocationResult(self.output, RECORD)
-        findings = [{**f, "in_scope": True, "scope_reason": ""} for f in self.findings]
-        return claude.InvocationResult(
-            {"findings": findings, "merged": [], "discarded": []}, RECORD
-        )
+        # 原則の起動は、その原則の観点の指摘だけを返す
+        mine = [
+            f
+            for f in self.findings
+            if f["viewpoint"] == only or (only is None and not f["viewpoint"].startswith("P"))
+        ]
+        findings = [{**f, "in_scope": True, "scope_reason": ""} for f in mine]
+        # 原則の起動のスキーマは merged を持たない
+        output: dict[str, Any] = {"findings": findings, "discarded": []}
+        if only is None:
+            output["merged"] = []
+        return claude.InvocationResult(output, RECORD)
 
 
 def d_finding(viewpoint: str = "D1", path: str = "src/a.py") -> dict[str, Any]:
@@ -252,6 +340,8 @@ def with_budget(
             budget.model if model is None else model,
             budget.max_budget_usd if max_budget_usd is None else max_budget_usd,
             budget.reserve_margin if reserve_margin is None else reserve_margin,
+            budget.principles,
+            budget.output_allowance_tokens,
         ),
     )
 

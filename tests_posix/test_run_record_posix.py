@@ -9,7 +9,7 @@ import os
 import signal
 
 import pytest
-from test_run_record import _dead_pid, _read, _settings
+from run_record_support import dead_pid, read, settings
 
 from jigane.commands.views.findings import stopped_lines
 from jigane.findings.records import IN_PROGRESS_FILE
@@ -20,7 +20,7 @@ from jigane.skills import run_record
 
 def test_process_presence_reports_present_and_absent_by_signal_zero() -> None:
     assert run_record.process_presence(os.getpid()) is run_record.ProcessPresence.PRESENT
-    assert run_record.process_presence(_dead_pid()) is run_record.ProcessPresence.ABSENT
+    assert run_record.process_presence(dead_pid()) is run_record.ProcessPresence.ABSENT
 
 
 def test_dead_process_in_progress_shows_as_stopped(review: Review) -> None:
@@ -31,7 +31,7 @@ def test_dead_process_in_progress_shows_as_stopped(review: Review) -> None:
         "model": "m",
         "effort": None,
         "max_budget_usd": 1.0,
-        "pid": _dead_pid(),
+        "pid": dead_pid(),
     }
     (directory / IN_PROGRESS_FILE).write_text(json.dumps({"macro": started}), encoding="utf-8")
     view = run_record.stopped_view(directory, MACRO)
@@ -53,11 +53,11 @@ def test_dead_process_in_progress_shows_as_stopped(review: Review) -> None:
 
 def test_sigterm_is_recorded_as_terminate(review: Review) -> None:
     def terminated() -> None:
-        with run_record.tracking(review, MACRO, _settings()):
+        with run_record.tracking(review, MACRO, settings()):
             os.kill(os.getpid(), signal.SIGTERM)
 
     with pytest.raises(KeyboardInterrupt):
         terminated()
-    [stopped] = _read(review, run_record.STOPPED_FILE)["macro"]
+    [stopped] = read(review, run_record.STOPPED_FILE)["macro"]
     assert stopped["kind"] == "terminate"
     assert stopped["stopped_at"] is not None

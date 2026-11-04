@@ -93,7 +93,7 @@ def test_design_plan_has_one_document_shard_and_file_shards(repo: Path) -> None:
         assert "| 群 | 問う懸念 |" in insert
     assert "設計書の構造" in sharded._design_insert(document_shard)
     assert "設計書の構造" not in sharded._design_insert(file_shard)
-    assert "選んだファイルと推しの理由" in sharded._design_insert(file_shard)
+    assert "選んだファイルと候補にした理由" in sharded._design_insert(file_shard)
     assert "`Cart` を名指しました" in sharded._design_insert(file_shard)
 
 

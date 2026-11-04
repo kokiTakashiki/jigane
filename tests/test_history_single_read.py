@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from fakes import MacroFake, discovered
-from test_history_warning import _break_history
+from review_fakes import break_history
 from test_review_relations import finding, save, write_findings
 
 from jigane.commands import main
@@ -82,7 +82,7 @@ def test_own_corrupt_history_is_reported_once_and_not_logged(
     project: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
     current = save(project, "solo", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00", "a..b")
-    warning = _break_history(current)
+    warning = break_history(current)
     with caplog.at_level(logging.WARNING):
         arguments = ["run", str(current.id), "macro", "--json"]
         assert main(arguments, invoke=MacroFake([discovered("M4")])) == EXIT_OK
@@ -97,7 +97,7 @@ def test_estimate_reports_own_and_related_corrupt_histories(
     older = save(project, "equiv1", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00", "a..b")
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     (older.id.directory() / HISTORY_FILE).write_text("{not json", encoding="utf-8")
-    own = _break_history(current)
+    own = break_history(current)
     arguments = ["estimate", str(current.id), "macro", *(["--json"] if as_json else [])]
     assert main(arguments) == EXIT_OK
     out = capsys.readouterr().out

@@ -1,7 +1,7 @@
 """設計書のレビューを作り、refresh する。設計は docs/design-review/design-review.md の 4.2 節。
 
 出所に保存するのは、設計書のパスと版、いまのコードの版、利用者の選択の三つだけ。
-推しは保存せず、作るときと refresh のたびに設計書といまのコードから作り直す。
+候補は保存せず、作るときと refresh のたびに設計書といまのコードから作り直す。
 """
 
 import hashlib
@@ -151,7 +151,7 @@ def _recommended_paths(root: Path, document_text: str) -> list[str]:
 
 def _selection_warnings(selection: tuple[str, ...], recommended: list[str]) -> list[str]:
     return [
-        f"選んだファイルが新しい推しに無い: {path}"
+        f"選んだファイルが新しい候補に無い: {path}"
         for path in selection
         if path not in recommended
     ]
@@ -198,7 +198,7 @@ def _build_content(
 
 
 def _declaration(document_path: str) -> Declaration:
-    return intent_declaration(f"設計書 {document_path} のレビュー。実装の前に方針の綻びを問う")
+    return intent_declaration(f"設計書 {document_path} のレビュー")
 
 
 def create_design_doc_review(
@@ -208,7 +208,7 @@ def create_design_doc_review(
     select: list[str] | None = None,
     attach: list[str] | None = None,
 ) -> Review:
-    """select が None なら、推しの候補すべてを選択にする。
+    """select が None なら、候補すべてを選択にする。
 
     attach は付属の文書で、
     省けば付けない。
@@ -250,7 +250,7 @@ def create_design_doc_review(
 def refresh_design_doc(
     review: Review, declaration_override: Declaration | None = None
 ) -> RefreshResult:
-    """設計書の版とコードの版を取り直し、推しを作り直して警告を付ける。選択は変えない。"""
+    """設計書の版とコードの版を取り直し、候補を作り直して警告を付ける。選択は変えない。"""
     origin = review.origin
     if not isinstance(origin, DesignDocOrigin):
         raise ReviewError(f"設計書の出所でない記録を設計書として refresh できません: {review.id}")

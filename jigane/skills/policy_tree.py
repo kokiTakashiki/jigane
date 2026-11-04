@@ -38,7 +38,7 @@ class PolicyTree:
 @dataclass(frozen=True)
 class ReviewTrees:
     after: PolicyTree
-    # 変更前の木。機能レビュー式には無い
+    # 変更前の木。ファイルのレビューには無い
     before: PolicyTree | None
 
 

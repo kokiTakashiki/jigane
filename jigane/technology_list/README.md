@@ -9,7 +9,7 @@
 | 名前 | 役割 |
 | --- | --- |
 | `build.build_model` | レビューから技術選定のモデル（dict）を作ります。CLI の `jigane technology-list` が使います |
-| `materials.short_section_text` | 一回の形の「技術選定」の節を、変化のあった技術だけの表にして、`build_model` から Markdown で作ります。`jigane.skills.macro` が使います |
+| `materials.short_section_text` | 一回の形の「技術選定」の節を、変化のあった技術だけの表にして、`build_model` から Markdown で作ります。変更したファイルから消えた技術は、`build.still_used_elsewhere` で他のファイルを調べ、使い続けていれば場所を添えます。`jigane.skills.macro` が使います |
 | `repository_modules.collect` | ツリーの中で定義されたモジュールの名前を、根拠のファイルと行とともに集めます |
 | `repository_modules.match` | 技術の名前が、集めた定義のどれに当たるかを返します |
 | `manifests.read` | 木を一度走査し、依存の宣言（パッケージの名前と版、ファイルと行）と、変更したファイルに効くマニフェストの配備の下限を読みます。ファイル名ごとの知識は、一行に集めた表 `MANIFEST_KINDS` が持ちます |

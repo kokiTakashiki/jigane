@@ -1,0 +1,13 @@
+from typing import NamedTuple
+
+
+class ClientConfig(NamedTuple):
+    host: str
+    port: int
+    timeout_s: float
+    use_tls: bool
+    retries: int
+
+
+def retry_budget(config: ClientConfig) -> float:
+    return config.timeout_s * config.retries

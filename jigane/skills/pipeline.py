@@ -35,6 +35,7 @@ from jigane.findings.records import (
     read_verification,
     reserve_numbers,
 )
+from jigane.groups import viewpoints
 from jigane.groups.definitions import GroupId
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude, finding_model
@@ -111,7 +112,7 @@ def prepare_candidates(
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for finding in discovered:
-        if finding["viewpoint"] == "M5" and not has_bot_findings:
+        if finding["viewpoint"] == viewpoints.BOT_RESPONSE.number and not has_bot_findings:
             # M5 はボットの指摘への対応を問う観点で、一覧が無ければ問えない。
             drops.without_bot_findings += 1
             continue
@@ -401,14 +402,18 @@ class PolicyGroupRun(GroupRun):
     dropped_without_bot_findings: int | None = None
     record_kind: str | None = None
     no_material: tuple[str, ...] | None = None
+    # 入力の見積もりで起動しなかった起動の記録。シャードの群の budget_stops と同じ形と欄名
+    budget_stops: tuple[Mapping[str, Any], ...] | None = None
 
     _OWN_PLAIN_KEYS = ("dropped_without_bot_findings", "record_kind")
 
     @classmethod
     def from_json(cls, value: Mapping[str, Any]) -> "PolicyGroupRun":
         stored_no_material = value.get("no_material")
+        stored_stops = value.get("budget_stops")
         return cls(
-            **cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "no_material")),
+            **cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "no_material", "budget_stops")),
+            budget_stops=None if stored_stops is None else tuple(stored_stops),
             dropped_without_bot_findings=value.get("dropped_without_bot_findings"),
             record_kind=value.get("record_kind"),
             no_material=None if stored_no_material is None else tuple(stored_no_material),
@@ -421,6 +426,8 @@ class PolicyGroupRun(GroupRun):
                 stored[key] = getattr(self, key)
         if self.no_material is not None:
             stored["no_material"] = list(self.no_material)
+        if self.budget_stops is not None:
+            stored["budget_stops"] = [dict(item) for item in self.budget_stops]
         return {**stored, **self.others}
 
 
@@ -663,9 +670,10 @@ def stored_invocation(
     rerun: RerunKind = RerunKind.INITIAL,
     *,
     concerns: ShardConcerns | None = None,
+    viewpoint: str | None = None,
 ) -> StoredInvocation:
     """concerns は発見役の起動が渡した懸念。発見役でない起動は None で、欄を書かない。"""
-    return StoredInvocation.of(
+    row = StoredInvocation.of(
         role,
         split_index,
         record,
@@ -674,6 +682,7 @@ def stored_invocation(
         rerun=None if rerun is RerunKind.INITIAL else rerun,
         concerns=concerns,
     )
+    return row if viewpoint is None else replace(row, viewpoint=viewpoint)
 
 
 def input_token_total(record: StoredInvocationRecord) -> int:

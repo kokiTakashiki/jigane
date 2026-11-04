@@ -10,9 +10,10 @@ from pydantic import ValidationError
 from jigane.findings.discard import DisclosedNitReason
 from jigane.findings.records import StoredFinding
 from jigane.llm_runs import claude
+from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.launch_failure import StoredInvocation
 from jigane.skills import adversarial, disclosed, pipeline
-from jigane.skills.output_models import BundleGroups, json_schema_of
+from jigane.skills.output_models import BundleGroups
 
 ROLE = "bundle_disclosed"
 MIN_TARGETS = 2

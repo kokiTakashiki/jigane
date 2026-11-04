@@ -1,6 +1,6 @@
-"""設計書の名指しをいまのコードに引き当て、突き合わせるファイルを推す。設計は 4.5 節。
+"""設計書の名指しをいまのコードに引き当て、突き合わせるファイルの候補を挙げる。設計は 4.5 節。
 
-LLM は呼ばない。同じ設計書と同じ作業ディレクトリからは、同じ推しと同じ照合の表が出る。
+LLM は呼ばない。同じ設計書と同じ作業ディレクトリからは、同じ候補と同じ照合の表が出る。
 言語アダプタの無いファイルは索引に入らないので、型と呼び出しの引き当てには現れない。
 パスの名指しだけは、試験を除く全てのファイルを引き当てる。
 """
@@ -169,7 +169,7 @@ class NotFound:
 
 @dataclass(frozen=True)
 class Ambiguous:
-    """名前は引けたが、候補が複数あって一つに絞れなかったもの。推しの候補には入れない。"""
+    """名前は引けたが、候補が複数あって一つに絞れなかったもの。候補には入れない。"""
 
     mention: Mention
     # 二つ以上ある
@@ -383,7 +383,7 @@ class _World:
 
 
 def recommend(root: Path, document: DesignDocument, limit: int = DEFAULT_LIMIT) -> Recommendation:
-    """設計書の名指しをいまのコードに引き当て、突き合わせるファイルを上限つきで推す。"""
+    """設計書の名指しをいまのコードに引き当て、突き合わせるファイルの候補を上限つきで挙げる。"""
     if limit < 1:
         raise ValueError(f"limit は 1 以上にしてください: {limit}")
     world = _World(root.resolve())
@@ -930,6 +930,36 @@ def _writes(function: ast.AST) -> bool:
     return False
 
 
+def _file_accessors(path: str, text: str, constants: Mapping[str, set[str]]) -> list[_Accessor]:
+    """一つのファイルの、定数を参照する関数。読めないファイルは空で、途中までの結果も返さない。"""
+    try:
+        tree = ast.parse(text)
+        found: list[_Accessor] = []
+        functions = [
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+        ]
+        for defining, names in constants.items():
+            module = _module_name(defining)
+            for constant in sorted(names):
+                direct_names, modules = _import_forms(tree, path, module, constant)
+                for function in functions:
+                    if _references(function, constant, direct_names, modules):
+                        # 呼び出しの辺の鍵は、デコレータの有無で宣言の行が変わりうるので両方を引く
+                        lines = {function.lineno, *(d.lineno for d in function.decorator_list)}
+                        writes = _writes(function)
+                        found += [
+                            _Accessor(path, function.name, line, writes) for line in sorted(lines)
+                        ]
+    except (SyntaxError, RecursionError, MemoryError, ValueError):
+        # 構文の解けないファイルは、参照の有無を言えない。
+        # 入れ子の深い式は、parse でも、後で式を文字列に戻す ast.unparse（_references と
+        # _writes）でも RecursionError、巨大な入力は MemoryError、
+        # NUL 文字は ValueError で落ちる
+        return []
+    else:
+        return found
+
+
 def _stored_accessors(world: _World, name: str, locations: list[Location]) -> list[_Accessor]:
     """保存物の名前を持つ定数を、関数の中で参照する関数。一段のたどり。
 
@@ -943,26 +973,7 @@ def _stored_accessors(world: _World, name: str, locations: list[Location]) -> li
     for path in world.source_paths:
         if path in constants or not path.endswith(".py"):
             continue
-        try:
-            tree = ast.parse(world.text(path))
-        except (SyntaxError, RecursionError, MemoryError, ValueError):
-            # 構文の解けないファイルは、参照の有無を言えない。
-            # 入れ子の深い式は RecursionError、巨大な入力は MemoryError、
-            # NUL 文字は ValueError で落ちる
-            continue
-        functions = [
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-        ]
-        for defining, names in constants.items():
-            module = _module_name(defining)
-            for constant in sorted(names):
-                direct_names, modules = _import_forms(tree, path, module, constant)
-                for function in functions:
-                    if _references(function, constant, direct_names, modules):
-                        # 呼び出しの辺の鍵は、デコレータの有無で宣言の行が変わりうるので両方を引く
-                        lines = {function.lineno, *(d.lineno for d in function.decorator_list)}
-                        for line in sorted(lines):
-                            found[_Accessor(path, function.name, line, _writes(function))] = None
+        found.update(dict.fromkeys(_file_accessors(path, world.text(path), constants)))
     return list(found)
 
 

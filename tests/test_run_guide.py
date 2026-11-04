@@ -107,3 +107,18 @@ def test_estimate_json_carries_run_guide(
     estimate = json.loads(capsys.readouterr().out)
     assert estimate["run_guide"] == run_guide(review, GroupId.SECURITY).to_json()
     assert estimate["run_guide"]["review_kind"] == "feature"
+
+
+def test_micro_guide_names_the_viewpoint_spans(tmp_path: Path) -> None:
+    text = run_guide(_review(tmp_path, ReviewKind.PULL_REQUEST), GroupId.MICRO).text
+    assert "D1〜D10 の観点" in text
+    assert "テスト規約 T1〜T4 を" in text
+    assert "設計の原則 P1〜P4、" in text
+
+
+def test_macro_guide_names_the_viewpoint_span(tmp_path: Path) -> None:
+    text = run_guide(_review(tmp_path, ReviewKind.PULL_REQUEST), GroupId.MACRO).text
+    assert text == (
+        "宣言、背景、ツリー図と表から、変更の道筋が目的に届くかを "
+        "M0〜M7 の観点と設計の原則 P1〜P4 で問う。"
+    )

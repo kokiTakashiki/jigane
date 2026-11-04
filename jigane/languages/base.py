@@ -130,6 +130,8 @@ class TypeDecl:
     line: int
     node: Node = field(compare=False, repr=False)
     scope: TypeScope = TypeScope.MODULE
+    # 直接インスタンスにできない型として宣言されている（Python の ABC など）
+    abstract: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,8 @@ class MemberDecl:
     body: Node | None = field(default=None, compare=False, repr=False)
     # declarations() の修飾名が別の形（Swift の `foo(label:)`）のときの、所有する型を除いた名前
     selector: str | None = None
+    # 本体を持たず、サブクラスが実装する約束として宣言されている（Python の @abstractmethod など）
+    abstract: bool = False
 
 
 @dataclass(frozen=True)
@@ -802,11 +806,18 @@ class FilePathAdapter(LanguageAdapter, Protocol):
         ...
 
 
+# ファイル名が関数の引数で渡る保存物の名前は、「関数名 の引数 引数名」と、この印を挟んで組む
+PARAMETER_STORE_MARK = " の引数 "
+
+
 class StoreFormat(StrEnum):
     """保存物の形式。値は表に出す綴り。"""
 
     CSV = "CSV"
     JSON = "JSON"
+    # プログラムが独自に決めた、既存の形式の道具（json、csv など）を通さない形式。
+    # 区切りや列の並びは持たない
+    CUSTOM = "独自の形式"
 
 
 class StoreRole(StrEnum):
@@ -928,6 +939,83 @@ class RegexAdapter(LanguageAdapter, Protocol):
         ...
 
 
+class DefinitionKind(StrEnum):
+    """値の組の書かれ方の区別。値は表に出す語ではなく、識別のための名前。"""
+
+    # 名前に束ねた定義（代入した変数、定数、列挙型）
+    NAMED = "named"
+    # 名前の無いリテラル（関数の引数や戻り値に直に書いた並びなど）
+    LITERAL = "literal"
+    # 読み取り役が構文から決めていない。区別を持たない言語とプラグインの既定
+    UNDETERMINED = "undetermined"
+
+
+@dataclass(frozen=True)
+class ValueSet:
+    """値の組一つ。要素がすべて短い文字列のリテラルで、要素が三つ以上の並び。"""
+
+    # 要素の文字列。順序と重複は落とす
+    values: frozenset[str]
+    path: str
+    # 1 始まり
+    line: int
+    # 代入の左辺、宣言の名前、列挙型の型の名前。
+    # 関数の引数に直に書いた並びなど、名前の無い並びは None
+    name: str | None = None
+    # 名前に束ねた定義か、名前の無いリテラルか。読み取り役が構文木から決めたときだけ
+    # NAMED か LITERAL にし、決めていなければ UNDETERMINED
+    kind: DefinitionKind = DefinitionKind.UNDETERMINED
+
+
+class ComparisonKind(StrEnum):
+    """文字列のリテラルと値を比べる形。値は表に出す語ではなく、識別のための名前。"""
+
+    EQUALS = "equals"
+    MEMBERSHIP = "membership"
+    PREFIX = "prefix"
+    SUFFIX = "suffix"
+    REGEX = "regex"
+
+
+@dataclass(frozen=True)
+class StringComparison:
+    """値と文字列のリテラルのまま比べている箇所一つ。`in` の組は要素ごとに一つ返す。"""
+
+    # 比べている文字列。接頭辞、接尾辞、正規表現のときは、その文字列そのもの
+    value: str
+    kind: ComparisonKind
+    path: str
+    # 1 始まり
+    line: int
+    # 比べている相手の式の原文（`mode`、`self.kind` など）。読み取れない言語と形では空
+    subject: str = ""
+
+
+@runtime_checkable
+class ValueSetReader(LanguageAdapter, Protocol):
+    """値の組と、値の組の値と比べている箇所を静的に読める言語アダプタ。
+
+    二つの読み取りは一つの口にまとめる。図は一つの口しか持てず、比べている箇所は
+    値の組と突き合わせて初めて意味を持つため、片方だけを持つ言語を作る理由が無い。
+    """
+
+    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+        """一つのファイルの値の組を、文書順に返す。
+
+        対象は tuple、set、frozenset、list のリテラルと、列挙型の値の並び。
+        要素に文字列のリテラル以外や長い文字列を含む並びは返さない。
+        """
+        ...
+
+    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+        """一つのファイルの、文字列のリテラルとの比較を、文書順に返す。
+
+        形は等値と不等値、`in`（名前の付いた組はそのファイルの中の定義を引く）、
+        接頭辞と接尾辞の判定、正規表現の一致。長さの上限は設けない。
+        """
+        ...
+
+
 def import_nodes(adapter: LanguageAdapter, root: Node) -> list[Node]:
     """import の文の節点を文書順に返す。入れ子の文の中へは降りない。"""
     found: list[Node] = []
@@ -947,7 +1035,7 @@ def leading_components(module: str, count: int) -> str:
 
 
 def grammar_target(adapter: LanguageAdapter) -> GrammarTarget:
-    """文法の層へ渡す照合の対象。外の言語の対象は、登録の層が包んだアダプタの属性に持つ。"""
+    """文法の層へ渡す照合の対象。追加の言語の対象は、登録の層が包んだアダプタの属性に持つ。"""
     attached = getattr(adapter, "grammar_target", None)
     if isinstance(attached, BuiltinGrammar | DeclaredGrammar):
         return attached

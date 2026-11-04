@@ -63,7 +63,7 @@ def test_select_overrides_recommendation_and_name(repo: Path) -> None:
     assert str(review.id) == "octo/hello+mine"
     assert isinstance(review.origin, DesignDocOrigin)
     assert review.origin.selection == ("other.py", "cart.py")
-    assert review.warnings == ["選んだファイルが新しい推しに無い: other.py"]
+    assert review.warnings == ["選んだファイルが新しい候補に無い: other.py"]
 
 
 def test_select_rejects_missing_file_and_outside(repo: Path) -> None:
@@ -92,7 +92,7 @@ def test_refresh_updates_versions_and_warns_without_changing_selection(repo: Pat
     assert origin.document_version != review.origin.document_version
     assert origin.code_version == git(repo, "rev-parse", "HEAD")
     assert origin.selection == ("cart.py",)
-    assert refreshed.review.warnings == ["選んだファイルが新しい推しに無い: cart.py"]
+    assert refreshed.review.warnings == ["選んだファイルが新しい候補に無い: cart.py"]
 
 
 def test_refresh_warns_when_selected_file_disappears(repo: Path) -> None:
@@ -127,7 +127,7 @@ def test_origin_round_trip_through_stored_fields(repo: Path) -> None:
 
 def test_unassemblable_combinations_are_rejected() -> None:
     origin = DesignDocOrigin("d.md", "v", "c", ()).to_dict()
-    with pytest.raises(ReviewError, match="機能の対象"):
+    with pytest.raises(ReviewError, match="ファイルの対象"):
         _origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, ["a"], design_doc=origin)
     with pytest.raises(ReviewError, match="設計書の情報がありません"):
         _origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, None, design_doc=None)
@@ -172,4 +172,4 @@ def test_cli_new_list_show(
 def test_help_describes_the_purpose(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         commands.main(["new", "--help"])
-    assert "設計書をレビューします。実装の前に方針の綻びを問います" in capsys.readouterr().out
+    assert "設計書をレビューします" in capsys.readouterr().out

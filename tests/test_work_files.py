@@ -78,7 +78,10 @@ def _raw_walk_lines(source: str) -> list[int]:
     ]
 
 
+@pytest.mark.whole_tree
 def test_scans_go_through_the_component() -> None:
+    # ruff の banned-api は Path の変数への .rglob を拾えず、
+    # import-linter は import しか見ないため、ここで走査する
     offenders = [
         f"{path.relative_to(PACKAGE.parent)}:{number}"
         for path in sorted(PACKAGE.rglob("*.py"))

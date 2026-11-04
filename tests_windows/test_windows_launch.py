@@ -37,16 +37,16 @@ def test_cmd_script_rejects_json_argument(fake_cmd_directory: Path) -> None:
     assert "cmd.exe" in str(raised.value)
 
 
-def test_cmd_script_resolves_and_launches_with_plain_argument(fake_cmd_directory: Path) -> None:
-    environment = isolated_environment(fake_cmd_directory)
+def test_cmd_script_resolves_and_launches_with_plain_argument(tmp_path: Path) -> None:
+    # claude は llm_runs からしか起動できないため、一覧の gh で解決と起動を確かめる
+    (tmp_path / "gh.cmd").write_bytes(b"@echo off\r\necho %*\r\n")
+    environment = isolated_environment(tmp_path)
 
-    resolved = resolve_command(["claude", PLAIN_ARGUMENT], environment)
+    resolved = resolve_command(["gh", PLAIN_ARGUMENT], environment)
 
-    assert os.path.normcase(resolved[0]) == os.path.normcase(
-        str(fake_cmd_directory / "claude.cmd")
-    )
+    assert os.path.normcase(resolved[0]) == os.path.normcase(str(tmp_path / "gh.cmd"))
     assert resolved[1:] == [PLAIN_ARGUMENT]
-    output = run_command(["claude", PLAIN_ARGUMENT], env=environment)
+    output = run_command(["gh", PLAIN_ARGUMENT], env=environment)
     assert PLAIN_ARGUMENT in output
 
 
@@ -83,8 +83,9 @@ def test_executable_in_the_current_directory_is_not_resolved(
 def test_exe_resolved_path_is_what_reaches_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "claude.exe").write_bytes(b"")
-    (tmp_path / "claude.cmd").write_bytes(b"@echo off\r\n")
+    # claude は llm_runs からしか起動できないため、一覧の gh で解決と起動を確かめる
+    (tmp_path / "gh.exe").write_bytes(b"")
+    (tmp_path / "gh.cmd").write_bytes(b"@echo off\r\n")
     environment = isolated_environment(tmp_path)
     recorded: list[list[str]] = []
 
@@ -94,9 +95,9 @@ def test_exe_resolved_path_is_what_reaches_subprocess(
 
     monkeypatch.setattr(subprocess, "run", record_run)
 
-    run_command(["claude", JSON_ARGUMENT], env=environment)
+    run_command(["gh", JSON_ARGUMENT], env=environment)
 
     assert len(recorded) == 1
-    assert os.path.normcase(recorded[0][0]) == os.path.normcase(str(tmp_path / "claude.exe"))
+    assert os.path.normcase(recorded[0][0]) == os.path.normcase(str(tmp_path / "gh.exe"))
     assert Path(recorded[0][0]).is_absolute()
     assert recorded[0][1:] == [JSON_ARGUMENT]

@@ -2,24 +2,36 @@
 
 from dataclasses import dataclass
 
-from jigane.groups.definitions import GroupId
+from jigane.groups import viewpoints
+from jigane.groups.definitions import MACRO, MICRO, GroupId
+from jigane.groups.viewpoints import ViewpointKind
 from jigane.reviews.lifecycle import Review
-from jigane.skills.micro import VIEWPOINTS as MICRO_VIEWPOINTS
 from jigane.skills.shards import ShardPlanKind, plan_kind_for
 from jigane.storage.store import ReviewKind
 
-_MACRO = "宣言、背景、ツリー図と表から、変更の道筋が目的に届くかを M0〜M6 の観点で問う。"
+
+def _span(group_viewpoints: tuple[viewpoints.Viewpoint, ...]) -> str:
+    """観点の一覧の最初と最後の番号を「〜」でつなぐ。"""
+    first, last = group_viewpoints[0].number, group_viewpoints[-1].number
+    return first if first == last else f"{first}〜{last}"
 
 
-def _span(prefix: str) -> str:
-    """観点の一覧のうち、prefix で始まる観点の最初と最後を「〜」でつなぐ。"""
-    ids = [viewpoint for viewpoint in MICRO_VIEWPOINTS if viewpoint.startswith(prefix)]
-    return f"{ids[0]}〜{ids[-1]}"
+def _micro_span(kind: ViewpointKind) -> str:
+    return _span(
+        tuple(viewpoint for viewpoint in viewpoints.of_group(MICRO) if viewpoint.kind is kind)
+    )
 
+
+_MACRO = (
+    "宣言、背景、ツリー図と表から、変更の道筋が目的に届くかを "
+    f"{_span(viewpoints.of_group(MACRO))} の観点と設計の原則 "
+    f"{_span(viewpoints.design_principles())} で問う。"
+)
 
 _MICRO_VIEWPOINTS = (
-    f"{_span('D')} の観点（セキュリティの D5 はセキュリティ画面が扱う）"
-    f"とテスト規約 {_span('T')} を"
+    f"{_micro_span(ViewpointKind.DEFECT)} の観点"
+    f"と設計の原則 {_micro_span(ViewpointKind.DESIGN_PRINCIPLE)}、"
+    f"テスト規約 {_micro_span(ViewpointKind.TEST_CONVENTION)} を"
 )
 _VERIFIERS = "反証役と判定役が検証します。"
 

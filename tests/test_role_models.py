@@ -1,6 +1,7 @@
 """役ごとの出力のモデルが、旧の入口のスキーマと同じ入力を受け付けることを縛る。"""
 
 import copy
+import dataclasses
 import re
 from collections.abc import Callable
 from typing import Any
@@ -10,7 +11,8 @@ import pytest
 from legacy_schemas import frozen_schema
 from pydantic import BaseModel, ValidationError
 
-from jigane.llm_runs.finding_model import RoleShape
+from jigane.findings.discard import DiscardedCandidate
+from jigane.llm_runs.finding_model import DiscardedSource, RoleSpec
 from jigane.skills import macro, micro, security
 
 
@@ -157,8 +159,8 @@ _MACRO: dict[str, Mutation] = {
 }
 
 _VIEWPOINTS = {
-    "macro": ["M0", "M6", "M7", "m0", ""],
-    "micro": ["D1", "T4", "D5", "S-ASVS-V1"],
+    "macro": ["M0", "M6", "M8", "m0", ""],
+    "micro": ["D1", "T4", "D12", "S-ASVS-V1"],
     "security": [
         "S-STORAGE",
         "S-PRIVACY",
@@ -168,7 +170,6 @@ _VIEWPOINTS = {
         "S-ASVS-V17",
         "S-ASVS-V18",
         "S-ASVS-V0",
-        "S-ASVS-V1\n",
         "X-S-ASVS-V1",
         "D1",
     ],
@@ -201,10 +202,10 @@ def _old_schema(role: str) -> dict[str, Any]:
 
 def _model(role: str) -> type[BaseModel]:
     if role == "macro":
-        return macro.lenient_conclude_model()
+        return macro.CONCLUDE.lenient_model()
     if role == "micro":
-        return micro.lenient_discovery_model()
-    return security.lenient_discovery_model()
+        return micro.DISCOVERY.lenient_model()
+    return security.DISCOVERY.lenient_model()
 
 
 def _accepted_by_model(model: type[BaseModel], output: dict[str, Any]) -> bool:
@@ -237,17 +238,16 @@ def test_the_cases_cover_both_accepted_and_rejected_inputs(role: str) -> None:
 
 
 def test_a_role_model_is_built_once_per_arguments() -> None:
-    assert micro.lenient_discovery_model() is micro.lenient_discovery_model()
-    assert micro.lenient_discovery_model() is not security.lenient_discovery_model()
+    assert micro.DISCOVERY.lenient_model() is micro.DISCOVERY.lenient_model()
+    assert micro.DISCOVERY.lenient_model() is not security.DISCOVERY.lenient_model()
 
 
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        ({"viewpoint_pattern": "^X"}, "viewpoint_pattern は viewpoints と一緒に渡す"),
         (
-            {"viewpoints": ("M1",), "model_written": ("claim",)},
-            "viewpoints は model_written に viewpoint が要る",
+            {"group": "micro", "model_written": ("claim",)},
+            "group は model_written に viewpoint が要る",
         ),
         (
             {"require_references": True, "model_written": ("claim",)},
@@ -259,18 +259,24 @@ def test_a_role_shape_rejects_a_setting_that_would_be_ignored(
     arguments: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ValueError, match=re.escape(message)):
-        RoleShape(**arguments)
+        RoleSpec(**arguments)
 
 
 @pytest.mark.parametrize(
     "arguments",
     [
         {},
-        {"viewpoints": ("M1",), "viewpoint_pattern": "^X"},
-        {"viewpoints": ("M1",), "model_written": ("viewpoint",)},
+        {"group": "micro"},
+        {"group": "micro", "model_written": ("viewpoint",)},
         {"require_references": True, "model_written": ("references",)},
         {"require_references": True},
     ],
 )
 def test_a_role_shape_accepts_a_setting_that_takes_effect(arguments: dict[str, Any]) -> None:
-    RoleShape(**arguments)
+    RoleSpec(**arguments)
+
+
+def test_the_discarded_source_and_the_discarded_candidate_name_the_same_fields() -> None:
+    assert set(DiscardedSource.model_fields) == {
+        f.name for f in dataclasses.fields(DiscardedCandidate)
+    }

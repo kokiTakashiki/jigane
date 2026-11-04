@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pr_support import BODY, URL, commit_all, git
+from pr_support import BODY, URL, clone_bare, commit_all, git
 
 from jigane.commands import context as cli_context
 from jigane.git import process
 from jigane.languages import registry
+from jigane.skills import policy_principles
+from jigane.skills.policy_principle_shapes import Shape
 from jigane.storage.store import default_data_home
 
 
@@ -117,7 +119,7 @@ def pr_template(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
 
     cache = root / "home" / "repositories" / "octo" / "hello.git"
     cache.parent.mkdir(parents=True)
-    git(root, "clone", "--bare", "--no-local", str(origin), str(cache))
+    clone_bare(origin, cache)
     return {"root": root, "base": base, "head": head}
 
 
@@ -193,3 +195,9 @@ def _terminal_with_consent(monkeypatch: pytest.MonkeyPatch) -> None:
     """run の同意の確認に、端末で y と答える偽物を既定で与える。同意の検査は個別に差し替える。"""
     monkeypatch.setattr("jigane.commands.context.stdio_is_terminal", lambda: True)
     monkeypatch.setattr("jigane.commands.context.read_answer", lambda _prompt: "y")
+
+
+@pytest.fixture
+def all_principle_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """原則の起動の条件を全て満たしたものとして扱い、四本が立つことを前提にした試験を支える。"""
+    monkeypatch.setattr(policy_principles, "present_shapes", lambda *_: frozenset(Shape))

@@ -45,7 +45,7 @@ def add_sarif_arguments(parser: argparse.ArgumentParser) -> None:
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     new = subparsers.add_parser("new", help="レビューを作ります")
     new_modes = new.add_subparsers(dest="mode", metavar="<mode>", required=True)
-    files = new_modes.add_parser("files", help="機能レビュー式のレビューを作ります")
+    files = new_modes.add_parser("files", help="ファイルのレビューを作ります")
     files.add_argument("paths", nargs="+", metavar="path")
     files.add_argument("--name", required=True)
     intent = files.add_mutually_exclusive_group()
@@ -54,14 +54,14 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     files.add_argument("--json", action="store_true")
     add_sarif_arguments(files)
 
-    pull = new_modes.add_parser("pr", help="差分レビュー式のレビューを作ります")
+    pull = new_modes.add_parser("pr", help="PR のレビューを作ります")
     pull.add_argument("url")
     pull.add_argument("--json", action="store_true")
     add_sarif_arguments(pull)
     range_mode = new_modes.add_parser(
         "range",
         help=(
-            "手元のコミットの範囲のレビューを作ります。"
+            "git の範囲から差分のレビューを作ります。"
             "同じ名前が既にあれば refresh で作り直します。"
             "別のレビューを残すなら --name を使います"
         ),
@@ -81,7 +81,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     add_sarif_arguments(range_mode)
     design_doc = new_modes.add_parser(
         "design-doc",
-        help="設計書をレビューします。実装の前に方針の綻びを問います",
+        help="設計書をレビューします",
     )
     design_doc.add_argument("document", metavar="<設計書のパス>")
     design_doc.add_argument(
@@ -92,7 +92,9 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         "--select",
         nargs="+",
         metavar="ファイル",
-        help="突き合わせるファイルです。既定は推し（jigane design suggest）の候補すべてです",
+        help=(
+            "読む、同じリポジトリにあるファイルです。既定は jigane design suggest の候補すべてです"
+        ),
     )
     design_doc.add_argument(
         "--with",

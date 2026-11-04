@@ -74,11 +74,11 @@ def test_diagram_run_passes_no_tools_and_stores_findings(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
     fake = MacroFake([discovered("M2")])
     assert main(["run", "shop:p", "macro"], invoke=fake) == EXIT_OK
-    assert len(fake.calls) == 1
-    call = fake.calls[0]
+    assert len(fake.diagram_calls) == 1
+    call = fake.diagram_calls[0]
     assert call.tools == ()
     assert call.max_turns == DIAGRAM_SHAPE.max_turns
-    assert call.budget.cli_usd == 0.5
+    assert call.budget.cli_usd == 0.36
     command = claude.build_command(call)
     assert command[command.index("--tools") + 1] == ""
     stored = json.loads(

@@ -242,15 +242,15 @@ def test_mcps_is_rejected_for_other_groups_before_invoking(
         ("D1", False),
     ],
 )
-def test_viewpoint_pattern(viewpoint: str, *, valid: bool) -> None:
+def test_viewpoint_enum(viewpoint: str, *, valid: bool) -> None:
     document = {"findings": [s_finding(viewpoint)]}
-    validator = jsonschema.Draft202012Validator(security.discovery_schema())
+    validator = jsonschema.Draft202012Validator(security.DISCOVERY.schema())
     assert validator.is_valid(document) is valid
 
 
 def test_references_required() -> None:
     document = {"findings": [s_finding(references=())]}
-    assert not jsonschema.Draft202012Validator(security.discovery_schema()).is_valid(document)
+    assert not jsonschema.Draft202012Validator(security.DISCOVERY.schema()).is_valid(document)
 
 
 def test_shard_without_references_is_failure(project: Path) -> None:
@@ -271,7 +271,7 @@ def test_macro_actionable_does_not_defer(project: Path) -> None:
             {
                 "id": "F1",
                 "severity": "warning",
-                "viewpoint": "V",
+                "viewpoint": "M2",
                 "claim": "C",
                 "adjudication": {
                     "kind": "rebuttal",

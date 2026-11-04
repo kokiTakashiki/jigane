@@ -196,3 +196,21 @@ def test_path_chain_is_followed_only_to_the_resolve_depth() -> None:
     chain = 'Path("x")' + ".parent" * 5
     assert pairs(f"{chain}.exists()\n") == [(chain, FileUsage.READ)]
     assert pairs(f"{chain + '.parent'}.exists()\n") == []
+
+
+def test_library_load_of_a_path_is_a_read() -> None:
+    code = "toml.load(path)\npd.read_csv(config_path)\njson.load(open(path))\n"
+    assert pairs(code) == [
+        ("path", FileUsage.READ),
+        ("config_path", FileUsage.READ),
+        ("path", FileUsage.READ),
+    ]
+
+
+def test_library_dump_takes_the_path_from_the_second_argument() -> None:
+    assert pairs("toml.dump(data, out_path)\n") == [("out_path", FileUsage.WRITE)]
+
+
+def test_library_load_of_an_opened_file_is_not_a_second_read() -> None:
+    code = 'with open(path) as f:\n    json.load(f)\nh = open("a.json")\njson.load(h)\n'
+    assert pairs(code) == [("path", FileUsage.READ), ('"a.json"', FileUsage.READ)]

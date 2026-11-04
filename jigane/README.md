@@ -6,7 +6,7 @@ PR または作業ツリーの変更を受け取り、レビューの材料（�
 
 ## サブパッケージ
 
-`jigane/` の直下は、サブパッケージと、直下に残る三つのモジュールからなります。
+`jigane/` の直下は、サブパッケージと、直下に残る二つのモジュールからなります。
 
 <!-- BEGIN GENERATED: package-table (scripts/generate_package_readme.py) -->
 
@@ -35,6 +35,7 @@ PR または作業ツリーの変更を受け取り、レビューの材料（�
 | [`static_analysis`](static_analysis/README.md) | 静的検査の結果（SARIF）を読み、検証して、正規化した指摘にします。 |
 | [`storage`](storage/README.md) | データの置き場の読み書き、保存物の形の検査、読み書きの失敗を受け持ちます。 |
 | [`technology_list`](technology_list/README.md) | レビューが変更したファイルの import から、使っている技術の表を LLM を使わずに作ります。 |
+| [`text`](text/README.md) | 外のコードやレビューの対象から来た文字列を、端末へ出せる形にします。 |
 
 <!-- END GENERATED: package-table -->
 
@@ -65,6 +66,7 @@ flowchart TB
         findings
         languages
         figures
+        text
     end
     subgraph feature
         design

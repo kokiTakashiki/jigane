@@ -42,7 +42,7 @@ def map_kind_of_mode(mode: str) -> MapKind:
     match stored_mode:
         case StoredMode.DESIGN_DOC:
             return MapKind.DESIGN_DOC
-        # diff は差分のレビュー、feature は機能のレビューの mode で、どちらもコードの地図
+        # diff は差分のレビュー、feature はファイルのレビューの mode で、どちらもコードの地図
         case StoredMode.DIFF | StoredMode.FEATURE:
             return MapKind.CODE
         case _:

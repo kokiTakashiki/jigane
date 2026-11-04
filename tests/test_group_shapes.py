@@ -38,11 +38,11 @@ def test_macro_invocation_carries_the_diagram_shape(project: Path) -> None:
     review = review_of(project)
     fake = MacroFake([discovered("M2")])
     assert main(["run", str(review.id), "macro"], invoke=fake) == EXIT_OK
-    (call,) = fake.calls
+    (call,) = fake.diagram_calls
     assert (call.model, call.effort, call.budget.cli_usd, call.max_turns) == (
         "claude-sonnet-5-5",
         "high",
-        0.5,
+        0.36,
         2,
     )
     assert call.tools == ()

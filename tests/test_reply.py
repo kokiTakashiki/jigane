@@ -167,7 +167,7 @@ def test_templates_listing(capsys: pytest.CaptureFixture[str]) -> None:
 @pytest.mark.parametrize(
     ("body", "fragment"),
     [
-        ("{% if %}", "bad.md.j2）の 1 行目が構文の誤りです"),
+        ("{% if %}", "bad.md.j2）の 1 行目が構文のエラーです"),
         ("{{ nothing_here }}", "1 行目で失敗しました: 'nothing_here' is undefined"),
         ("{{ ''.__class__ }}", "1 行目で失敗しました: access to attribute '__class__'"),
     ],

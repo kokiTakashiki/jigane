@@ -3,7 +3,13 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages import calls_core, java_concurrency, type_names
+from jigane.languages import (
+    calls_core,
+    java_concurrency,
+    java_string_comparisons,
+    java_value_sets,
+    type_names,
+)
 from jigane.languages.base import (
     Argument,
     BodyBounds,
@@ -28,11 +34,14 @@ from jigane.languages.base import (
     Return,
     Sharing,
     Step,
+    StringComparison,
     TypeDecl,
     TypeKind,
+    ValueSet,
     Visibility,
     import_nodes,
     leading_components,
+    parse,
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
@@ -179,6 +188,12 @@ def _declared(node: Node, default: Visibility) -> Visibility:
     if types & {"public", "protected"}:
         return Visibility.PUBLIC
     return default
+
+
+def _is_abstract(node: Node) -> bool:
+    """修飾子に abstract が書かれているか。"""
+    modifiers = next((c for c in node.children if c.type == "modifiers"), None)
+    return modifiers is not None and any(c.type == "abstract" for c in modifiers.children)
 
 
 def _name(node: Node) -> str:
@@ -400,6 +415,14 @@ class JavaAdapter:
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return _regex_scan(root_node, path)
 
+    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+        return java_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
+
+    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+        return java_string_comparisons.string_comparisons_of(
+            parse(self, source.encode()).root_node, path
+        )
+
     def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
         found: list[Import] = []
         for node in import_nodes(self, root_node):
@@ -476,7 +499,16 @@ class JavaAdapter:
         qualified = f"{prefix}{name}"
         line = node.start_point.row + 1
         result.append(
-            TypeDecl(qualified, name, _TYPE_KINDS[node.type], _bases(node), path, line, node)
+            TypeDecl(
+                qualified,
+                name,
+                _TYPE_KINDS[node.type],
+                _bases(node),
+                path,
+                line,
+                node,
+                abstract=node.type == "class_declaration" and _is_abstract(node),
+            )
         )
         # レコードの成分は、型のフィールドのように参照できる
         components = _parameters(node.child_by_field_name("parameters"))
@@ -510,7 +542,17 @@ class JavaAdapter:
             body: Node | None = None,
         ) -> MemberDecl:
             annotation = _text(type_node) if type_node is not None else None
-            return MemberDecl(owner, name, kind, annotation, parameters, line, node, body)
+            return MemberDecl(
+                owner,
+                name,
+                kind,
+                annotation,
+                parameters,
+                line,
+                node,
+                body,
+                abstract=kind == "method" and _is_abstract(node),
+            )
 
         if node.type in _TYPE_NODES:
             self._collect_type(node, f"{owner}.", path, result)

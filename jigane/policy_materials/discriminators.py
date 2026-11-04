@@ -7,13 +7,15 @@
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from tree_sitter import Node
+
 from jigane.figures.models import MermaidFigure, Panel
 from jigane.git.tree_files import walk_tree_files
 from jigane.judgment_map.classification import Segment
 from jigane.languages.base import Branch, Return, Span, Step
 from jigane.languages.base import Member as MemberRef
 from jigane.policy_materials import er
-from jigane.policy_materials.classes import _changed_types, _flat
+from jigane.policy_materials.type_deltas import _changed_types, _flat
 from jigane.preconditions.required import required
 from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import Index, Member, TypeInfo
@@ -141,6 +143,13 @@ def _touches(member: Member, path: str, span: Span, name: str) -> bool:
     return first <= span.end_line and span.start_line <= last
 
 
+def discriminator_steps(index: Index, member: Member, body: Node) -> list[Step] | None:
+    """関数の本体の分岐と return。流れ図に載らない言語の関数なら None。"""
+    return index.adapter.discriminator_branches(
+        body, required(index.trees[member.path].root_node.text)
+    )
+
+
 def _render(
     member: Member, nodes: dict[str, tuple[str, str]], edges: list[tuple[str, str, str]]
 ) -> Panel:
@@ -166,10 +175,33 @@ def _indexes_of(review: Review) -> Indexes:
     return Indexes(root, paths)
 
 
+def enum_names(indexes: Indexes) -> set[str]:
+    """列挙型の名前の集合。"""
+    return {t.name for t in indexes.types() if er.is_enum_like(t)}
+
+
+def discriminator_flow(
+    index: Index, member: Member, body: Node, enums: set[str]
+) -> tuple[dict[str, tuple[str, str]], list[tuple[str, str, str]]] | None:
+    """関数一つが判別の流れ図に載るなら、刈った (節, 辺)。載らなければ None。"""
+    if not enums:
+        return None
+    steps = discriminator_steps(index, member, body)
+    if steps is None:
+        return None
+    flow = _Flow(enums)
+    start = flow.new("start", member.qualified_name)
+    flow.walk(steps, [(start, "")])
+    nodes, edges = flow.pruned()
+    if not any(kind == "leaf" for kind, _ in nodes.values()):
+        return None
+    return nodes, edges
+
+
 def discriminator_diagram(review: Review) -> MermaidFigure | None:
     """判別の流れ図。列挙型の値を返す関数が無ければ None。"""
     indexes = _indexes_of(review)
-    enums = {t.name for t in indexes.types() if er.is_enum_like(t)}
+    enums = enum_names(indexes)
     if not enums:
         return None
     callables = _changed_callables(indexes, review.map_kind.segments)
@@ -179,19 +211,13 @@ def discriminator_diagram(review: Review) -> MermaidFigure | None:
         body = index.adapter.body_of(member.node)
         if body is None:
             continue
-        steps = index.adapter.discriminator_branches(
-            body, required(index.trees[member.path].root_node.text)
-        )
-        if steps is None:
+        if discriminator_steps(index, member, body) is None:
             skipped += 1
             continue
-        flow = _Flow(enums)
-        start = flow.new("start", member.qualified_name)
-        flow.walk(steps, [(start, "")])
-        nodes, edges = flow.pruned()
-        if not any(kind == "leaf" for kind, _ in nodes.values()):
+        drawn = discriminator_flow(index, member, body, enums)
+        if drawn is None:
             continue
-        blocks.append(_render(member, nodes, edges))
+        blocks.append(_render(member, *drawn))
     if not blocks:
         return None
     note = (

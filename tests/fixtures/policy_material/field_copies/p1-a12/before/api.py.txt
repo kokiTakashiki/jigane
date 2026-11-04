@@ -1,0 +1,13 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class BookDto:
+    isbn: str
+    title: str
+    author: str
+    pages: int
+
+
+def to_json(dto):
+    return {"isbn": dto.isbn, "title": dto.title}

@@ -1,5 +1,6 @@
 """根ごとのシーケンス図のモデルを組み、JSON と Mermaid の文面へ書き出す（4.2.3〜4.2.6 節）。"""
 
+import re
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -32,6 +33,15 @@ EXTERNAL_PARTICIPANT_LIMIT = 6
 EXTERNAL_FOLDED_PARTICIPANT = "外部"
 ARROW_LIMIT = 80
 UNRESOLVED_PARTICIPANT = "?"
+# 呼び先を解けない呼び出しを、ソースの呼びの式の名前の参加者で描くときの接頭辞と表示の添え字
+UNRESOLVED_TARGET_PREFIX = "?"
+UNRESOLVED_TARGET_SUFFIX = "（解けない呼び先）"
+# 一枚の図で、呼びの式ごとの解けない呼び先の参加者を置く上限。残りは件数の注記にする
+UNRESOLVED_TARGET_LIMIT = 5
+UNRESOLVED_EXPRESSION_WIDTH = 40
+# 「変更に関わらない呼び出し」の注記に並べる呼び先の名前の上限。注記を一行に収めるため
+COLLAPSED_NAME_LIMIT = 5
+_HEAD_NAME = re.compile(r"[^\W\d]\w*")
 # 参加者の名札に並べる判断の箇所の数。ツリー図の札（TAG_CAP）と同じ 3 件にして、
 # 名札が参加者の名前より長くならない幅に収める
 PARTICIPANT_TAG_CAP = 3
@@ -58,7 +68,9 @@ class FoldedExternals:
 
 @dataclass(frozen=True)
 class UnresolvedParticipant:
-    """型を解けなかった印。型ではない。"""
+    """型を解けなかった印。型ではない。expression は呼び先の原文で、無ければ印だけの "?"。"""
+
+    expression: str = ""
 
 
 ParticipantIdentity = (
@@ -162,7 +174,7 @@ class RegionLabels:
         self.participant: dict[TypeKey, list[str]] = {}
         for region in (r for r in self.regions if r.qualified_name):
             self._label_named(index, region)
-        # 機能レビュー式の箇所はファイル単位で修飾名を持たない。
+        # ファイルのレビューの箇所はファイル単位で修飾名を持たない。
         # 名前のある箇所を先に対応付け、空きに限ってパスで当てる
         for region in self.regions:
             if region.qualified_name:
@@ -279,7 +291,9 @@ class _Builder:
         depth: int,
         *,
         full: bool,
+        relations: bool,
     ) -> None:
+        self.relations = relations
         self.index = index
         self.changed = selection.changed
         self.labels = labels
@@ -288,20 +302,27 @@ class _Builder:
         self.full = full
 
     def build(self, root: Root) -> Diagram:
-        diagram = self._build(root, draw_externals=False)
+        diagram = self._build(root, draw_externals=False, draw_relations=False)
         if diagram.arrows:
             return diagram
-        # 外部の呼び出しを畳んだ形で矢印が 0 本になる入口（外部の型だけを呼ぶ）に限り、
-        # 外部の矢印で描き直す。矢印を持つ図に外部の矢印を足すと既存の図の雑音になる
-        return self._build(root, draw_externals=True)
+        # 変更に関わる呼び出しだけに畳んだ形で矢印が 0 本になる入口（外部の型だけを呼ぶ、
+        # 単独の関数、呼び先を解けない）に限り、入口の直接の呼び出しを全て矢印で描き直す。
+        # 矢印を持つ図にこれらを足すと既存の図の雑音になる。
+        # 変更前の図は「変更した宣言へ届くか」を比べるので、関係の矢印を足さない（relations が偽）
+        return self._build(root, draw_externals=True, draw_relations=self.relations)
 
-    def _build(self, root: Root, *, draw_externals: bool) -> Diagram:
+    def _build(self, root: Root, *, draw_externals: bool, draw_relations: bool) -> Diagram:
         self.draw_externals = draw_externals
+        self.draw_relations = draw_relations
+        self.unresolved_targets: set[str] = set()
+        self.beyond_unresolved_targets = 0
         self.folded = False
         member = root.member
         diagram = Diagram(member.qualified_name, member.path, member.line, list(root.labels))
         self.diagram = diagram
         self.collapsed = 0
+        self.collapsed_repository_calls = 0
+        self.collapsed_names: list[str] = []
         self.beyond_depth = 0
         self.beyond_arrows = 0
         self.beyond_participants = 0
@@ -312,7 +333,12 @@ class _Builder:
             member.path, frozenset()
         )
         if self.collapsed:
-            diagram.notes.append(f"変更に関わらない呼び出し {self.collapsed} 件")
+            diagram.notes.append(self._collapsed_note())
+        if self.beyond_unresolved_targets:
+            diagram.notes.append(
+                f"解けない呼び先の上限 {UNRESOLVED_TARGET_LIMIT} を超える呼び出し "
+                f"{self.beyond_unresolved_targets} 件"
+            )
         if self.beyond_depth:
             diagram.notes.append(
                 f"深さの上限 {self.max_depth} を超える呼び出し {self.beyond_depth} 件"
@@ -391,12 +417,12 @@ class _Builder:
                 return existing
         if len(self.diagram.participants) >= PARTICIPANT_LIMIT:
             return None
-        created = Participant(
-            f"P{len(self.diagram.participants)}",
-            name,
-            _display(self.index.adapter, name),
-            identity,
-        )
+        if isinstance(identity, UnresolvedParticipant) and identity.expression:
+            # 呼びの式は "." を含みうるので、型の名前のように末尾で切らない
+            display = f"{identity.expression}{UNRESOLVED_TARGET_SUFFIX}"
+        else:
+            display = _display(self.index.adapter, name)
+        created = Participant(f"P{len(self.diagram.participants)}", name, display, identity)
         self.diagram.participants.append(created)
         return created
 
@@ -439,8 +465,9 @@ class _Builder:
                 self.diagram.evidence.unresolved_calls += 1
             if callee is not None:
                 target = self._dispatch(callee)
-                if not (self.full or key_of(target) in self.changed or self.reach.reaches(target)):
-                    self.collapsed += 1
+                related = self.full or key_of(target) in self.changed or self.reach.reaches(target)
+                if not related and not self.draw_relations:
+                    self._collapse(call.name)
                     continue
                 target_owner = self.index.type_name(target.owner)
                 next_depth = depth + (target_owner != sender)
@@ -458,32 +485,109 @@ class _Builder:
                     region=region,
                 )
                 recursion = key_of(target) in stack
-                if drawn and not recursion:
+                # 変更に関わらない呼び先は、入口からの関係を示すだけで本体は辿らない
+                if drawn and not recursion and related:
                     self._walk(target, dict(call.bindings), next_depth, stack | {key_of(target)})
-            elif isinstance(resolution, External) and self.draw_externals:
-                self._external_arrow(sender, resolution.type, call, depth + 1)
-            elif not self.full:
-                self.collapsed += 1
-            elif isinstance(resolution, Resolved):
-                self._arrow(
-                    sender,
-                    self.index.type_name(resolution.type),
-                    IndexedParticipant(resolution.type),
-                    call,
-                    depth + 1,
-                    status="unresolved",
-                    region=None,
-                )
             else:
-                self._arrow(
-                    sender,
-                    UNRESOLVED_PARTICIPANT,
-                    UnresolvedParticipant(),
-                    call,
-                    depth + 1,
-                    status="unresolved",
-                    region=None,
-                )
+                self._walk_unmatched(sender, call, depth + 1)
+
+    def _walk_unmatched(self, sender: str, call: Call, depth: int) -> None:
+        """呼び先の宣言を見つけられなかった呼び出し。"""
+        resolution = call.resolution
+        if isinstance(resolution, External) and self.draw_externals:
+            self._external_arrow(sender, resolution.type, call, depth)
+        elif isinstance(resolution, Resolved) and self.full:
+            self._arrow(
+                sender,
+                self.index.type_name(resolution.type),
+                IndexedParticipant(resolution.type),
+                call,
+                depth,
+                status="unresolved",
+                region=None,
+            )
+        elif (
+            isinstance(resolution, Unresolved)
+            and self.draw_relations
+            and self._names_repository_module(call, resolution)
+        ):
+            self._unresolved_target_arrow(sender, resolution, call, depth)
+        elif self.full:
+            self._arrow(
+                sender,
+                UNRESOLVED_PARTICIPANT,
+                UnresolvedParticipant(),
+                call,
+                depth,
+                status="unresolved",
+                region=None,
+            )
+        elif isinstance(resolution, Unresolved) and self._names_repository_module(
+            call, resolution
+        ):
+            # 関係の矢印にするのはリポジトリの中のモジュールを呼ぶ呼び出しだけ。
+            # 件数に数えるときは、注記に名前を残す
+            self._collapse(call.name)
+        else:
+            # 宣言がリポジトリに無い呼び出し（標準ライブラリ、外の依存、組み込み）は
+            # 「変更に関わらない呼び出し」の件数にだけ数え、名前は並べない
+            self.collapsed += 1
+
+    def _collapse(self, name: str) -> None:
+        """リポジトリの中の呼び出しを、名前を残して「変更に関わらない呼び出し」に数える。"""
+        self.collapsed += 1
+        self.collapsed_repository_calls += 1
+        if name not in self.collapsed_names:
+            self.collapsed_names.append(name)
+
+    def _collapsed_note(self) -> str:
+        note = f"変更に関わらない呼び出し {self.collapsed} 件"
+        if not self.collapsed_names:
+            return note
+        shown = self.collapsed_names[:COLLAPSED_NAME_LIMIT]
+        rest = len(self.collapsed_names) - len(shown)
+        if rest:
+            shown.append(f"ほか {rest} 件")
+        external = self.collapsed - self.collapsed_repository_calls
+        tail = f"（ほか外の呼び出し {external} 件）" if external else ""
+        return f"{note}: {'、'.join(shown)}{tail}"
+
+    def _names_repository_module(self, call: Call, resolution: Unresolved) -> bool:
+        """呼びの式の先頭の名前が、そのファイルの import でリポジトリの中のモジュールを指すか。"""
+        head = _HEAD_NAME.match(resolution.text)
+        if head is None:
+            return False
+        origin = self.index.imported.get(call.path, {}).get(head.group())
+        if origin is None:
+            return False
+        return any(
+            origin == module or origin.startswith(f"{module}.") or module.startswith(f"{origin}.")
+            for module in self.index.modules.values()
+        )
+
+    def _unresolved_target_arrow(
+        self, sender: str, resolution: Unresolved, call: Call, depth: int
+    ) -> None:
+        """呼び先を解けない呼び出しを、ソースの呼びの式を名前にした参加者への矢印で描く。"""
+        text = " ".join(resolution.text.split())[:UNRESOLVED_EXPRESSION_WIDTH]
+        expression = f"{text}.{call.name}" if text else call.name
+        if (
+            expression not in self.unresolved_targets
+            and len(self.unresolved_targets) >= UNRESOLVED_TARGET_LIMIT
+        ):
+            self.beyond_unresolved_targets += 1
+            return
+        drawn = self._arrow(
+            sender,
+            f"{UNRESOLVED_TARGET_PREFIX}{expression}",
+            UnresolvedParticipant(expression),
+            call,
+            depth,
+            status="unresolved",
+            region=None,
+        )
+        if drawn:
+            self.unresolved_targets.add(expression)
 
 
 def build_diagrams(
@@ -494,12 +598,13 @@ def build_diagrams(
     *,
     full: bool = False,
     roots: Sequence[Root] | None = None,
+    relations: bool = True,
 ) -> dict[str, Any]:
     """根ごとの図と、J の番号の逆引きと、どの図にも現れない判断の箇所を持つモデルを返す。"""
     chosen = list(selection.roots if roots is None else roots)
     labels = RegionLabels(index, regions)
     reach = Reachability(index, selection.changed, [r.member for r in chosen])
-    builder = _Builder(index, selection, labels, reach, depth, full=full)
+    builder = _Builder(index, selection, labels, reach, depth, full=full, relations=relations)
     diagrams = [builder.build(root) for root in chosen]
     reverse: dict[str, list[dict[str, Any]]] = {}
     for diagram in diagrams:
@@ -638,7 +743,7 @@ def to_mermaid(diagram: Mapping[str, Any]) -> str:
         for p in diagram["participants"]
     )
     for arrow in diagram["arrows"]:
-        operator = "-x" if arrow["status"] == "unresolved" else "->>"
+        operator = "--x" if arrow["status"] == "unresolved" else "->>"
         tag = f" [{arrow['region']}]" if arrow["region"] else ""
         sender, receiver = alias[arrow["sender"]], alias[arrow["receiver"]]
         mark = MARK_SUFFIX.get(arrow.get("mark", "same"), "")

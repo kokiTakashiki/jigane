@@ -1,0 +1,14 @@
+class Table:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def count(self):
+        return len(self.rows)
+
+    def render(self, separator=" | ", header=None):
+        lines = []
+        if header:
+            lines.append(separator.join(header))
+        for row in self.rows:
+            lines.append(separator.join(str(cell) for cell in row))
+        return "\n".join(lines)

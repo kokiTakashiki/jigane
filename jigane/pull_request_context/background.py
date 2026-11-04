@@ -440,6 +440,6 @@ def save_background(directory: Path, background: Background) -> None:
 def load_background(directory: Path) -> Background | None:
     path = directory / BACKGROUND_FILE
     if not path.is_file():
-        # 機能レビュー式と、背景を集める前に作った差分レビュー式には無い
+        # ファイルのレビューと、背景を集める前に作った差分のレビューには無い
         return None
     return parse_background(json.loads(path.read_text(encoding="utf-8")))

@@ -150,7 +150,7 @@ def _equivalent(table: dict[str, Any], where: str) -> Equivalent:
 def _equivalents(
     entry: dict[str, Any], languages: Collection[str], where: str, required: Collection[str]
 ) -> dict[str, Equivalent]:
-    """required の言語は表が要る。それ以外（外の言語）は、表が無ければ未検証にする。"""
+    """required の言語は表が要る。それ以外（追加の言語）は、表が無ければ未検証にする。"""
     table = entry.get("equivalent")
     if not isinstance(table, dict):
         raise CatalogError(f"{where}: equivalent がありません")
@@ -251,7 +251,7 @@ def load_catalog(
     query_texts: dict[str, str] = {}
     for place in places:
         for name in toml_names(place):
-            # 同じ名前は先の置き場が勝つ。外の言語との重なりは発見のときに誤りにしてある
+            # 同じ名前は先の置き場が勝つ。追加の言語との重なりは発見のときに誤りにしてある
             query_texts.setdefault(
                 name.removesuffix(".toml"), place.joinpath(name).read_text(encoding="utf-8")
             )

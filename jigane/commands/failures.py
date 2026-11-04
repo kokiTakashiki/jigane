@@ -147,7 +147,7 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         LanguagePluginUnavailableError,
         Kind(
             "language_plugin_unavailable",
-            "外の言語を使えません",
+            "追加の言語を使えません",
             "理由に出ている手順で、使えない言語を外すか、languages.json を直して、"
             "もう一度実行してください",
         ),

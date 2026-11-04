@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, assert_never
 
-from jigane.commands.budget_argument import add_max_budget_argument
+from jigane.commands.budget_argument import add_max_budget_argument, principle_numbers_by
 from jigane.commands.consent import launch_plan, require_consent, require_unadapted_consent
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK
@@ -34,13 +34,19 @@ from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude, launch_failure
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
 from jigane.reviews.lifecycle import Review, load_review, resolve_review
-from jigane.skills import macro, micro, order, pipeline, run_record, security
+from jigane.skills import macro, macro_principles_run, micro, order, pipeline, run_record, security
 from jigane.skills.assembly import AssemblyInput, HistorySource
 from jigane.skills.mcp import NO_MCP, McpSelection
 
 
 def _model_defaults_text() -> str:
     return "、".join(f"{group.label}は {group.model}" for group in GROUPS)
+
+
+def _principle_models_text() -> str:
+    return "、".join(
+        f"{numbers} が {model}" for model, numbers in principle_numbers_by("model").items()
+    )
 
 
 def _effort_defaults_text() -> str:
@@ -68,7 +74,13 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     run.add_argument(
         "--model",
         default=None,
-        help=f"その回の全ての役のモデルです。省略すると群の既定（{_model_defaults_text()}）を使います",
+        help=(
+            "その回の全ての役のモデルです。"
+            f"省略すると群の既定（{_model_defaults_text()}）を使います。"
+            f"方針の図の形の原則の起動は既定で {_principle_models_text()} です。"
+            "`--model` を渡すと図と原則のすべての起動がそのモデルで走り、"
+            "上限はそのままなので、原則の起動が上限で見送られることがあります"
+        ),
     )
     run.add_argument(
         "--effort",
@@ -300,7 +312,11 @@ def run_settings(
     shape = group_defaults(group)
     return claude.RunSettings(
         budget=claude.RunBudget(
-            defaults.budget.model, defaults.budget.max_budget_usd, shape.reserve_margin
+            defaults.budget.model,
+            defaults.budget.max_budget_usd,
+            shape.reserve_margin,
+            defaults.budget.principles,
+            defaults.budget.output_allowance_tokens,
         ),
         effort=defaults.effort,
         invoke=invoke,
@@ -397,7 +413,7 @@ def run_group(
     # 実行の途中で止めても、起動したことと終わった起動の金額が残るようにする
     with run_record.tracking(review, group, settings) as tracked:
         if group == MACRO:
-            return PolicyGroupResult(macro.run_macro(assembly, tracked), history)
+            return PolicyGroupResult(macro_principles_run.run_policy(assembly, tracked), history)
         # 方針の状態は止める理由にせず、実行の前に知らせる。標準出力は --json の本体に空ける
         policy_notice = order.policy_notice(review)
         if policy_notice is not None:
@@ -433,7 +449,11 @@ def run_review(
     defaults = resolve_run_defaults(group, policy_shape, effort)
     settings = claude.RunSettings(
         budget=claude.RunBudget(
-            defaults.budget.model, defaults.budget.max_budget_usd, shape.reserve_margin
+            defaults.budget.model,
+            defaults.budget.max_budget_usd,
+            shape.reserve_margin,
+            defaults.budget.principles,
+            defaults.budget.output_allowance_tokens,
         ),
         effort=defaults.effort,
         invoke=invoke,

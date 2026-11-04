@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any, assert_never, cast
 
 from jigane.findings.records import (
+    HISTORY_FILE,
     GroupResult,
     HistoryRound,
+    HistoryWarning,
     StoredFinding,
     ThemeUpdate,
     _upgrade_finding_v1,
@@ -183,6 +185,15 @@ def write_fake_review(
     review_module._write_review_file(directory, review)
     (directory / MAP_FILE).write_text(json.dumps(dump_map(review.map_kind)), encoding="utf-8")
     return review
+
+
+def break_history(review: Review) -> HistoryWarning:
+    directory = review.id.directory()
+    (directory / HISTORY_FILE).write_text("{not json", encoding="utf-8")
+    [warning] = load_history_checked(directory).warnings
+    assert warning.path == directory / HISTORY_FILE
+    assert warning.reason.startswith("JSONDecodeError")
+    return warning
 
 
 def history_rounds(directory: Path, group: GroupId) -> list[HistoryRound]:

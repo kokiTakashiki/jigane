@@ -2,7 +2,13 @@
 
 from dataclasses import dataclass
 
-from jigane.groups.definitions import GROUP_BY_ID, Effort, GroupId, RunShape
+from jigane.groups.definitions import (
+    GROUP_BY_ID,
+    PRINCIPLE_RUNS,
+    Effort,
+    GroupId,
+    RunShape,
+)
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs.claude import RunBudget
 
@@ -28,11 +34,27 @@ def resolve_run_defaults(
     """
     group_shape: RunShape = GROUP_BY_ID[group].shape
     default_shape = shape.run_shape if shape is not None else group_shape
+    # 原則の起動の組は図の形だけが持つ。--model と上限の指定は原則の起動にも効く
+    principles = (
+        {
+            number: RunBudget(
+                model if model is not None else run.model,
+                max_budget_usd if max_budget_usd is not None else run.max_budget_usd,
+                default_shape.reserve_margin,
+                output_allowance_tokens=run.output_allowance_tokens,
+            )
+            for number, run in PRINCIPLE_RUNS.items()
+        }
+        if shape is PolicyShape.DIAGRAM
+        else None
+    )
     return RunDefaults(
         effort if effort is not None else default_shape.effort,
         RunBudget(
             model if model is not None else GROUP_BY_ID[group].model,
             max_budget_usd if max_budget_usd is not None else default_shape.max_budget_usd,
             default_shape.reserve_margin,
+            principles,
+            default_shape.output_allowance_tokens,
         ),
     )

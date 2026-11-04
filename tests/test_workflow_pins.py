@@ -10,6 +10,7 @@
 import re
 from pathlib import Path
 
+import pytest
 from workflow_yaml import load_yaml, trailing_comment, uses_holders
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,6 +46,7 @@ def test_workflows_exist() -> None:
     assert workflow_files()
 
 
+@pytest.mark.whole_tree
 def test_every_external_action_has_its_origin_in_a_trailing_comment() -> None:
     offenders = [
         f"{path.relative_to(ROOT)}: {value}"
@@ -54,6 +56,7 @@ def test_every_external_action_has_its_origin_in_a_trailing_comment() -> None:
     assert offenders == []
 
 
+@pytest.mark.whole_tree
 def test_every_external_uses_is_pinned_to_a_commit_sha() -> None:
     offenders = [
         f"{path.relative_to(ROOT)}: {value}"

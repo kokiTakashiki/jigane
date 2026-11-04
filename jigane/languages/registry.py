@@ -33,11 +33,11 @@ from jigane.languages.plugins import (
     ReasonKind,
     discover,
     load_enabled,
-    sanitize_text,
 )
 from jigane.languages.python import PythonAdapter
 from jigane.languages.swift import SwiftAdapter
 from jigane.storage.store import data_home
+from jigane.text.terminal import sanitize_text
 
 
 def _builtin(adapter: LanguageAdapter, label: str) -> LanguagePlugin:
@@ -63,14 +63,14 @@ _plugins: tuple[LanguagePlugin, ...] = (
 
 
 class LanguagePluginUnavailableError(Exception):
-    """有効にした外の言語を使えない。languages.json が壊れている場合と、言語が使えない場合。"""
+    """有効にした追加の言語を使えない。languages.json が壊れている場合と、言語が使えない場合。"""
 
 
 _states: tuple[LanguageState, ...] | None = None
 
 
 class _GrammarBound:
-    """外の言語のアダプタを包み、照合に通った文法の対象を結ぶ。他の口は包んだアダプタへ委ねる。"""
+    """追加の言語のアダプタを包み、照合に通った文法の対象を結ぶ。他の口は包んだアダプタへ委ねる。"""
 
     def __init__(self, inner: LanguageAdapter, target: grammars.GrammarTarget) -> None:
         self._inner = inner
@@ -103,12 +103,12 @@ def _external_plugins(states: tuple[LanguageState, ...]) -> list[LanguagePlugin]
 
 
 def discovered_plugins() -> list[LanguagePlugin]:
-    """文法の照合の前の、有効な外の言語。文法の取得は、照合に通らない言語の文法も対象にするために使う。"""
+    """文法の照合の前の、有効な追加の言語。文法の取得は、照合に通らない言語の文法も対象にするために使う。"""
     return _external_plugins(_discovered_states())
 
 
 def _check_grammars(states: tuple[LanguageState, ...]) -> tuple[LanguageState, ...]:
-    """外の言語の文法を、その言語の宣言と照合する。誤りは言語の状態に載せる。"""
+    """追加の言語の文法を、その言語の宣言と照合する。誤りは言語の状態に載せる。"""
     external = {id(plugin): plugin for plugin in _external_plugins(states)}
     root = grammars.cache_root()
     checked: list[LanguageState] = []
@@ -154,7 +154,7 @@ def set_states(value: tuple[LanguageState, ...] | None) -> None:
 
 
 def require_ready() -> None:
-    """組み込みの文法が無い、または有効にした外の言語に使えないものがあれば止める。起動のときに副コマンドの前で呼ぶ。"""
+    """組み込みの文法が無い、または有効にした追加の言語に使えないものがあれば止める。起動のときに副コマンドの前で呼ぶ。"""
     root = grammars.cache_root()
     for plugin in _plugins:
         grammars.require_present(root, plugin.adapter.grammar)
@@ -166,7 +166,7 @@ def require_ready() -> None:
         f"外す手順: jigane languages disable {state.name}"
         for state in failed
     ]
-    # 名前も詳細も外のコードが決めた文字列で、端末へ出る前に制御文字を除く
+    # 名前も詳細もプラグインのコードが決めた文字列で、端末へ出る前に制御文字を除く
     raise LanguagePluginUnavailableError(sanitize_text("\n".join(lines)))
 
 
@@ -214,17 +214,17 @@ def _external_data(parts: tuple[str, ...]) -> list[Traversable]:
 
 
 def query_places() -> tuple[Traversable, ...]:
-    """照会の置き場の一覧。本体が先頭で、有効な外の言語が続く。"""
+    """照会の置き場の一覧。本体が先頭で、有効な追加の言語が続く。"""
     return (BUILTIN_QUERIES_DIR, *_external_data(PLUGIN_QUERIES_PARTS))
 
 
 def flaky_places() -> tuple[Traversable, ...]:
-    """flaky の型の置き場の一覧。本体が先頭で、有効な外の言語が続く。"""
+    """flaky の型の置き場の一覧。本体が先頭で、有効な追加の言語が続く。"""
     return (BUILTIN_FLAKY_QUERIES_DIR, *_external_data(PLUGIN_FLAKY_QUERIES_PARTS))
 
 
 def grammar_target_named(grammar: str) -> grammars.GrammarTarget:
-    """文法名から、照合の対象を引く。照合に通った外の言語の文法名はその宣言の対象になる。"""
+    """文法名から、照合の対象を引く。照合に通った追加の言語の文法名はその宣言の対象になる。"""
     for plugin in _all_plugins():
         if plugin.adapter.grammar == grammar:
             return grammar_target(plugin.adapter)

@@ -2,7 +2,15 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages import calls_core, csharp_concurrency, csharp_regex, csharp_xaml, type_names
+from jigane.languages import (
+    calls_core,
+    csharp_concurrency,
+    csharp_regex,
+    csharp_string_comparisons,
+    csharp_value_sets,
+    csharp_xaml,
+    type_names,
+)
 from jigane.languages.base import (
     Argument,
     BodyBounds,
@@ -25,12 +33,15 @@ from jigane.languages.base import (
     RegexScan,
     Sharing,
     Step,
+    StringComparison,
     TypeDecl,
     TypeKind,
     TypeScope,
+    ValueSet,
     Visibility,
     import_nodes,
     leading_components,
+    parse,
     span_of,
     split_declaration,
 )
@@ -417,6 +428,14 @@ class CSharpAdapter:
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return csharp_regex.regex_scan(root_node, path)
 
+    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+        return csharp_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
+
+    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+        return csharp_string_comparisons.string_comparisons_of(
+            parse(self, source.encode()).root_node, path
+        )
+
     def locals_of(self, body_node: Node) -> Locals:
         return calls_core.locals_of(body_node, _RULES)
 
@@ -440,7 +459,17 @@ class CSharpAdapter:
         line = node.start_point.row + 1
         scope = TypeScope.FILE if "file" in _modifiers(node) else TypeScope.MODULE
         result.append(
-            TypeDecl(qualified, name, TYPE_KINDS[node.type], _bases(node), path, line, node, scope)
+            TypeDecl(
+                qualified,
+                name,
+                TYPE_KINDS[node.type],
+                _bases(node),
+                path,
+                line,
+                node,
+                scope,
+                abstract=node.type == "class_declaration" and "abstract" in _modifiers(node),
+            )
         )
         # プライマリコンストラクタの引数は、型のフィールドのように参照できる
         primary = next((c for c in node.children if c.type == "parameter_list"), None)
@@ -474,7 +503,17 @@ class CSharpAdapter:
             body: Node | None,
         ) -> MemberDecl:
             annotation = _text(type_node) if type_node is not None else None
-            return MemberDecl(owner, name, kind, annotation, parameters, line, node, body)
+            return MemberDecl(
+                owner,
+                name,
+                kind,
+                annotation,
+                parameters,
+                line,
+                node,
+                body,
+                abstract=kind == "method" and "abstract" in _modifiers(node),
+            )
 
         if node.type in TYPE_KINDS:
             self._collect_type(node, f"{owner}.", path, result)

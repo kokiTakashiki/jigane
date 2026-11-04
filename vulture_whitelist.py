@@ -74,3 +74,17 @@ _.ADDED_ENVIRONMENT  # 同上
 _.REMOVED_ENVIRONMENT  # 同上
 _.INHERITED_ENVIRONMENT  # 同上
 _.WORKING_DIRECTORY  # 同上
+
+# --- 観点の表の読み込み口。置き場と表示とプロンプトを表へ移す後の刻みが引く ---
+_.by_number  # groups/viewpoints.py。表示とプロンプトを表へ移す後の刻みが引く
+_.by_legacy_number  # 同上。0.1.x の置き場の番号を読む後の刻みが引く
+
+# --- 設計書の形の観点の識別子。表の番号の文字列から ViewpointId(row.number) が引くので、コードに名前が現れない ---
+_.M0  # design/division.py の ViewpointId
+_.M1  # 同上
+_.M2  # 同上
+_.M3  # 同上
+_.M4  # 同上
+_.M6  # 同上
+# pytest.mark.usefixtures が文字列で引く fixture。
+_.all_principle_shapes

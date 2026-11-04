@@ -112,7 +112,7 @@ def test_design_review_map_uses_sections_and_keeps_code_as_reference(repo: Path)
     on_disk = json.loads((review.id.directory() / "map.json").read_text(encoding="utf-8"))
     assert on_disk["mode"] == "design_doc"
     text = "\n".join(map_lines(load_review(review.id)))
-    assert "いまの形（推しのコード）" in text
+    assert "いまの形（候補のコード）" in text
     assert "docs/shop-design.md" in text
 
 

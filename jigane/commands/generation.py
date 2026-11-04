@@ -27,7 +27,7 @@ def generate(
 ) -> None:
     """最終的な指摘から文面を作り、標準出力かファイルへ書く。
 
-    export-reply は差分レビュー式の指摘から文を作る。機能レビューは差分レビュー式でないので、
+    export-reply は差分のレビューの指摘から文を作る。ファイルのレビューは差分のレビューでないので、
     export-reply でなく export-report を使う。
 
     Args:
@@ -42,11 +42,11 @@ def generate(
         case ExportKind.REPLY:
             if not review.is_diff:
                 raise ReviewError(
-                    "export-reply は差分レビュー式のレビューだけで使います。"
-                    "機能レビューは export-report を使ってください"
+                    "export-reply は差分のレビューだけで使います。"
+                    "ファイルのレビューは export-report を使ってください"
                 )
         case ExportKind.REPORT:
-            # export-report は機能レビューも書き出せるので、検査は要らない
+            # export-report はファイルのレビューも書き出せるので、検査は要らない
             pass
         case unreachable:
             assert_never(unreachable)

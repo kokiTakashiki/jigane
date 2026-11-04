@@ -13,7 +13,10 @@ from jigane.figures.models import (
 )
 from jigane.policy_materials import changed_files
 from jigane.policy_materials.classes import class_diagram
+from jigane.policy_materials.type_deltas import TypeShapeChange, type_shape_change
 from jigane.reviews.lifecycle import Review
+from jigane.sequence.index import TypeInfo
+from jigane.sequence.indexes import Indexes
 from jigane.storage.store import ReviewKind
 
 PYTHON_AFTER = """\
@@ -132,6 +135,289 @@ def test_python_members_annotations_bases_enum_values_and_positions(tmp_path: Pa
     assert "%% Color m.py:4" in text
 
 
+ABSTRACT_SOURCE = """\
+import abc
+from abc import ABC, ABCMeta, abstractmethod
+
+
+class Store(ABC):
+    @abstractmethod
+    def load(self, key: str) -> int:
+        ...
+
+    def name(self) -> str:
+        return "store"
+
+
+class Meta(metaclass=ABCMeta):
+    @abc.abstractmethod
+    def run(self) -> None:
+        ...
+
+
+class Plain:
+    def run(self) -> None:
+        pass
+
+
+class Child(Store):
+    def load(self, key: str) -> int:
+        return 0
+"""
+
+
+def _blocks(text: str) -> dict[str, str]:
+    return {chunk.split("[", 1)[0].strip(): chunk for chunk in text.split("    class ")[1:]}
+
+
+def test_python_abstract_classes_and_methods_are_marked(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "a.py", ABSTRACT_SOURCE)).text())
+    assert "<<abstract>>" in blocks["Store"]
+    assert "load(key: str) int*" in blocks["Store"]
+    assert "name() str\n" in blocks["Store"]
+    assert "<<abstract>>" in blocks["Meta"]
+    assert "run() None*" in blocks["Meta"]
+
+
+def test_python_plain_classes_get_no_abstract_mark(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "a.py", ABSTRACT_SOURCE)).text())
+    assert "<<abstract>>" not in blocks["Plain"]
+    assert "*" not in blocks["Plain"]
+    assert "<<abstract>>" not in blocks["Child"]
+    assert "load(key: str) int\n" in blocks["Child"]
+
+
+def _python_blocks(tmp_path: Path, source: str) -> dict[str, str]:
+    return _blocks(class_diagram(feature_review(tmp_path, "a.py", source)).text())
+
+
+def test_python_abc_without_own_abstract_method_is_not_marked(tmp_path: Path) -> None:
+    source = (
+        "from abc import ABC\n\n\nclass Base(ABC):\n    def run(self) -> None:\n        pass\n"
+    )
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<abstract>>" not in blocks["Base"]
+
+
+def test_python_abc_names_not_imported_from_abc_are_not_marked(tmp_path: Path) -> None:
+    source = """\
+from abc import abstractmethod
+
+
+class ABC:
+    pass
+
+
+class NoImport(ABC):
+    @abstractmethod
+    def run(self) -> None:
+        ...
+"""
+    blocks = _python_blocks(tmp_path, source)
+    # 同じファイルで定義した ABC は abc 由来でないので、型に印は付かない
+    assert "<<abstract>>" not in blocks["NoImport"]
+    assert "run() None*" in blocks["NoImport"]
+    source = """\
+from other import ABC, abstractmethod
+
+
+class Foreign(ABC):
+    @abstractmethod
+    def run(self) -> None:
+        ...
+"""
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<abstract>>" not in blocks["Foreign"]
+    assert "*" not in blocks["Foreign"]
+
+
+def test_python_abc_without_any_import_is_not_marked(tmp_path: Path) -> None:
+    source = "class Base(ABC):\n    @abstractmethod\n    def run(self) -> None:\n        ...\n"
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<abstract>>" not in blocks["Base"]
+    assert "*" not in blocks["Base"]
+
+
+def test_python_aliased_abc_imports_are_followed(tmp_path: Path) -> None:
+    source = """\
+import abc as a
+from abc import ABC as Base, abstractmethod as abstract
+
+
+class ViaFrom(Base):
+    @abstract
+    def run(self) -> None:
+        ...
+
+
+class ViaModule(a.ABC):
+    @a.abstractmethod
+    def run(self) -> None:
+        ...
+"""
+    blocks = _python_blocks(tmp_path, source)
+    for name in ("ViaFrom", "ViaModule"):
+        assert "<<abstract>>" in blocks[name]
+        assert "run() None*" in blocks[name]
+
+
+def test_python_indirect_abc_subclass_is_not_marked(tmp_path: Path) -> None:
+    source = """\
+from abc import ABC, abstractmethod
+
+
+class Root(ABC):
+    @abstractmethod
+    def run(self) -> None:
+        ...
+
+
+class Middle(Root):
+    @abstractmethod
+    def more(self) -> None:
+        ...
+"""
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<abstract>>" in blocks["Root"]
+    assert "<<abstract>>" not in blocks["Middle"]
+    assert "more() None*" in blocks["Middle"]
+
+
+def test_python_protocol_is_an_abstract_class_not_an_interface(tmp_path: Path) -> None:
+    source = """\
+from typing import Protocol, Generic
+import typing_extensions
+
+
+class Reader(Protocol):
+    def read(self) -> str:
+        ...
+
+
+class Boxed(Protocol[int]):
+    def get(self) -> int:
+        ...
+
+
+class Ext(typing_extensions.Protocol):
+    def go(self) -> None:
+        ...
+
+
+class Impl(Reader):
+    def read(self) -> str:
+        return ""
+"""
+    blocks = _python_blocks(tmp_path, source)
+    for name in ("Reader", "Boxed", "Ext"):
+        assert "<<abstract>>" in blocks[name]
+        assert "<<interface>>" not in blocks[name]
+    assert "<<abstract>>" not in blocks["Impl"]
+    assert "<<interface>>" not in blocks["Impl"]
+
+
+def test_python_protocol_not_imported_from_typing_stays_a_class(tmp_path: Path) -> None:
+    source = "from other import Protocol\n\n\nclass Reader(Protocol):\n    pass\n"
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<interface>>" not in blocks["Reader"]
+    assert "<<abstract>>" not in blocks["Reader"]
+
+
+def test_python_relative_imports_are_not_read_as_abc_or_typing(tmp_path: Path) -> None:
+    source = """\
+from .abc import ABC, abstractmethod
+from .typing import Protocol
+
+
+class Base(ABC):
+    @abstractmethod
+    def run(self) -> None:
+        ...
+
+
+class Reader(Protocol):
+    def read(self) -> str:
+        ...
+"""
+    blocks = _python_blocks(tmp_path, source)
+    assert "<<abstract>>" not in blocks["Base"]
+    assert "*" not in blocks["Base"]
+    assert "<<interface>>" not in blocks["Reader"]
+
+
+JAVA_ABSTRACT = """\
+abstract class Shape {
+    abstract double area();
+
+    double name() {
+        return 0;
+    }
+}
+
+class Circle extends Shape {
+    double area() {
+        return 1;
+    }
+}
+
+interface Drawable {
+    void draw();
+}
+"""
+
+
+def test_java_abstract_modifier_marks_classes_and_methods(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "Shape.java", JAVA_ABSTRACT)).text())
+    assert "<<abstract>>" in blocks["Shape"]
+    assert "area() double*" in blocks["Shape"]
+    assert "name() double\n" in blocks["Shape"]
+
+
+def test_java_plain_classes_and_interfaces_get_no_abstract_mark(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "Shape.java", JAVA_ABSTRACT)).text())
+    assert "<<abstract>>" not in blocks["Circle"]
+    assert "*" not in blocks["Circle"]
+    assert "<<interface>>" in blocks["Drawable"]
+    assert "<<abstract>>" not in blocks["Drawable"]
+    assert "draw() void\n" in blocks["Drawable"]
+
+
+CSHARP_ABSTRACT = """\
+abstract class Shape
+{
+    public abstract double Area();
+
+    public double Name() { return 0; }
+}
+
+class Circle : Shape
+{
+    public override double Area() { return 1; }
+}
+
+interface IDrawable
+{
+    void Draw();
+}
+"""
+
+
+def test_csharp_abstract_modifier_marks_classes_and_methods(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "Shape.cs", CSHARP_ABSTRACT)).text())
+    assert "<<abstract>>" in blocks["Shape"]
+    assert "Area() double*" in blocks["Shape"]
+    assert "Name() double\n" in blocks["Shape"]
+
+
+def test_csharp_plain_classes_and_interfaces_get_no_abstract_mark(tmp_path: Path) -> None:
+    blocks = _blocks(class_diagram(feature_review(tmp_path, "Shape.cs", CSHARP_ABSTRACT)).text())
+    assert "<<abstract>>" not in blocks["Circle"]
+    assert "*" not in blocks["Circle"]
+    assert "<<interface>>" in blocks["IDrawable"]
+    assert "<<abstract>>" not in blocks["IDrawable"]
+    assert "Draw() void\n" in blocks["IDrawable"]
+
+
 def test_swift_members_signature_inheritance_and_enum_cases(tmp_path: Path) -> None:
     text = class_diagram(feature_review(tmp_path, "s.swift", SWIFT)).text()
     assert "radius: Double" in text
@@ -203,7 +489,7 @@ def test_diff_review_shows_unchanged_members_by_name_only(tmp_path: Path) -> Non
 
 
 def test_feature_review_keeps_member_signatures(tmp_path: Path) -> None:
-    # 変更前との比べが無い機能レビュー式では、どの項目も変わっていないとは言えない
+    # 変更前との比べが無いファイルのレビューでは、どの項目も変わっていないとは言えない
     text = class_diagram(feature_review(tmp_path, "i.cs", CSHARP)).text()
     assert "Price(level: Level, count: int) int" in text
 
@@ -663,3 +949,85 @@ def test_a_member_naming_its_own_type_draws_no_relation(tmp_path: Path) -> None:
     assert "..>" not in diagram
     assert "-->" not in diagram
     assert "<|--" not in diagram
+
+
+def shape_review(tmp_path: Path, before: str, after: str, file: str = "m.py") -> Review:
+    base = tmp_path / "base"
+    new = tmp_path / "after"
+    base.mkdir()
+    new.mkdir()
+    (base / file).write_text(before, encoding="utf-8")
+    (new / file).write_text(after, encoding="utf-8")
+    last = len(after.splitlines())
+    return make_review(
+        new,
+        [file],
+        base_tree=base,
+        judgment_map={"segments": [whole(file, last)], "regions": [], "line_counts": {}},
+        kind=ReviewKind.RANGE,
+    )
+
+
+def python_type(source: str, name: str, tmp_path: Path, file: str = "m.py") -> TypeInfo:
+    (tmp_path / file).write_text(source, encoding="utf-8")
+    found = Indexes(tmp_path, [file]).types()
+    return next(t for t in found if t.name == name)
+
+
+WITH_BASE = "class A:\n    pass\n\n\nclass W(A):\n    x: int\n"
+WITHOUT_BASE = "class A:\n    pass\n\n\nclass W:\n    x: int\n"
+SWIFT_CLASS = "final class W {\n    var x: Int\n}\n"
+SWIFT_ENUM = "enum W {\n    case x\n}\n"
+
+
+def test_type_shape_change_reports_added_and_removed_bases(tmp_path: Path) -> None:
+    plain = python_type(WITHOUT_BASE, "W", tmp_path)
+    derived = python_type(WITH_BASE, "W", tmp_path)
+    assert type_shape_change(plain, derived) == TypeShapeChange("W", (), ("A",), "class", "class")
+    assert type_shape_change(derived, plain) == TypeShapeChange("W", ("A",), (), "class", "class")
+
+
+def test_type_shape_change_reports_a_kind_change(tmp_path: Path) -> None:
+    cls = python_type(SWIFT_CLASS, "W", tmp_path, "w.swift")
+    enum = python_type(SWIFT_ENUM, "W", tmp_path, "w.swift")
+    change = type_shape_change(cls, enum)
+    assert change is not None
+    assert (change.kind_before, change.kind_after) == ("class", "enum")
+
+
+def test_type_shape_change_is_none_when_nothing_changed(tmp_path: Path) -> None:
+    one = python_type(WITH_BASE, "W", tmp_path)
+    two = python_type(WITH_BASE.replace("x: int", "x: str"), "W", tmp_path)
+    assert type_shape_change(one, two) is None
+
+
+def test_class_diagram_notes_a_base_added_to_a_type(tmp_path: Path) -> None:
+    text = class_diagram(shape_review(tmp_path, WITHOUT_BASE, WITH_BASE)).text()
+    assert "基底を変えた" in text
+    assert "変更で継承か種類が変わった型: `W`（基底: なし → `A`）" in text
+
+
+def test_class_diagram_notes_a_base_removed_from_a_type(tmp_path: Path) -> None:
+    text = class_diagram(shape_review(tmp_path, WITH_BASE, WITHOUT_BASE)).text()
+    assert "`W`（基底: `A` → なし）" in text
+
+
+def test_class_diagram_notes_a_kind_change(tmp_path: Path) -> None:
+    text = class_diagram(shape_review(tmp_path, SWIFT_CLASS, SWIFT_ENUM, "w.swift")).text()
+    assert "種類を変えた" in text
+    assert "種類: class → enum" in text
+
+
+def test_class_diagram_has_no_shape_note_when_bases_and_kind_match(tmp_path: Path) -> None:
+    text = class_diagram(
+        shape_review(tmp_path, WITH_BASE, WITH_BASE.replace("x: int", "x: str"))
+    ).text()
+    assert "基底を変えた" not in text
+    assert "種類を変えた" not in text
+    assert "継承か種類が変わった型" not in text
+
+
+def test_class_diagram_takes_no_shape_change_for_an_added_type(tmp_path: Path) -> None:
+    text = class_diagram(shape_review(tmp_path, "class A:\n    pass\n", WITH_BASE)).text()
+    assert "追加した型" in text
+    assert "継承か種類が変わった型" not in text

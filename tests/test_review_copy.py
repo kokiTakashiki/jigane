@@ -26,7 +26,7 @@ def _stored(finding_id: str) -> dict[str, object]:
     return {
         "id": finding_id,
         "severity": "warning",
-        "viewpoint": "V",
+        "viewpoint": "M2",
         "claim": "c",
         "triage": None,
         "theme": None,

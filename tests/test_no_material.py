@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from design_materials_support import work
 from fakes import MacroFake, as_run, settings_for
 from group_state_support import seed_group
-from test_design_materials import DOCUMENT, _work
+from test_design_materials import DOCUMENT
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -62,14 +63,14 @@ def test_no_material_is_a_state_apart_from_no_findings() -> None:
 
 
 def test_design_materials_without_anything_become_no_material(tmp_path: Path) -> None:
-    materials = design_materials(_work(tmp_path), "docs/d.md", "", [])
+    materials = design_materials(work(tmp_path), "docs/d.md", "", [])
     outcome = group_outcome(
         as_run({"no_material": [kind.value for kind in materials.missing]}, policy=True), 0
     )
     assert outcome == NoMaterial(materials.missing)
     assert len(outcome.missing) == 4
     # 本文があれば、図や名指しが空でも材料なしにならない
-    some = design_materials(_work(tmp_path), "docs/d.md", DOCUMENT, [])
+    some = design_materials(work(tmp_path), "docs/d.md", DOCUMENT, [])
     assert not some.is_empty
 
 

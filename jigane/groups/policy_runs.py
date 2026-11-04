@@ -18,6 +18,7 @@ class PolicyRole(StrEnum):
 
     DIAGRAM = "diagram"
     DESIGN = "design"
+    PRINCIPLE = "principle"
     SINGLE = "single"
     ROUTE = "discovery:route"
     VERIFY = "discovery:verify"
@@ -33,6 +34,7 @@ class PolicyRole(StrEnum):
 _ROLE_LABELS = {
     PolicyRole.DIAGRAM: "図",
     PolicyRole.DESIGN: "設計書",
+    PolicyRole.PRINCIPLE: "原則",
     PolicyRole.SINGLE: "一回の形（廃止）",
     PolicyRole.ROUTE: "四回の形（廃止）:道筋",
     PolicyRole.VERIFY: "四回の形（廃止）:検証",
@@ -57,7 +59,7 @@ class PolicyShape(StrEnum):
         """形の起動が記録する役。廃止した FULL は役が四つに分かれる。"""
         match self:
             case PolicyShape.DIAGRAM:
-                return (PolicyRole.DIAGRAM,)
+                return (PolicyRole.DIAGRAM, PolicyRole.PRINCIPLE)
             case PolicyShape.DESIGN:
                 return (PolicyRole.DESIGN,)
             case PolicyShape.SINGLE:
@@ -120,17 +122,19 @@ class PolicyShape(StrEnum):
 
 def role_of(shape: PolicyShape) -> PolicyRole:
     """形の起動が記録する役。役が一つに決まらない形は ValueError。"""
-    roles = shape.roles
-    if len(roles) != 1:
+    if shape is PolicyShape.FULL:
         raise ValueError("廃止した四回の形は、一つの役に決まりません")
-    return roles[0]
+    # 図の形は先頭が図の起動の役で、原則の役は原則ごとの起動が別に書く
+    return shape.roles[0]
 
 
 def estimate_basis_row_labels() -> tuple[str, ...]:
     """見積もりの過去実額に数える使用量の行の役の名前。形の定義から引く。"""
+    # 原則の行は図 1 回の基準に混ぜない
     return tuple(
         label
         for shape in PolicyShape
         if shape.is_estimate_basis
         for label in shape.usage_row_labels
+        if label != PolicyRole.PRINCIPLE.label
     )

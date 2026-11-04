@@ -26,13 +26,14 @@ from jigane.findings.records import (
     save_findings_state,
 )
 from jigane.groups.definitions import MACRO, MICRO
+from jigane.groups.viewpoints import by_number
 
 
 def _finding(finding_id: str, triage: object, severity: str = "major") -> dict[str, Any]:
     return {
         "id": finding_id,
         "severity": severity,
-        "viewpoint": "V",
+        "viewpoint": "M2",
         "claim": "C",
         "triage": triage,
         "theme": "T1",
@@ -112,9 +113,11 @@ def test_writer_read_then_save_keeps_stored_triage(directory: Path) -> None:
 
 def test_stored_findings_round_trips_the_current_form() -> None:
     raw = {
-        "format": 3,
+        "format": 4,
         "last_number": 7,
-        "groups": {"macro": [_finding("F1", "must_read")]},
+        "groups": {
+            "macro": [{**_finding("F1", "must_read"), "viewpoint": str(by_number("M2").uuid)}]
+        },
         "stale_groups": ["macro"],
         "last_theme_number": 2,
         "themes": [
@@ -171,12 +174,14 @@ def test_read_findings_json_migrates_legacy_nit_in_a_group() -> None:
     assert raw["groups"]["micro"][0] == legacy
 
 
+@pytest.mark.whole_tree
 def test_only_findings_module_reads_or_writes_the_findings_file() -> None:
     root = Path(__file__).parent.parent / "jigane"
     handlers = json_users_of_stored_file(root, "FINDINGS_FILE", "findings.json")
     assert handlers == ["findings/records.py"]
 
 
+@pytest.mark.whole_tree
 def test_writers_outside_findings_do_not_edit_the_state_by_key() -> None:
     root = Path(__file__).parent.parent / "jigane"
     keys = frozenset({"groups", "themes", "stale_groups", "last_number", "last_theme_number"})
@@ -235,7 +240,11 @@ def test_a_group_name_outside_the_current_groups_is_kept_and_written_back(
     assert list(stored.groups) == [MACRO]
     assert stored.unknown_groups == {"retired": legacy}
     assert "retired" in caplog.text
-    assert stored.to_json()["groups"] == raw["groups"]
+    written = {
+        "macro": [{**_finding("F1", "must_read"), "viewpoint": str(by_number("M2").uuid)}],
+        "retired": legacy,
+    }
+    assert stored.to_json()["groups"] == written
 
 
 def test_stored_finding_round_trips_and_keeps_extra_fields() -> None:
@@ -299,7 +308,7 @@ def test_stored_finding_kind_follows_the_type() -> None:
 _COMMON: dict[str, Any] = {
     "id": "F2",
     "severity": "major",
-    "viewpoint": "v",
+    "viewpoint": "M2",
     "claim": "c",
     "theme": None,
     "adjudication": None,

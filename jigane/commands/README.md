@@ -27,8 +27,8 @@
 
 - レビューの作成と更新：`new`、`refresh`（出所の型から更新の手への振り分け `refresh_review` を持ち、種類ごとの更新は `reviews.lifecycle` と `design.review_documents` が持ちます）、`delete`、`archive`、`unarchive`
 - 表示：`list`、`show`、`diagrams`、`sequence`、`usage`、`estimate`
-- 設計書の `new design-doc`：設計書をレビューします。実装の前に方針の綻びを問います。出所は設計書のパスと版、コードの版、選んだファイル、`--with` で選んだ付属の文書のパスと版です。
-- 設計書の `design suggest`：設計書の名指しから、突き合わせるファイルと、付属の文書の候補（同じ場所の reports/ の .md）を示します。保存はしません。
+- 設計書の `new design-doc`：設計書をレビューします。出所は設計書のパスと版、コードの版、選んだファイル、`--with` で選んだ付属の文書のパスと版です。
+- 設計書の `design suggest`：設計書の名指しから、設計書のレビューで読むファイルと、付属の文書の候補（同じ場所の reports/ の .md）を示します。保存はしません。
 - スキルの実行：`run`
 - 検査と一覧：`flaky`（テストの flaky の検査だけを走らせます）、`technology-list`（変更したファイルが使う技術の表を出します）、`languages`（言語の一覧、有効化、無効化、文法の取得）
 - 最終的な指摘の編集：`pick`、`unpick`、`hold`、`unhold`、`object`、`unobject`
@@ -40,13 +40,13 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`static_analysis`、`storage`、`technology_list`
+読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`static_analysis`、`storage`、`technology_list`、`text`
 
 読まれるサブパッケージ：なし
 
 <!-- END GENERATED: dependencies -->
 
-- `jigane.reviews.lifecycle` でレビューを読み込み、`jigane.design.review_documents` で設計書のレビューを作成と更新し、`jigane.skills` の `run` で群を走らせます。
+- `jigane.reviews.lifecycle` でレビューを読み込み、`jigane.design.review_documents` で設計書のレビューを作成と更新し、`jigane.skills` の `macro_principles_run.run_policy`（方針）、`micro`、`security` で群を走らせます。
 - `jigane.__main__` が `commands.main` を呼びます。
 
 副コマンドの引数、機械が読む出力（`--json`）、失敗の JSON の鍵（`failures` の `Failure.to_dict`）、終了コード（`exit_codes`）は、外の道具との契約です。機械が読む出力を出す副コマンドは、すべて `--json` を持ちます。失敗は `--json` を付けたとき（`sequence` は `--format json` を付けたとき）だけ、標準出力に `{"error": {...}}` で出ます。`sequence` は `--json` を持たず、出力の形を `--format` で選びます。例外は、人向けの進捗だけを出す `languages fetch` です。

@@ -6,7 +6,6 @@ import json
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.views.review import origin_lines, total_lines
-from jigane.languages.plugins import sanitize_text
 from jigane.reviews.lifecycle import (
     ARCHIVED_EXCLUDE,
     ARCHIVED_ONLY,
@@ -16,6 +15,7 @@ from jigane.reviews.lifecycle import (
     is_archived,
     list_reviews,
 )
+from jigane.text.terminal import sanitize_text
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -42,9 +42,10 @@ def run(args: argparse.Namespace, context: Context) -> int:
                     "repository": f"{review.id.owner}/{review.id.repo}",
                     "key": review.id.key,
                     **review.kind_fields(),
-                    # PR のレビューは PR の題。範囲と機能のレビューは題が無く null（名前は key）
+                    # PR のレビューは PR の題。範囲とファイルのレビューは題が無く null
+                    # （名前は key）
                     "title": origin.info.title if isinstance(origin, PullRequestOrigin) else None,
-                    # 範囲のレビューは作ったときの範囲の文字列。PR と機能のレビューは null
+                    # 範囲のレビューは作ったときの範囲の文字列。PR とファイルのレビューは null
                     "range_text": origin.range.range_text
                     if isinstance(origin, RangeOrigin)
                     else None,

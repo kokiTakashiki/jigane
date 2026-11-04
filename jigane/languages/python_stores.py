@@ -1,7 +1,10 @@
 """保存物の鍵の抽出（Python）。構文木（ast）だけから読み、実行も評価もしない。
 
 保存物は、JSON と CSV と TSV のファイルの名前の定数で束ねるか、
-`to_json` と `from_json` を持つ型で束ねる。関数の本体は鍵の集合だけを読み、値は読まない。
+`to_json` と `from_json` を持つ型で束ねる。
+ファイルの名前が関数の引数で渡る保存物は、「関数名 の引数 引数名」の名前で関数ごとに束ねる。
+文字列を組んで書き、`split` で読み戻す独自の形式は、鍵を持たない側として拾う。
+関数の本体は鍵の集合だけを読み、値は読まない。
 束ねと突き合わせは言語に依らない側（`jigane.skills.policy_stores`）が行う。
 """
 
@@ -10,7 +13,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from jigane.languages.base import StoreAccess, StoreFormat, StoreRole, StoreSide
+from jigane.languages.base import (
+    PARAMETER_STORE_MARK,
+    StoreAccess,
+    StoreFormat,
+    StoreRole,
+    StoreSide,
+)
 
 _SUFFIXES = (".json", ".jsonl", ".csv", ".tsv")
 _READ_SOURCES = {"load", "loads", "DictReader"}
@@ -30,6 +39,35 @@ def _call_name(node: ast.Call) -> str:
     if isinstance(func, ast.Attribute):
         return func.attr
     return func.id if isinstance(func, ast.Name) else ""
+
+
+def _csv_reader_names(tree: ast.Module) -> frozenset[str]:
+    """csv.reader を指す呼び出しの綴り。
+
+    `from csv import reader [as x]` は `x`、`import csv [as c]` は `c.reader`。
+    """
+    spellings: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "csv" and node.level == 0:
+            spellings.update(a.asname or a.name for a in node.names if a.name == "reader")
+        elif isinstance(node, ast.Import):
+            spellings.update(f"{a.asname or a.name}.reader" for a in node.names if a.name == "csv")
+    return frozenset(spellings)
+
+
+def _is_positional_csv_reader(call: ast.Call, csv_readers: frozenset[str]) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return (
+            func.attr == "reader"
+            and isinstance(func.value, ast.Name)
+            and f"{func.value.id}.reader" in csv_readers
+        )
+    return isinstance(func, ast.Name) and func.id in csv_readers
+
+
+def _is_read_source(call: ast.Call, csv_readers: frozenset[str]) -> bool:
+    return _call_name(call) in _READ_SOURCES or _is_positional_csv_reader(call, csv_readers)
 
 
 def _constants(tree: ast.Module) -> dict[str, str]:
@@ -475,19 +513,27 @@ def _bind(target: ast.AST, tainted: set[str]) -> None:
     tainted.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
 
 
-def _propagate(node: ast.AST, tainted: set[str]) -> None:
-    if isinstance(node, ast.Assign) and _derives(node.value, tainted):
+def _propagate(
+    node: ast.AST, tainted: set[str], csv_readers: frozenset[str] = frozenset()
+) -> None:
+    if isinstance(node, ast.Assign) and _derives(node.value, tainted, csv_readers):
         for target in node.targets:
             _bind(target, tainted)
-    elif isinstance(node, (ast.For, ast.comprehension)) and _derives(node.iter, tainted):
+    elif isinstance(node, (ast.For, ast.comprehension)) and _derives(
+        node.iter, tainted, csv_readers
+    ):
         _bind(node.target, tainted)
     elif isinstance(node, ast.With):
         for item in node.items:
-            if item.optional_vars is not None and _derives(item.context_expr, tainted):
+            if item.optional_vars is not None and _derives(
+                item.context_expr, tainted, csv_readers
+            ):
                 _bind(item.optional_vars, tainted)
 
 
-def _tainted_names(function: _Function, *, is_reader_method: bool) -> set[str]:
+def _tainted_names(
+    function: _Function, *, is_reader_method: bool, csv_readers: frozenset[str] = frozenset()
+) -> set[str]:
     tainted: set[str] = set()
     if is_reader_method:
         tainted |= {a.arg for a in function.args.args if a.arg not in ("self", "cls")}
@@ -495,16 +541,16 @@ def _tainted_names(function: _Function, *, is_reader_method: bool) -> set[str]:
     for _ in range(4):
         before = len(tainted)
         for node in ast.walk(function):
-            _propagate(node, tainted)
+            _propagate(node, tainted, csv_readers)
         if len(tainted) == before:
             break
     return tainted
 
 
-def _derives(expr: ast.AST, tainted: set[str]) -> bool:
+def _derives(expr: ast.AST, tainted: set[str], csv_readers: frozenset[str] = frozenset()) -> bool:
     return any(
         (isinstance(n, ast.Name) and n.id in tainted)
-        or (isinstance(n, ast.Call) and _call_name(n) in _READ_SOURCES)
+        or (isinstance(n, ast.Call) and _is_read_source(n, csv_readers))
         for n in ast.walk(expr)
     )
 
@@ -515,17 +561,22 @@ def _read_side(
     path: str,
     owner: ast.ClassDef | None,
     vocab: _Vocabulary,
+    *,
+    keep_empty: bool = False,
+    csv_readers: frozenset[str] = frozenset(),
 ) -> _Side | None:
     is_reader_method = function.name in _READ_METHODS and owner is not None
     calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)]
-    if not is_reader_method and not any(_call_name(c) in _READ_SOURCES for c in calls):
+    if not is_reader_method and not any(_is_read_source(c, csv_readers) for c in calls):
         # 読み込みの入口が無い関数は、何も辿れない
         return None
-    tainted = _tainted_names(function, is_reader_method=is_reader_method)
-    is_csv = any(_call_name(c) == "DictReader" for c in calls)
+    tainted = _tainted_names(function, is_reader_method=is_reader_method, csv_readers=csv_readers)
+    is_csv = any(
+        _call_name(c) == "DictReader" or _is_positional_csv_reader(c, csv_readers) for c in calls
+    )
     side = _Side(name, path, kind=StoreFormat.CSV if is_csv else StoreFormat.JSON)
     for node in ast.walk(function):
-        if isinstance(node, ast.Subscript) and _derives(node.value, tainted):
+        if isinstance(node, ast.Subscript) and _derives(node.value, tainted, csv_readers):
             side.add(vocab.key(node.slice, path))
         elif isinstance(node, ast.Call):
             func = node.func
@@ -533,12 +584,12 @@ def _read_side(
                 isinstance(func, ast.Attribute)
                 and func.attr in ("get", "pop", "setdefault")
                 and node.args
-                and _derives(func.value, tainted)
+                and _derives(func.value, tainted, csv_readers)
             ):
                 side.add(vocab.key(node.args[0], path))
             built = _call_name(node)
-            takes = any(_derives(a, tainted) for a in node.args) or any(
-                _derives(k.value, tainted) for k in node.keywords
+            takes = any(_derives(a, tainted, csv_readers) for a in node.args) or any(
+                _derives(k.value, tainted, csv_readers) for k in node.keywords
             )
             if takes and (built[:1].isupper() or built == "cls"):
                 type_name = owner.name if built == "cls" and owner is not None else built
@@ -547,12 +598,157 @@ def _read_side(
                     built == "cls" or vocab.find(vocab.classes, path, type_name) is not None
                 ):
                     side.types.add(type_name)
-                spread = any(k.arg is None and _derives(k.value, tainted) for k in node.keywords)
+                spread = any(
+                    k.arg is None and _derives(k.value, tainted, csv_readers)
+                    for k in node.keywords
+                )
                 if spread and (fields := vocab.find(vocab.classes, path, type_name)) is not None:
                     side.keys |= fields[1]
-        elif isinstance(node, ast.Compare) and any(_derives(c, tainted) for c in node.comparators):
+        elif isinstance(node, ast.Compare) and any(
+            _derives(c, tainted, csv_readers) for c in node.comparators
+        ):
             side.add(vocab.key(node.left, path))
-    return side if side.keys or side.types else None
+    # csv.reader は位置で読むので鍵が付かない。固定のファイル名で読む関数も読む側として残す
+    positional = any(_is_positional_csv_reader(c, csv_readers) for c in calls)
+    return side if side.keys or side.types or keep_empty or positional else None
+
+
+@dataclass
+class _Opened:
+    """`open` で開いたファイル。target は保存物の名前（引数なら「関数 の引数 名前」）か None。"""
+
+    target: str | None
+    handle: str | None
+    writing: bool
+    reading: bool
+    parameter: bool
+
+
+def _parameters(function: _Function) -> set[str]:
+    args = function.args
+    return {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]} - {"self", "cls"}
+
+
+def _open_mode(call: ast.Call) -> str | None:
+    mode = call.args[1] if len(call.args) > 1 else None
+    if mode is None:
+        mode = next((k.value for k in call.keywords if k.arg == "mode"), None)
+    return "r" if mode is None else _string(mode)
+
+
+def _opened_files(
+    function: _Function, qualified: str, path: str, vocab: _Vocabulary
+) -> list[_Opened]:
+    parameters = _parameters(function)
+    found: list[_Opened] = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.With):
+            pairs = [(item.context_expr, item.optional_vars) for item in node.items]
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            pairs = [(node.value, node.targets[0])]
+        else:
+            continue
+        for call, variable in pairs:
+            if not (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "open"
+                and call.args
+            ):
+                continue
+            first = call.args[0]
+            parameter = isinstance(first, ast.Name) and first.id in parameters
+            target: str | None = None
+            if parameter and isinstance(first, ast.Name):
+                target = f"{qualified}{PARAMETER_STORE_MARK}{first.id}"
+            else:
+                target = _string(first) or vocab.string_constant(first, path)
+            mode = _open_mode(call)
+            writing = mode is not None and any(c in mode for c in "wax")
+            found.append(
+                _Opened(
+                    target,
+                    variable.id if isinstance(variable, ast.Name) else None,
+                    writing,
+                    mode is not None and not writing,
+                    parameter,
+                )
+            )
+    return found
+
+
+def _composed(expr: ast.expr, function: _Function) -> bool:
+    """文字列を連結、f 文字列、join、format、% で組んだ式か。名前なら代入された式を一段見る。"""
+    if isinstance(expr, ast.JoinedStr):
+        return True
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
+        return any(isinstance(n, ast.JoinedStr) or _string(n) is not None for n in ast.walk(expr))
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
+        return expr.func.attr in ("join", "format") and _string(expr.func.value) is not None
+    if isinstance(expr, ast.Name):
+        return any(
+            not isinstance(v, ast.Name) and _composed(v, function)
+            for v in _local_values(function, expr.id)
+        )
+    return False
+
+
+def _text_write_side(
+    function: _Function, name: str, path: str, opened: list[_Opened]
+) -> _Side | None:
+    handles = {o.handle for o in opened if o.writing and o.handle is not None}
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "write"
+            and isinstance(func.value, ast.Name)
+            and func.value.id in handles
+            and node.args
+            and _composed(node.args[0], function)
+        ):
+            return _Side(name, path, kind=StoreFormat.CUSTOM)
+        if (
+            isinstance(func, ast.Name)
+            and func.id == "print"
+            and any(
+                k.arg == "file" and isinstance(k.value, ast.Name) and k.value.id in handles
+                for k in node.keywords
+            )
+            and any(_composed(a, function) for a in node.args)
+        ):
+            return _Side(name, path, kind=StoreFormat.CUSTOM)
+    return None
+
+
+def _splits_text(call: ast.Call, tainted: set[str]) -> bool:
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr in ("split", "rsplit", "partition")):
+        return False
+    if len(call.args) == 1 and _string(call.args[0]) == "\n":
+        # 行に分けるだけで、行の中の形は読んでいない
+        return False
+    return _derives(func.value, tainted)
+
+
+def _text_read_side(
+    function: _Function, name: str, path: str, opened: list[_Opened]
+) -> _Side | None:
+    tainted = {o.handle for o in opened if o.reading and o.handle is not None}
+    if not tainted:
+        return None
+    # 代入の連鎖を辿るため、増えなくなるまで回す
+    for _ in range(4):
+        before = len(tainted)
+        for node in ast.walk(function):
+            _propagate(node, tainted)
+        if len(tainted) == before:
+            break
+    if any(isinstance(n, ast.Call) and _splits_text(n, tainted) for n in ast.walk(function)):
+        return _Side(name, path, kind=StoreFormat.CUSTOM)
+    return None
 
 
 def _sink_argument(call: ast.Call, sink: _Sink) -> ast.expr | None:
@@ -615,6 +811,8 @@ def _write_side(
     path: str,
     owner: ast.ClassDef | None,
     vocab: _Vocabulary,
+    *,
+    keep_empty: bool = False,
 ) -> _Side | None:
     calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)]
     sinks = _called_sinks(function, calls, path, vocab)
@@ -631,7 +829,7 @@ def _write_side(
             _add_written_keys(node, side, function, path, owner, vocab=vocab, sinks=sinks)
         elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Subscript):
             side.add(vocab.key(node.targets[0].slice, path))
-    return side if side.keys else None
+    return side if side.keys or keep_empty else None
 
 
 def _sink_of(function: _Function, owner: ast.ClassDef | None) -> _Sink | None:
@@ -726,10 +924,25 @@ def store_accesses(sources: Mapping[str, str]) -> list[StoreAccess]:
     vocab = _vocabulary(parsed)
     found: list[StoreAccess] = []
     for path, tree in parsed.items():
+        csv_readers = _csv_reader_names(tree)
         for function, owner in _functions(tree):
             qualified = f"{owner.name}.{function.name}" if owner is not None else function.name
-            writer = _write_side(function, qualified, path, owner, vocab)
-            reader = _read_side(function, qualified, path, owner, vocab)
+            opened = _opened_files(function, qualified, path, vocab)
+            # 引数で渡るファイルへの書き読みは、鍵が取れなくても保存物の入口として載せる
+            writes_parameter = any(o.parameter and o.writing for o in opened)
+            reads_parameter = any(o.parameter and o.reading for o in opened)
+            writer = _write_side(
+                function, qualified, path, owner, vocab, keep_empty=writes_parameter
+            ) or _text_write_side(function, qualified, path, opened)
+            reader = _read_side(
+                function,
+                qualified,
+                path,
+                owner,
+                vocab,
+                keep_empty=reads_parameter,
+                csv_readers=csv_readers,
+            ) or _text_read_side(function, qualified, path, opened)
             sides = tuple(
                 _side(side, role)
                 for side, role in ((writer, StoreRole.WRITE), (reader, StoreRole.READ))
@@ -739,10 +952,20 @@ def store_accesses(sources: Mapping[str, str]) -> list[StoreAccess]:
                 # 保存物に触れない関数は載せない
                 continue
             paired = owner is not None and function.name in (_WRITE_METHODS | _READ_METHODS)
+            names = _store_names(function, path, vocab)
+            has_custom = any(side.kind is StoreFormat.CUSTOM for side in sides)
+            has_labels = any(side.labels for side in sides)
+            for file in opened:
+                if file.target is None:
+                    continue
+                # 拡張子を持つ JSON と CSV の名前は上で拾い済み。ほかの名前と引数は、
+                # 独自の形式か、ほかに束ねる手がかりが無いときだけ保存物の名前にする
+                if has_custom or (file.parameter and not names and not has_labels):
+                    names.add(file.target)
             found.append(
                 StoreAccess(
                     path,
-                    frozenset(_store_names(function, path, vocab)),
+                    frozenset(names),
                     owner.name if paired and owner is not None else None,
                     sides,
                 )

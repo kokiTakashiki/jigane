@@ -34,6 +34,28 @@ def data_home() -> Path:
     return default_data_home()
 
 
+def ensure_data_home() -> Path:
+    """データの置き場の根が無ければ 0700 で作って返す。
+
+    置き場には差分、PR の本文、Claude の出力が平文で入るため、他の利用者に読ませない。
+    """
+    home = data_home()
+    if home.exists():
+        # 既にある根の権限は利用者の選んだものとして変えない
+        return home
+    home.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # 作った瞬間から広い権限で見えないよう、mode を渡して作る
+        home.mkdir(mode=0o700)
+    except FileExistsError:
+        # 同時に作った側の根の権限には触らない
+        return home
+    # mkdir の mode は umask で削られるので、作ったあとにも明示する。
+    # Windows の chmod は読み取り専用の印にしか効かず、0o700 を渡しても害はない
+    home.chmod(0o700)
+    return home
+
+
 class ReviewKind(StrEnum):
     """レビューの出所の種類。識別子の区切り、キーの規則、保存先はこの種類の性質として持つ。"""
 
@@ -79,7 +101,7 @@ class ReviewKind(StrEnum):
             case ReviewKind.RANGE:
                 return "範囲"
             case ReviewKind.FEATURE:
-                return "機能"
+                return "ファイル"
             case ReviewKind.DESIGN_DOC:
                 return "設計書"
             case _:
@@ -89,7 +111,7 @@ class ReviewKind(StrEnum):
     def is_pull_request(self) -> bool:
         """PR 固有の動作（ボットの材料）をするか。refresh は PR に固有でない。
 
-        reply は差分レビュー式で文を作る。
+        reply は差分のレビューで文を作る。
         """
         match self:
             case ReviewKind.PULL_REQUEST:
@@ -112,7 +134,7 @@ class ReviewKind(StrEnum):
 
     @property
     def is_diff(self) -> bool:
-        """差分レビュー式か。"""
+        """差分のレビューか。"""
         match self:
             case ReviewKind.PULL_REQUEST | ReviewKind.RANGE:
                 return True
@@ -136,7 +158,8 @@ class ReviewKind(StrEnum):
     def directory_prefix(self) -> str:
         """キーの前に付けるディレクトリ名の印。
 
-        範囲と設計書は PR の番号や機能の名前と重ならないよう、識別子の区切りと同じ印を付ける。
+        範囲と設計書は PR の番号やファイルのレビューの名前と重ならないよう、
+        識別子の区切りと同じ印を付ける。
         """
         match self:
             case ReviewKind.PULL_REQUEST | ReviewKind.FEATURE:
@@ -202,7 +225,7 @@ def _kind_of(text: str, separator: str, key: str) -> ReviewKind:
 class ReviewId:
     owner: str
     repo: str
-    # PR は番号、範囲と機能と設計書は名前。ディレクトリ名として同じ位置に入る
+    # PR は番号、範囲とファイルのレビューと設計書は名前。ディレクトリ名として同じ位置に入る
     key: str
     kind: ReviewKind
 

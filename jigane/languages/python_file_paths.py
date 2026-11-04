@@ -31,6 +31,33 @@ _MODULE_FUNCTIONS = {
         "isdir": FileUsage.READ,
     },
 }
+# `open(path)` を置き換えうる、外の道具の読み書き。受け手のモジュール名から、関数名、使い道、
+# パスを渡す引数の位置。ファイルを読み続けている事実を、表から消さないために数える。
+# `json.load(f)` のように開いたファイルを渡す形は、引数がパスの形のときだけ数える
+_READ_FIRST = (FileUsage.READ, 0)
+_WRITE_SECOND = (FileUsage.WRITE, 1)
+_LIBRARY_FILE_CALLS: dict[str, dict[str, tuple[FileUsage, int]]] = {
+    "toml": {"load": _READ_FIRST, "dump": _WRITE_SECOND},
+    "tomllib": {"load": _READ_FIRST},
+    "tomli": {"load": _READ_FIRST},
+    "json": {"load": _READ_FIRST, "dump": _WRITE_SECOND},
+    "yaml": {
+        "load": _READ_FIRST,
+        "safe_load": _READ_FIRST,
+        "dump": _WRITE_SECOND,
+        "safe_dump": _WRITE_SECOND,
+    },
+    "pickle": {"load": _READ_FIRST, "dump": _WRITE_SECOND},
+    "pandas": {
+        "read_csv": _READ_FIRST,
+        "read_json": _READ_FIRST,
+        "read_parquet": _READ_FIRST,
+        "read_excel": _READ_FIRST,
+    },
+    "numpy": {"load": _READ_FIRST, "loadtxt": _READ_FIRST},
+}
+_LIBRARY_FILE_CALLS["pd"] = _LIBRARY_FILE_CALLS["pandas"]
+_LIBRARY_FILE_CALLS["np"] = _LIBRARY_FILE_CALLS["numpy"]
 _WRITE_MODE_CHARACTERS = frozenset("wax+")
 # `.open` を持つが、パスの受け手ではないモジュールの名前
 _NOT_PATH_MODULES = frozenset({"os", "io", "gzip", "bz2", "lzma", "zipfile", "tarfile", "codecs"})
@@ -211,9 +238,37 @@ class _Reader:
             if positional:
                 self._add_traced(call, positional[0], module_usage)
             return
+        library = _LIBRARY_FILE_CALLS.get(_text(receiver), {}).get(method)
+        if library is not None and self._library_call(call, library, positional):
+            return
         if self._wrapper_call(call, receiver, method, positional):
             return
         self._method_call(call, receiver, method, positional, keywords)
+
+    def _library_call(
+        self, call: Node, library: tuple[FileUsage, int], positional: list[Node]
+    ) -> bool:
+        """`toml.load(path)` のように、外の道具にパスを渡して読み書きさせる呼び出し。"""
+        usage, index = library
+        if len(positional) <= index or not self._is_path_argument(positional[index]):
+            return False
+        self._add_traced(call, positional[index], usage)
+        return True
+
+    def _is_path_argument(self, argument: Node) -> bool:
+        """引数が開いたファイルでなくパスと分かるか。分からなければ数えない（取り違えを避ける）。"""
+        resolved = self._previous_assignment(argument) if argument.type == "identifier" else None
+        target = resolved or argument
+        if target.type == "call" and _text(
+            target.child_by_field_name("function") or target
+        ).endswith("open"):
+            return False
+        if target.type in ("string", "concatenated_string"):
+            return True
+        if self._is_known_path(target, 0) or self._is_path_producing(target):
+            return True
+        # 名前に path を含む変数や属性。`f` や `stream` などの開いたファイルの名前は含まない
+        return argument.type in ("identifier", "attribute") and "path" in _text(argument).lower()
 
     def _method_call(
         self,

@@ -1,4 +1,4 @@
-"""`jigane languages`: 組み込みと外の言語を一覧し、外の言語を有効にし、外す。"""
+"""`jigane languages`: 組み込みと追加の言語を一覧し、追加の言語を有効にし、外す。"""
 
 import argparse
 import json
@@ -31,16 +31,16 @@ from jigane.languages.plugins import (
     normalize_distribution,
     read_content,
     reapproval_reason,
-    sanitize_text,
     save_enabled,
     validate_plugin,
 )
 from jigane.skills.language_support import LanguageSupport, support_of
 from jigane.skills.policy_figures import REGISTRY
-from jigane.storage.store import data_home
+from jigane.storage.store import data_home, ensure_data_home
+from jigane.text.terminal import sanitize_text
 
 TRUST_NOTICE = (
-    "外の言語のコードと文法は、jigane と同じ権限で動きます。"
+    "追加の言語のコードと文法は、jigane と同じ権限で動きます。"
     "出どころを信頼できる配布だけを有効にしてください。"
 )
 CAPABILITY_NOTICE = "口は試験的です。jigane の版で変わることがあります"
@@ -166,15 +166,15 @@ LanguageRow = ReadyRow | NotEnabledRow | UnavailableRow
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     languages_parser = subparsers.add_parser(
-        "languages", help="言語を一覧し、外の言語を有効にし、外し、文法を取得します"
+        "languages", help="言語を一覧し、追加の言語を有効にし、外し、文法を取得します"
     )
     actions = languages_parser.add_subparsers(dest="action", required=True, metavar="<action>")
 
-    list_parser = actions.add_parser("list", help="組み込みと外の言語を一覧します")
+    list_parser = actions.add_parser("list", help="組み込みと追加の言語を一覧します")
     list_parser.add_argument("--json", action="store_true")
     list_parser.set_defaults(handler=run_list)
 
-    enable_parser = actions.add_parser("enable", help="外の言語を有効にします")
+    enable_parser = actions.add_parser("enable", help="追加の言語を有効にします")
     enable_parser.add_argument("name")
     enable_parser.add_argument(
         "--distribution",
@@ -184,7 +184,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     enable_parser.set_defaults(handler=run_enable)
 
     fetch_parser = actions.add_parser(
-        "fetch", help="組み込みと有効な外の言語の文法を取得して照合します"
+        "fetch", help="組み込みと有効な追加の言語の文法を取得して照合します"
     )
     fetch_parser.add_argument(
         ACCEPT_TERMS_OPTION,
@@ -194,7 +194,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     )
     fetch_parser.set_defaults(handler=run_fetch)
 
-    disable_parser = actions.add_parser("disable", help="外の言語を外します")
+    disable_parser = actions.add_parser("disable", help="追加の言語を外します")
     disable_parser.add_argument("name")
     disable_parser.add_argument(
         "--distribution", help="同じ名前が複数の配布で有効なときに、外す配布を選びます"
@@ -312,7 +312,7 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
     entry = EnabledLanguage(name, dist.name, dist.version, content)
     current = _load_for_edit(path)
     if entry in current:
-        # 承認済みなので、外のコードを読み込む確認も書き直しも要らない
+        # 承認済みなので、プラグインのコードを読み込む確認も書き直しも要らない
         return _report_enabled(entry, already=True, as_json=args.json)
     _confirm(context, entry, dist.version, _reapproval_reason(current, entry, content))
     problem = _verify(entry_point)
@@ -324,6 +324,7 @@ def run_enable(args: argparse.Namespace, context: Context) -> int:
         for item in current
         if not (item.name == entry.name and item.distribution == entry.distribution)
     ]
+    ensure_data_home()
     save_enabled(path, [*kept, entry])
     return _report_enabled(entry, already=False, as_json=args.json)
 
@@ -347,13 +348,13 @@ def _reapproval_reason(
 def _confirm(
     context: Context, entry: EnabledLanguage, version: str, reason: str | None = None
 ) -> None:
-    """外のコードを import する前に、信頼の注意と配布を示して y か yes を得る。
+    """プラグインのコードを import する前に、信頼の注意と配布を示して y か yes を得る。
 
     reason があれば、確認を取り直す理由として配布の次に示す。
     """
     if not context.is_terminal():
         raise ConsentUnavailableError(
-            "確認を得られないので外の言語を読み込みません。端末から実行してください"
+            "確認を得られないので追加の言語を読み込みません。端末から実行してください"
         )
     print(TRUST_NOTICE, file=sys.stderr)
     print(
@@ -384,8 +385,8 @@ def _verify(entry_point: EntryPoint) -> str | None:
     """entry point を一度だけ読み込んで検証する。通れば None、通らなければ理由。"""
     try:
         plugin: object = entry_point.load()()
-    except Exception as error:  # noqa: BLE001 外のプラグインが投げる型は絞れない
-        # 外のコードが何を投げるかは分からない
+    except Exception as error:  # noqa: BLE001 プラグインが投げる型は絞れない
+        # プラグインのコードが何を投げるかは分からない
         return f"読み込みに失敗しました: {type(error).__name__}: {error}"
     return validate_plugin(entry_point, plugin)
 
@@ -437,6 +438,7 @@ def run_disable(args: argparse.Namespace, context: Context) -> int:
         )
     changed = bool(named)
     if changed:
+        ensure_data_home()
         save_enabled(path, [item for item in current if item not in named])
     if args.json:
         print(json.dumps({"name": args.name, "removed": changed}, ensure_ascii=False))

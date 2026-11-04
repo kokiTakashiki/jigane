@@ -96,7 +96,7 @@ class _Tally:
 
 
 def _load_pairs(review: Review) -> list[FilePair] | None:
-    """ファイルの対の記録。機能レビュー式と、記録の無い古いレビューは None。"""
+    """ファイルの対の記録。ファイルのレビューと、記録の無い古いレビューは None。"""
     if not review.is_diff:
         return None
     try:
@@ -327,7 +327,7 @@ def current_tree_figure(paths: Sequence[str]) -> TreeFigure:
 def tree_figure(review: Review) -> TreeFigure:
     """ツリー図の図。画面とプロンプトが同じものを使う。
 
-    差分レビュー式は変更前の木と変更後の木の二枚、機能レビュー式は変更後の木だけ。
+    差分のレビューは変更前の木と変更後の木の二枚、ファイルのレビューは変更後の木だけ。
     判断の箇所の札は、箇所の path が一致する木の節点に付く。
     """
     files = file_changes(review)

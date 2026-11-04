@@ -8,6 +8,8 @@ git の場所の変数の除去、Windows の解決、実行ファイルが無�
 （returncode None、missing_executable）は run_command と同じ。
 """
 
+import errno
+import os
 import subprocess
 from pathlib import Path
 
@@ -46,4 +48,9 @@ def run_tool(
             # 作業ディレクトリが無い失敗は、実行ファイルの失敗ではないので元の例外のまま渡す
             raise
         raise failure from error
+    except NotADirectoryError as error:
+        # Windows は作業ディレクトリが無いと WinError 267 を出すため、POSIX と同じ失敗に揃える
+        if cwd is None or cwd.is_dir():
+            raise
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(cwd)) from error
     return completed.stdout

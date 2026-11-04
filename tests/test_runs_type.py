@@ -149,6 +149,7 @@ def test_budget_outcome_comes_from_the_record_type() -> None:
     assert stored.exceeded_after_success()
 
 
+@pytest.mark.whole_tree
 def test_runs_json_is_read_and_written_only_in_pipeline() -> None:
     """runs.json を json で直接読み書きするのは pipeline.py だけ。"""
     root = Path(jigane.__file__).parent

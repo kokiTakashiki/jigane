@@ -15,13 +15,16 @@ from jigane.design.review_documents import create_design_doc_review
 from jigane.groups import policy_runs
 from jigane.groups.definitions import (
     DESIGN_SHAPE,
+    DIAGRAM_SHAPE,
     GROUP_BY_ID,
     MACRO,
     MICRO,
+    PRINCIPLE_RUNS,
     SECURITY,
     Effort,
 )
 from jigane.groups.policy_runs import PolicyRole, PolicyShape
+from jigane.groups.viewpoints import design_principles
 from jigane.llm_runs import claude
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.usage_table import USAGE_CSV
@@ -77,8 +80,9 @@ def write_settings(document: dict[str, object]) -> None:
 
 
 def test_shape_defaults_come_from_the_policy_shape_and_keep_the_current_values() -> None:
+    assert PolicyShape.DIAGRAM.run_shape.max_budget_usd == 0.36
+    assert PolicyShape.DESIGN.run_shape.max_budget_usd == 0.5
     for shape in (PolicyShape.DIAGRAM, PolicyShape.DESIGN):
-        assert shape.run_shape.max_budget_usd == 0.5
         assert shape.run_shape.effort == "high"
 
 
@@ -89,12 +93,60 @@ def test_every_default_value_is_unchanged_for_every_group_and_shape() -> None:
             resolve_run_defaults(group, None, None).budget.max_budget_usd,
         )
         for group in (MACRO, MICRO, SECURITY)
-    ] == [("high", 0.5), (None, 0.5), (None, 0.5)]
-    for shape in PolicyShape:
-        assert resolve_run_defaults(MACRO, shape, None) == resolve_run_defaults(
-            MACRO, PolicyShape.DIAGRAM, None
+    ] == [("high", 0.36), (None, 0.5), (None, 0.5)]
+    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.max_budget_usd == 0.5
+
+
+def test_only_the_diagram_shape_has_a_principle_budget() -> None:
+    diagram = resolve_run_defaults(MACRO, PolicyShape.DIAGRAM, None).budget
+    assert (diagram.model, diagram.max_budget_usd) == ("claude-sonnet-5-5", 0.36)
+    assert diagram.principles == {
+        number: claude.RunBudget(
+            run.model,
+            run.max_budget_usd,
+            reserve_margin=False,
+            output_allowance_tokens=run.output_allowance_tokens,
         )
-        assert (shape.run_shape.effort, shape.run_shape.max_budget_usd) == ("high", 0.5)
+        for number, run in PRINCIPLE_RUNS.items()
+    }
+    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.principles is None
+    for group in (MACRO, MICRO, SECURITY):
+        assert resolve_run_defaults(group, None, None).budget.principles is None
+
+
+def test_principle_runs_match_the_principle_numbers_and_sum_to_44_cents() -> None:
+    assert list(PRINCIPLE_RUNS) == [principle.number for principle in design_principles()]
+    total = DIAGRAM_SHAPE.max_budget_usd + sum(
+        run.max_budget_usd for run in PRINCIPLE_RUNS.values()
+    )
+    assert total == pytest.approx(0.44)
+
+
+def test_model_and_limit_arguments_reach_all_five_diagram_launches() -> None:
+    budget = resolve_run_defaults(MACRO, PolicyShape.DIAGRAM, None, "m-override", 0.9).budget
+    assert (budget.model, budget.max_budget_usd) == ("m-override", 0.9)
+    assert budget.principles is not None
+    assert set(budget.principles) == set(PRINCIPLE_RUNS)
+    assert set(budget.principles.values()) == {
+        claude.RunBudget("m-override", 0.9, reserve_margin=False, output_allowance_tokens=12_000)
+    }
+
+
+@pytest.mark.usefixtures("all_principle_shapes")
+def test_default_diagram_run_uses_sonnet_for_the_diagram_and_haiku_for_the_principles(
+    repo: Path,
+) -> None:
+    review = create_feature_review(repo, ["docs"], "p")
+    fake = MacroFake([])
+    assert main(["run", str(review.id), "macro"], invoke=fake) == EXIT_OK
+    assert [(c.model, c.budget.limit_usd) for c in fake.diagram_calls] == [
+        ("claude-sonnet-5-5", 0.36)
+    ]
+    # 原則の起動は並行して走るため、順序は問わない
+    assert (
+        sorted((c.model, c.budget.limit_usd) for c in fake.principle_calls)
+        == [("claude-haiku-5-5", 0.02)] * 4
+    )
 
 
 def test_model_override_replaces_the_group_default_model() -> None:
@@ -438,6 +490,7 @@ def test_every_policy_role_has_its_usage_label() -> None:
     assert {role: role.label for role in PolicyRole} == {
         PolicyRole.DIAGRAM: "図",
         PolicyRole.DESIGN: "設計書",
+        PolicyRole.PRINCIPLE: "原則",
         PolicyRole.SINGLE: "一回の形（廃止）",
         PolicyRole.ROUTE: "四回の形（廃止）:道筋",
         PolicyRole.VERIFY: "四回の形（廃止）:検証",
@@ -446,6 +499,7 @@ def test_every_policy_role_has_its_usage_label() -> None:
     }
 
 
+@pytest.mark.whole_tree
 def test_package_source_names_no_settings_file() -> None:
     package = Path(__file__).resolve().parents[1] / "jigane"
     named = [

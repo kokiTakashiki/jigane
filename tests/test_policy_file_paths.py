@@ -101,3 +101,40 @@ def test_same_expression_read_then_write_is_not_marked_changed(tmp_path: Path) -
     figure = policy_file_paths.file_path_table(review)
     assert figure is not None
     assert {row.change for row in figure.rows} == {RowChange.UNCHANGED}
+
+
+def _usage_marks(tmp_path: Path, before: str, after: str) -> dict[str, tuple[str, RowChange]]:
+    base = tmp_path / "base"
+    changed = tmp_path / "after"
+    base.mkdir()
+    changed.mkdir()
+    (base / "c.py").write_text(before, encoding="utf-8")
+    (changed / "c.py").write_text(after, encoding="utf-8")
+    review = make_review(
+        changed,
+        ["c.py"],
+        base_tree=base,
+        judgment_map={"segments": [whole("c.py", 3)], "regions": [], "line_counts": {}},
+        kind=ReviewKind.RANGE,
+    )
+    figure = policy_file_paths.file_path_table(review)
+    assert figure is not None
+    return {row.cells[3]: (row.cells[2], row.change) for row in figure.rows}
+
+
+def test_replacing_open_with_a_library_load_does_not_remove_the_read(tmp_path: Path) -> None:
+    marks = _usage_marks(
+        tmp_path,
+        "def load(path):\n    return parse(open(path).read())\n",
+        "def load(path):\n    return toml.load(path)\n",
+    )
+    assert marks == {"path": ("読む", RowChange.UNCHANGED)}
+
+
+def test_dropping_the_read_still_removes_it(tmp_path: Path) -> None:
+    marks = _usage_marks(
+        tmp_path,
+        "def load(path):\n    return parse(open(path).read())\n",
+        "def load(path):\n    return parse(DEFAULT)\n",
+    )
+    assert marks == {"path": ("読む", RowChange.REMOVED)}

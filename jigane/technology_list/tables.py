@@ -29,7 +29,7 @@ CHANGE = "change"
 PATH = "path"
 
 NO_IMPORTS_TEXT = "変更したファイルに import が無い。"
-NO_MANIFEST_BASE_TEXT = "機能レビュー式には変更前が無いため、依存の宣言の変化は無い。"
+NO_MANIFEST_BASE_TEXT = "ファイルのレビューには変更前が無いため、依存の宣言の変化は無い。"
 MANIFEST_UNCHANGED_TEXT = "依存の宣言は変わっていない。"
 NO_BRIDGES_TEXT = "技術の橋渡しは無い。"
 NO_PLATFORMS_TEXT = "読めるマニフェストに配備の下限は見つからなかった。"
@@ -105,7 +105,7 @@ def _manifest_changes_section(model: dict[str, Any]) -> Section:
         ]
         for c in changes or []
     ]
-    # 変更前のツリーが無い機能レビュー式は比べられず、変わらなかったとは別の文を出す
+    # 変更前のツリーが無いファイルのレビューは比べられず、変わらなかったとは別の文を出す
     empty = NO_MANIFEST_BASE_TEXT if changes is None else MANIFEST_UNCHANGED_TEXT
     return Section(
         "manifest_changes",

@@ -11,7 +11,6 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from jigane.languages.plugins import sanitize_text
 from jigane.static_analysis.models import (
     DropReason,
     SarifDriver,
@@ -22,6 +21,7 @@ from jigane.static_analysis.models import (
     StaticFinding,
 )
 from jigane.static_analysis.paths import resolve_uri
+from jigane.text.terminal import sanitize_text
 
 _MEGABYTE = 1024 * 1024
 

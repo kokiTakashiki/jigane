@@ -56,7 +56,7 @@ def test_prompt_raises_scope_and_deepening_instead_of_dropping_them() -> None:
 
 
 def test_deepens_is_an_optional_field_of_the_model_output() -> None:
-    conclude = macro.conclude_schema()["properties"]["findings"]["items"]
+    conclude = macro.CONCLUDE.schema()["properties"]["findings"]["items"]
     assert "deepens" in conclude["properties"]
 
 

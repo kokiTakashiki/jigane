@@ -31,7 +31,10 @@ from jigane.languages.base import (
     Sharing,
     Step,
     StoreAccess,
+    StringComparison,
     TypeDecl,
+    TypeKind,
+    ValueSet,
     Visibility,
     import_nodes,
     leading_components,
@@ -42,6 +45,10 @@ from jigane.languages.python_arguments import command_arguments as _command_argu
 from jigane.languages.python_file_paths import file_path_patterns as _file_path_patterns
 from jigane.languages.python_regex import regex_scan as _regex_scan
 from jigane.languages.python_stores import store_accesses as _store_accesses
+from jigane.languages.python_string_comparisons import (
+    string_comparisons as _string_comparisons,
+)
+from jigane.languages.python_value_sets import value_sets as _value_sets
 from jigane.languages.queries import load_queries
 from jigane.preconditions.required import required
 
@@ -108,12 +115,78 @@ def _from_base(module: Node, package: str) -> str | None:
     return ".".join(base)
 
 
+def _is_relative_import(node: Node) -> bool:
+    """相対 import か。先は同名の自作モジュールかもしれず、abc や typing とは言えない。"""
+    module = node.child_by_field_name("module_name")
+    return module is not None and module.type == "relative_import"
+
+
+def _import_nodes(adapter: "PythonAdapter", root: Node, *, absolute_only: bool) -> list[Node]:
+    nodes = import_nodes(adapter, root)
+    return [n for n in nodes if not (absolute_only and _is_relative_import(n))]
+
+
 def _unwrap(node: Node) -> tuple[Node, list[str]]:
     """decorated_definition を、定義の節点とデコレータの原文に分ける。"""
     if node.type != "decorated_definition":
         return node, []
     decorators = [_text(c).lstrip("@").strip() for c in node.children if c.type == "decorator"]
     return required(node.child_by_field_name("definition")), decorators
+
+
+_ABC_BASE = "abc.ABC"
+_ABC_METACLASS = "abc.ABCMeta"
+_ABSTRACT_DECORATOR = "abc.abstractmethod"
+_PROTOCOLS = frozenset({"typing.Protocol", "typing_extensions.Protocol"})
+
+
+def _resolved(spelling: str, imported: Mapping[str, str]) -> str | None:
+    """綴りの先頭の名前を、読み込みの節から辿った修飾名に直す。読み込みの無い名前は None。"""
+    head, dot, rest = spelling.partition(".")
+    target = imported.get(head)
+    return None if target is None else f"{target}{dot}{rest}"
+
+
+def _declares_abstract_method(body: Node, imported: Mapping[str, str]) -> bool:
+    for statement in body.children:
+        definition, decorators = _unwrap(statement)
+        if definition.type == "function_definition" and _has_abstract_marker(decorators, imported):
+            return True
+    return False
+
+
+def _inherits_abc(superclasses: Node | None, imported: Mapping[str, str]) -> bool:
+    """基底に abc の ABC を直接継ぐか、metaclass に abc の ABCMeta を渡しているか。"""
+    if superclasses is None:
+        return False
+    for child in superclasses.named_children:
+        if child.type == "keyword_argument":
+            name, value = child.child_by_field_name("name"), child.child_by_field_name("value")
+            if (
+                name is not None
+                and value is not None
+                and _text(name) == "metaclass"
+                and _resolved(_text(value), imported) == _ABC_METACLASS
+            ):
+                return True
+        elif _resolved(_text(child), imported) == _ABC_BASE:
+            return True
+    return False
+
+
+def _is_protocol(superclasses: Node | None, imported: Mapping[str, str]) -> bool:
+    """基底に typing の Protocol を直接継ぐか。`Protocol[T]` の添字は外して読む。"""
+    if superclasses is None:
+        return False
+    return any(
+        child.type != "keyword_argument"
+        and _resolved(_text(child).split("[", 1)[0], imported) in _PROTOCOLS
+        for child in superclasses.named_children
+    )
+
+
+def _has_abstract_marker(decorators: list[str], imported: Mapping[str, str]) -> bool:
+    return any(_resolved(d, imported) == _ABSTRACT_DECORATOR for d in decorators)
 
 
 def _parameters(function: Node, *, drop_first: bool) -> tuple[ParameterDecl, ...]:
@@ -414,9 +487,14 @@ class PythonAdapter:
         return leading_components(module, 1)
 
     def imported_names(self, root_node: Node, _source: bytes, path: str, /) -> dict[str, str]:
+        return self._imported_names(root_node, path, absolute_only=False)
+
+    def _imported_names(
+        self, root_node: Node, path: str, *, absolute_only: bool
+    ) -> dict[str, str]:
         package = _package_of(path)
         table: dict[str, str] = {}
-        for node in import_nodes(self, root_node):
+        for node in _import_nodes(self, root_node, absolute_only=absolute_only):
             if node.type == "import_statement":
                 for name in node.children_by_field_name("name"):
                     if name.type == "aliased_import":
@@ -460,6 +538,12 @@ class PythonAdapter:
 
     def store_accesses(self, sources: Mapping[str, str]) -> list[StoreAccess]:
         return _store_accesses(sources)
+
+    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+        return _value_sets(source, path)
+
+    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+        return _string_comparisons(source, path)
 
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return _regex_scan(root_node, path)
@@ -539,7 +623,8 @@ class PythonAdapter:
         result: list[TypeDecl | MemberDecl] = [
             TypeDecl(module, module.rsplit(".", 1)[-1], "module", (), path, 1, root_node)
         ]
-        self._collect_members(root_node, module, module, path, result)
+        imported = self._imported_names(root_node, path, absolute_only=True)
+        self._collect_members(root_node, module, module, path, imported, result)
         return result
 
     def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step] | None:
@@ -584,6 +669,7 @@ class PythonAdapter:
         owner: str,
         module: str,
         path: str,
+        imported: Mapping[str, str],
         result: list[TypeDecl | MemberDecl],
     ) -> None:
         in_class = owner != module and container.type == "block"
@@ -592,10 +678,12 @@ class PythonAdapter:
             definition, decorators = _unwrap(statement)
             line = statement.start_point.row + 1
             if definition.type == "class_definition":
-                self._collect_class(statement, definition, owner, module, path, result=result)
+                self._collect_class(
+                    statement, definition, owner, module, path, imported, result=result
+                )
             elif definition.type == "function_definition":
                 self._collect_function(
-                    statement, definition, decorators, owner, result, in_class=in_class
+                    statement, definition, decorators, owner, imported, result, in_class=in_class
                 )
             elif (in_class or container.type == "module") and (
                 assignment := _assignment_of(statement)
@@ -628,6 +716,7 @@ class PythonAdapter:
         owner: str,
         module: str,
         path: str,
+        imported: Mapping[str, str],
         *,
         result: list[TypeDecl | MemberDecl],
     ) -> None:
@@ -639,11 +728,27 @@ class PythonAdapter:
             for c in (supers.named_children if supers is not None else [])
             if c.type != "keyword_argument"
         )
-        result.append(
-            TypeDecl(qualified, name, "class", bases, path, outer.start_point.row + 1, outer)
-        )
         body = required(node.child_by_field_name("body"))
-        self._collect_members(body, qualified, module, path, result)
+        # 抽象と読むのは、abc 由来の基底を継ぎ、かつ自身で abc 由来の抽象メソッドを宣言する型だけ。
+        # 抽象メソッドを持たない ABC の子は、インスタンスにできる
+        abstract = _inherits_abc(supers, imported) and _declares_abstract_method(body, imported)
+        # Protocol は継がなくても満たせるので interface にせず、class のまま抽象の印だけ付ける。
+        # typing の仕様は "Protocols cannot be instantiated"
+        abstract = abstract or _is_protocol(supers, imported)
+        kind: TypeKind = "class"
+        result.append(
+            TypeDecl(
+                qualified,
+                name,
+                kind,
+                bases,
+                path,
+                outer.start_point.row + 1,
+                outer,
+                abstract=abstract,
+            )
+        )
+        self._collect_members(body, qualified, module, path, imported, result)
 
     def _collect_function(
         self,
@@ -651,6 +756,7 @@ class PythonAdapter:
         node: Node,
         decorators: list[str],
         owner: str,
+        imported: Mapping[str, str],
         result: list[TypeDecl | MemberDecl],
         *,
         in_class: bool,
@@ -678,7 +784,16 @@ class PythonAdapter:
             parameters = ()
         result.append(
             MemberDecl(
-                owner, member_name, kind, annotation, parameters, line, outer, body, selector
+                owner,
+                member_name,
+                kind,
+                annotation,
+                parameters,
+                line,
+                outer,
+                body,
+                selector,
+                abstract=kind == "method" and _has_abstract_marker(decorators, imported),
             )
         )
         if kind == "constructor" and body is not None:

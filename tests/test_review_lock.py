@@ -2,70 +2,30 @@ import json
 import os
 import subprocess
 import sys
-import threading
 import time
-from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
 import pytest
-from review_fakes import group_result, stored_finding
+from lock_support import overlapping_merge, run_in_threads
+from review_fakes import group_result
 
 from jigane.findings.records import (
     FINDINGS_FILE,
     load_findings_state,
     merge_group,
-    read_stored_state,
     reserve_numbers,
-    save_findings_state,
 )
-from jigane.groups.definitions import MACRO, SECURITY, GroupId
+from jigane.groups.definitions import MACRO, SECURITY
 from jigane.storage import store
 from jigane.storage.store import LockTimeoutError, review_lock, write_text_atomic
 
 
-def _run_in_threads(targets: list[Callable[[], object]]) -> None:
-    threads = [threading.Thread(target=target) for target in targets]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-
-def _overlapping_merge(
-    directory: Path, group: str, *, locked: bool, barrier: threading.Barrier | None
-) -> None:
-    """読んだ後、保存の前に、バリアで他方の読みを待つ保存。ロックが無ければ二つの読みは必ず重なる。"""
-
-    def save() -> None:
-        state = read_stored_state(directory)
-        if barrier is not None:
-            barrier.wait(timeout=10)
-        state.groups[GroupId(group)] = (
-            stored_finding(
-                {
-                    "id": group,
-                    "severity": "warning",
-                    "viewpoint": "V",
-                    "claim": "C",
-                    "triage": "must_read",
-                }
-            ),
-        )
-        save_findings_state(directory, state)
-
-    if locked:
-        with review_lock(directory):
-            save()
-    else:
-        save()
-
-
 def test_two_groups_saved_concurrently_both_remain(tmp_path: Path) -> None:
     # ロックの中ではもう一方が読めないので、バリアは使えない
-    _run_in_threads(
+    run_in_threads(
         [
-            partial(_overlapping_merge, tmp_path, g, locked=True, barrier=None)
+            partial(overlapping_merge, tmp_path, g, locked=True, barrier=None)
             for g in ("macro", "security")
         ]
     )
@@ -80,7 +40,7 @@ def test_merge_group_keeps_other_groups(tmp_path: Path) -> None:
 
 def test_reserved_numbers_do_not_overlap(tmp_path: Path) -> None:
     firsts: list[int] = []
-    _run_in_threads([lambda: firsts.append(reserve_numbers(tmp_path, 5)) for _ in range(8)])
+    run_in_threads([lambda: firsts.append(reserve_numbers(tmp_path, 5)) for _ in range(8)])
     assert sorted(firsts) == [1 + 5 * index for index in range(8)]
     assert load_findings_state(tmp_path).last_number == 40
 

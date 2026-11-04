@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import jigane
 
 OLD_NAMES = ("外観", "細部")
@@ -8,6 +10,7 @@ TEXT_SUFFIXES = {".py", ".js", ".css", ".html", ".md", ".txt", ".json"}
 ALLOWED: dict[str, str] = {}
 
 
+@pytest.mark.whole_tree
 def test_old_group_names_do_not_remain_in_human_facing_strings() -> None:
     package_root = Path(jigane.__file__).parent
     remaining: list[str] = []

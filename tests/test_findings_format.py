@@ -18,6 +18,7 @@ from jigane.findings.records import (
     _upgrade_finding_v2,
     _upgrade_findings_v1,
     _upgrade_findings_v2,
+    _upgrade_findings_v3,
     _upgrade_history_v2,
     load_findings_state,
     read_findings_json,
@@ -111,17 +112,19 @@ def test_upgrade_does_not_touch_the_input() -> None:
 
 @pytest.mark.parametrize("name", V1_FINDINGS)
 def test_current_form_reads_and_writes_back_to_the_same_dict(name: str) -> None:
-    current = _upgrade_findings_v2(_upgrade_findings_v1(v1_state(V1_FINDINGS[name])))
+    current = _upgrade_findings_v3(
+        _upgrade_findings_v2(_upgrade_findings_v1(v1_state(V1_FINDINGS[name])))
+    )
     assert json.loads(json.dumps(read_findings_json(current).to_json())) == current
 
 
 def test_current_form_skips_the_upgrade() -> None:
-    # 版 3 のファイルは、鍵が欠けていても補わず、欠けたまま失敗する
+    # 版 4 のファイルは、鍵が欠けていても補わず、欠けたまま失敗する
     with pytest.raises(KeyError):
-        read_findings_json({"format": 3, "last_number": 0, "groups": {}})
+        read_findings_json({"format": 4, "last_number": 0, "groups": {}})
 
 
-@pytest.mark.parametrize("version", [0, 4, 99, "3", 3.0, True, None])
+@pytest.mark.parametrize("version", [0, 5, 99, "3", 3.0, True, None])
 def test_an_unsupported_version_fails_with_a_clear_error(version: object) -> None:
     raw = {"format": version, "last_number": 0, "groups": {}}
     with pytest.raises(ReviewError, match=FINDINGS_FILE):
@@ -223,7 +226,7 @@ def test_findings_file_v2_moves_to_v3_through_the_same_finding_upgrade() -> None
     raw = _upgrade_findings_v1({"groups": {"micro": [V2_DISCLOSED]}})
     stored = read_findings_json(raw)
     assert stored.to_json()["groups"]["micro"][0]["nit_reason"] == V3_REASON
-    assert stored.to_json()["format"] == 3
+    assert stored.to_json()["format"] == 4
 
 
 def test_history_file_v2_moves_to_v3_through_the_same_finding_upgrade() -> None:

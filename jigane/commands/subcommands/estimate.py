@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, assert_never
 
@@ -74,7 +75,8 @@ def input_cost_lines(estimate: Estimate, basis: claude.RunBudget) -> list[str]:
     cost = estimate.input_cost(basis)
     if cost is None:
         return []
-    lines = [f"入力の費用の見積もり: {cost.cost.usd:.4f} USD"]
+    label = "入力と出力の見込みの費用の見積もり" if basis.counts_output else "入力の費用の見積もり"
+    lines = [f"{label}: {cost.cost.usd:.4f} USD"]
     if cost.cost.assumed_price:
         lines.append(claude.assumed_price_notice(model, cost.cost))
     warning = estimate.expected_budget_warning(basis)
@@ -84,6 +86,26 @@ def input_cost_lines(estimate: Estimate, basis: claude.RunBudget) -> list[str]:
     if stop_warning is not None:
         sections = "、".join(entry.text() for entry in estimate.largest_section_entries())
         lines.append(stop_warning + (f"大きい節: {sections}" if sections else ""))
+    return lines
+
+
+def principle_lines(estimate: Estimate, basis: claude.RunBudget) -> list[str]:
+    if not isinstance(estimate, DiagramPolicyEstimate) or basis.principles is None:
+        # 原則の起動を持つのは図の形だけで、その組は図の形の既定が渡す
+        return []
+    runs = [basis.for_principle(number) for number, _ in estimate.principle_input_tokens]
+    total = basis.max_budget_usd + sum(run.max_budget_usd for run in runs)
+    lines = []
+    if runs:
+        groups = Counter((run.model, run.max_budget_usd) for run in runs)
+        lines.append(
+            "原則の起動: "
+            + "、".join(
+                f"{model} {count} 回（1 回の目安 {limit:g} USD）"
+                for (model, limit), count in groups.items()
+            )
+        )
+    lines.append(f"全起動の和の目安（超えることがある）: {round(total, 6):g} USD")
     return lines
 
 
@@ -180,6 +202,7 @@ def print_estimate(
             f"モデルの既定値: {model}",
             f"effort: {defaults.effort or '渡さない'}",
             f"1 回の起動の目安（超えることがある）: {defaults.budget.max_budget_usd} USD",
+            *principle_lines(estimate, basis),
             f"注記: {estimate.note}",
             *blocker_lines(blockers),
             *(f"警告: {warning.text()}" for warning in warnings),

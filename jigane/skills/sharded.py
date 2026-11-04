@@ -29,6 +29,7 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, GroupId
 from jigane.llm_runs import claude
+from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import (
     DISCOVERY_ROLE,
     DiscoveryLaunchFailed,
@@ -75,7 +76,7 @@ DOCUMENT_SHARD_INTRO = (
 )
 DESIGN_FILE_SHARD_INTRO = (
     "設計書のレビューのファイルのシャードである。担当のファイルは選んだコードの本文で、"
-    "設計書の全文と、そのファイルを名指した節と推しの理由は、下の「設計書の資料」の節にある。"
+    "設計書の全文と、そのファイルを名指した節と候補にした理由は、下の「設計書の資料」の節にある。"
     "受け持ちの表で{group}の行に当たる懸念のうち、設計書とこのファイルを突き合わせて初めて"
     "分かるものだけを問う。設計書だけで決まる懸念は、設計書のシャードが問うので、ここでは問わない。"
     "根拠の位置は、設計書の行かこのファイルの行にする。"
@@ -108,15 +109,32 @@ Select = Callable[[list[StoredFinding], int, SelectContext], Selection]
 @dataclass(frozen=True)
 class ShardedGroup:
     group: GroupId
-    schema: dict[str, Any]
-    # 入口の検証に使う。schema と同じ形で、location.path の形の決まりだけを外してある
-    lenient_model: type[BaseModel]
+    spec: RoleSpec
     tools: tuple[str, ...]
     select: Select
     mcp_config: Path | None = None
     allowed_mcp_tools: tuple[str, ...] = ()
     # 使う MCP。プロンプトに差し込み、実行の記録に残す
     mcp: McpSelection = NO_MCP
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        return self.spec.schema()
+
+    @property
+    def lenient_model(self) -> type[BaseModel]:
+        return self.spec.lenient_model()
+
+
+def discovery_spec(group: GroupId, *, require_references: bool = False) -> RoleSpec:
+    """シャードごとの発見役の仕様。群ごとに違うのは観点の群と、根拠の参照を要るかだけ。"""
+    return RoleSpec(
+        group=group,
+        require_references=require_references,
+        require_scope_fields=True,
+        allow_disclosed_at=True,
+        model_written=adversarial.MODEL_WRITTEN,
+    )
 
 
 def withheld_notice(paths: tuple[str, ...]) -> str | None:

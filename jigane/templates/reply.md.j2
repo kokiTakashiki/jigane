@@ -1,4 +1,4 @@
-{#- PR への返信の文面。差分レビュー式で使う。 -#}
+{#- PR への返信の文面。差分のレビューで使う。 -#}
 {% macro item(finding) %}
 - **{{ finding.number }}** [{{ finding.severity }}] {{ finding.claim | md }}{% if finding.evidence %}（{% for e in finding.evidence %}`{{ e.location }}`{{ "、" if not loop.last }}{% endfor %}）{% endif %}
 {% if finding.body %}

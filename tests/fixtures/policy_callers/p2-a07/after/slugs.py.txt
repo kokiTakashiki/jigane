@@ -1,0 +1,10 @@
+def slugify(title):
+    return title.strip().lower().replace(" ", "-")
+
+
+def truncate_slug(slug, limit=40):
+    return slug[:limit].rstrip("-")
+
+
+def post_path(title):
+    return "/posts/" + slugify(title)

@@ -145,10 +145,115 @@ def test_a_different_vocabulary_does_not_bind_to_the_pair(tmp_path: Path) -> Non
     assert rows["Column の列を持つ CSV"][2] == "（見つからない）"
 
 
-def test_plain_string_keys_without_a_name_are_not_bound(tmp_path: Path) -> None:
+def test_plain_string_keys_without_a_name_stay_in_their_own_parameter_store(
+    tmp_path: Path,
+) -> None:
     source = (
         "import csv\n\n\ndef save(path, rows):\n"
         "    with open(path, 'w') as handle:\n"
         "        csv.writer(handle).writerow(['a', 'b'])\n"
     )
-    assert policy_stores.store_table(feature_review(tmp_path, "s.py", source)) is None
+    figure = policy_stores.store_table(feature_review(tmp_path, "s.py", source))
+    assert isinstance(figure, TableFigure)
+    assert [row.cells[0] for row in figure.rows] == ["save の引数 path"]
+
+
+HANDWRITTEN = """BOOKMARKS_FILE = "bookmarks.txt"
+
+
+def save_bookmark(url, title):
+    with open(BOOKMARKS_FILE, "a") as f:
+        f.write(url + "|" + title + "\\n")
+
+
+def load_bookmarks():
+    with open(BOOKMARKS_FILE) as f:
+        return [line.strip().split("|") for line in f]
+"""
+
+HANDWRITTEN_WRITE_ONLY = """def save_bookmark(url, title):
+    with open("bookmarks.txt", "a") as f:
+        f.write(f"{url}|{title}\\n")
+"""
+
+PARAMETER_PATH = """import json
+
+
+def save(path, url):
+    with open(path, "w") as f:
+        json.dump({"url": url}, f)
+"""
+
+
+def test_custom_text_store_lists_writer_reader_and_format(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(feature_review(tmp_path, "h.py", HANDWRITTEN))
+    assert isinstance(figure, TableFigure)
+    row = {row.cells[0]: row.cells for row in figure.rows}["bookmarks.txt"]
+    assert row[1] == "save_bookmark"
+    assert row[2] == "load_bookmarks"
+    assert row[5] == "独自の形式"
+
+
+def test_custom_store_without_a_found_reader_is_not_called_absent(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(feature_review(tmp_path, "h.py", HANDWRITTEN_WRITE_ONLY))
+    assert isinstance(figure, TableFigure)
+    row = {row.cells[0]: row.cells for row in figure.rows}["bookmarks.txt"]
+    assert row[1] == "save_bookmark"
+    assert row[2] == policy_stores.UNIDENTIFIED
+    assert policy_stores.NOT_FOUND not in row
+
+
+def test_file_passed_as_a_parameter_is_a_store_named_after_the_function(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(feature_review(tmp_path, "p.py", PARAMETER_PATH))
+    assert isinstance(figure, TableFigure)
+    row = {row.cells[0]: row.cells for row in figure.rows}["save の引数 path"]
+    assert row[1] == "save: url"
+    assert row[5] == "JSON"
+
+
+SAVE_MODULE = """import json
+
+
+def save(path, url):
+    with open(path, "w") as f:
+        json.dump({"url": url}, f)
+"""
+LOAD_MODULE = """import csv
+
+
+def load(path):
+    with open(path) as f:
+        return [row["url"] for row in csv.DictReader(f)]
+"""
+FIXED_NAME_WRITE_ONLY = """import json
+
+
+def save(url):
+    with open("urls.json", "w") as f:
+        json.dump({"url": url}, f)
+"""
+
+
+def test_stores_passed_by_parameter_say_unidentified_for_the_other_side(tmp_path: Path) -> None:
+    write_project(tmp_path, {"load_urls.py": LOAD_MODULE})
+    figure = policy_stores.store_table(feature_review(tmp_path, "save_urls.py", SAVE_MODULE))
+    assert isinstance(figure, TableFigure)
+    rows = {row.cells[0]: row.cells for row in figure.rows}
+    assert rows["save の引数 path"][2] == policy_stores.UNIDENTIFIED
+    assert policy_stores.NOT_FOUND not in rows["save の引数 path"]
+
+
+def test_reading_side_passed_by_parameter_says_unidentified_for_the_writer(tmp_path: Path) -> None:
+    write_project(tmp_path, {"save_urls.py": SAVE_MODULE})
+    figure = policy_stores.store_table(feature_review(tmp_path, "load_urls.py", LOAD_MODULE))
+    assert isinstance(figure, TableFigure)
+    rows = {row.cells[0]: row.cells for row in figure.rows}
+    assert rows["load の引数 path"][1] == policy_stores.UNIDENTIFIED
+    assert policy_stores.NOT_FOUND not in rows["load の引数 path"]
+
+
+def test_fixed_name_store_without_a_counterpart_stays_not_found(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(feature_review(tmp_path, "s.py", FIXED_NAME_WRITE_ONLY))
+    assert isinstance(figure, TableFigure)
+    row = {row.cells[0]: row.cells for row in figure.rows}["urls.json"]
+    assert row[2] == policy_stores.NOT_FOUND

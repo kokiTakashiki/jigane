@@ -73,12 +73,12 @@ def test_macro_conclude_model_roundtrip() -> None:
             },
         ],
     }
-    assert _roundtrip(macro.lenient_conclude_model(), output) == output
+    assert _roundtrip(macro.CONCLUDE.lenient_model(), output) == output
 
 
 @pytest.mark.parametrize(
     ("model", "viewpoint"),
-    [(micro.lenient_discovery_model(), "D1"), (security.lenient_discovery_model(), "S-AUTH")],
+    [(micro.DISCOVERY.lenient_model(), "D1"), (security.DISCOVERY.lenient_model(), "S-AUTH")],
 )
 def test_sharded_discovery_model_roundtrip(model: type[BaseModel], viewpoint: str) -> None:
     findings = [
@@ -93,9 +93,9 @@ def test_sharded_discovery_model_roundtrip(model: type[BaseModel], viewpoint: st
 @pytest.mark.parametrize(
     ("model", "viewpoint", "extra"),
     [
-        (macro.lenient_conclude_model(), "M1", {"merged": [], "discarded": []}),
-        (micro.lenient_discovery_model(), "D1", {}),
-        (security.lenient_discovery_model(), "S-AUTH", {}),
+        (macro.CONCLUDE.lenient_model(), "M1", {"merged": [], "discarded": []}),
+        (micro.DISCOVERY.lenient_model(), "D1", {}),
+        (security.DISCOVERY.lenient_model(), "S-AUTH", {}),
     ],
 )
 def test_whole_float_line_dumps_as_int(

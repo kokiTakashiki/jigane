@@ -1,0 +1,2 @@
+def fetch_user(directory, user_id, default=None):
+    return directory.get(user_id, default)

@@ -11,7 +11,6 @@ from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.kinds import Kind
 from jigane.judgment_map.map_kind import CodeMap, DesignDocMap
 from jigane.judgment_map.region_table import CodeRegion, SectionRegion
-from jigane.languages.plugins import one_line_text, sanitize_text
 from jigane.pull_request_context.background import OWNERLESS_TEXT, PastPullRequest, has_owners
 from jigane.pull_request_context.bots import read_bot_comments
 from jigane.reviews import selection as selection_module
@@ -23,6 +22,7 @@ from jigane.reviews.lifecycle import (
     Review,
 )
 from jigane.static_analysis.intake import StaticFindingsStore, read_static_findings
+from jigane.text.terminal import one_line_text, sanitize_text
 
 SHORT_SHA = 7
 
@@ -65,11 +65,11 @@ def map_lines(review: Review) -> list[str]:
         lines.append(f"      {one_line_text(region.summary)}")
     match kind:
         case DesignDocMap():
-            # 設計書の地図の箇所は節で、推しのコードの箇所は「いまの形」の参考として件数だけ出す
+            # 設計書の地図の箇所は節で、候補のコードの箇所は「いまの形」の参考として件数だけ出す
             form = kind.current_form
             form_levels = form.line_counts.by_level
             lines.append(
-                f"いまの形（推しのコード）: 判断の箇所 {len(form.regions)} 件、"
+                f"いまの形（候補のコード）: 判断の箇所 {len(form.regions)} 件、"
                 f"重要 {form_levels['required']} / 全体 {sum(form_levels.values())}"
             )
         case CodeMap():
@@ -102,7 +102,9 @@ def _attachment_lines(review: Review, design_doc: DesignDocOrigin) -> list[str]:
 
 
 def origin_lines(review: Review) -> list[str]:
-    """種類ごとの出所の行。PR は題と URL、範囲は範囲の文字列、設計書は版と選択、機能は持たない。
+    """種類ごとの出所の行。
+
+    PR は題と URL、範囲は範囲の文字列、設計書は版と選択を持つ。ファイルのレビューは持たない。
 
     new、show、refresh、list はここから引く。
     """
@@ -253,7 +255,7 @@ def static_findings_json(review: Review) -> dict[str, Any] | None:
             "finding_count": len(store.findings),
             "raised_region_count": view.raised_regions,
             "outside_diff_count": len(view.outside_diff),
-            "dropped": dict(store.dropped),
+            "dropped": {reason.value: count for reason, count in store.dropped.items()},
         },
         "findings": [
             {**item.model_dump(mode="json"), "message": sanitize_text(item.message)}

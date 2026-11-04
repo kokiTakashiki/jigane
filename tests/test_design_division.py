@@ -125,6 +125,7 @@ def _word_literals(source: str, words: set[str]) -> list[str]:
     ]
 
 
+@pytest.mark.whole_tree
 def test_heading_words_are_defined_only_in_the_table() -> None:
     package = Path(jigane.__file__).parent
     words = {word for group in (MICRO, SECURITY) for word in group_words(group)}

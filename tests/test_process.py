@@ -32,6 +32,7 @@ def test_command_error_message_has_command_and_directory(tmp_path: Path) -> None
     assert str(tmp_path) in message
 
 
+@pytest.mark.whole_tree
 def test_consent_prompts_end_with_the_marker_the_gui_matches() -> None:
     # GUI は標準エラーの末尾が CONSENT_PROMPT_END かで問いを見分ける。問いを出す側が
     # 文面を自前で書くと食い違うので、末尾は定数だけが持つ

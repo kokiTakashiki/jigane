@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 import tree_sitter_language_pack
-from language_plugin_support import Installer, approved
-from test_grammars import _fake_library
+from language_plugin_support import Installer, approved, fake_library
 
 from jigane import commands
 from jigane.languages import fetch_main, grammars, queries, registry
@@ -54,12 +53,12 @@ def _enable_zig(
 
 
 def test_declared_grammar_passes(store: Path) -> None:
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     grammars.verify_declared(store, "zig", _spec())
 
 
 def test_pack_version_mismatch_fails(store: Path) -> None:
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     with pytest.raises(
         grammars.GrammarError, match=r"宣言のパックの版 0\.0\.0 が、入っているパック"
     ):
@@ -67,13 +66,13 @@ def test_pack_version_mismatch_fails(store: Path) -> None:
 
 
 def test_missing_platform_hash_fails(store: Path) -> None:
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     with pytest.raises(grammars.GrammarError, match=r"宣言に .* のハッシュがありません"):
         grammars.verify_declared(store, "zig", _spec(platform="plan9-riscv"))
 
 
 def test_hash_mismatch_fails(store: Path) -> None:
-    _fake_library(store, "zig", b"tampered")
+    fake_library(store, "zig", b"tampered")
     with pytest.raises(grammars.GrammarError, match="ハッシュが宣言と合いません"):
         grammars.verify_declared(store, "zig", _spec())
 
@@ -91,7 +90,7 @@ def test_odd_grammar_name_is_rejected(store: Path) -> None:
 def test_declaration_naming_a_builtin_grammar_uses_the_builtin_record(
     store: Path, monkeypatch: pytest.MonkeyPatch, install: Installer, tmp_path: Path
 ) -> None:
-    _fake_library(store, "python", b"genuine")
+    fake_library(store, "python", b"genuine")
     monkeypatch.setattr(
         grammars, "_recorded", lambda: {grammars.platform_key(): {"python": _digest(b"genuine")}}
     )
@@ -122,7 +121,7 @@ def test_builtin_verification_is_unchanged(store: Path) -> None:
 def test_matching_external_grammar_leaves_the_language_ready(
     install: Installer, tmp_path: Path, store: Path
 ) -> None:
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     _enable_zig(install, tmp_path, _spec())
     assert registry.adapter_for("a.zig") is not None
 
@@ -130,7 +129,7 @@ def test_matching_external_grammar_leaves_the_language_ready(
 def test_external_grammar_error_makes_the_language_unavailable(
     install: Installer, tmp_path: Path, store: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _fake_library(store, "zig", b"tampered")
+    fake_library(store, "zig", b"tampered")
     _enable_zig(install, tmp_path, _spec())
     (state,) = [s for s in registry.states() if isinstance(s, LanguageUnavailable)]
     assert state.reason_kind is ReasonKind.GRAMMAR_ERROR
@@ -158,7 +157,7 @@ def _fake_download(
         for name in names:
             if name not in contents:
                 raise RuntimeError(f"unknown grammar {name}")
-            _fake_library(store, "c_sharp" if name == "csharp" else name, contents[name])
+            fake_library(store, "c_sharp" if name == "csharp" else name, contents[name])
 
     monkeypatch.setattr(tree_sitter_language_pack, "download", download)
     recorded = {name: _digest(_BUILTIN_CONTENTS[name]) for name in grammars.GRAMMARS}
@@ -236,13 +235,13 @@ def test_fetch_builtin_mismatch_exits_nonzero(
 def test_runtime_verification_uses_the_declaration_of_an_external_language(
     install: Installer, tmp_path: Path, store: Path
 ) -> None:
-    _fake_library(store, "zig", b"tampered")
+    fake_library(store, "zig", b"tampered")
     _enable_zig(install, tmp_path, _spec())
     assert [s for s in registry.states() if isinstance(s, LanguageUnavailable)]
     # 使えない言語の宣言は呼ぶ側に渡らず、組み込みの記録に無い名前として止まる
     with pytest.raises(grammars.GrammarError, match=r"^未知の文法: zig$"):
         grammars.get_parser(grammars.BuiltinGrammar("zig"))
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     registry.set_states(None)
     adapter = registry.adapter_for("a.zig")
     assert adapter is not None
@@ -250,7 +249,7 @@ def test_runtime_verification_uses_the_declaration_of_an_external_language(
     assert isinstance(target, grammars.DeclaredGrammar)
     grammars._prepare(target)
     # 宣言と合わない実物に差し替わった後は、記録を捨てた照合で止まる
-    _fake_library(store, "zig", b"swapped")
+    fake_library(store, "zig", b"swapped")
     grammars._checked.clear()
     with pytest.raises(grammars.GrammarError, match="ハッシュが宣言と合いません"):
         grammars._prepare(target)
@@ -335,7 +334,7 @@ def test_both_fetch_entries_print_the_same_line_for_a_failing_external_language(
 def test_registry_binds_the_declared_target_to_the_external_adapter(
     install: Installer, tmp_path: Path, store: Path
 ) -> None:
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     _enable_zig(install, tmp_path, _spec())
     adapter = registry.adapter_for("a.zig")
     assert adapter is not None
@@ -369,7 +368,7 @@ def test_load_queries_checks_the_grammar_by_the_declared_target(
     (home / "languages.json").write_text(
         json.dumps({"enabled": [approved("zig").to_json()]}), encoding="utf-8"
     )
-    _fake_library(store, "zig", b"zig-library")
+    fake_library(store, "zig", b"zig-library")
     queries._load.cache_clear()
     asked: list[grammars.GrammarTarget] = []
     python_language = tree_sitter_language_pack.get_language("python")

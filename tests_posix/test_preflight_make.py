@@ -16,7 +16,7 @@ UV = shutil.which("uv")
 
 @pytest.fixture
 def unprepared_tree(tmp_path: Path) -> Path:
-    # .venv の無い木。Makefile と台本だけを写す
+    # .venv の無い木。Makefile とスクリプトだけを写す
     tree = tmp_path / "tree"
     (tree / "scripts").mkdir(parents=True)
     shutil.copy(ROOT / "Makefile", tree / "Makefile")

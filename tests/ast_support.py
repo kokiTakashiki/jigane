@@ -58,6 +58,8 @@ def json_users_of_stored_file(
 
     exclude に挙げたファイル名のソースは見ない。
     """
+    # 保存のファイル名の文字列と json の呼び出しの組は、
+    # ruff の banned-api でも import-linter でも書けないため、ここで走査する
     return [
         path.relative_to(root).as_posix()
         for path in sorted(root.rglob("*.py"))
@@ -87,6 +89,8 @@ def _assigns_state_key(target: ast.expr, keys: frozenset[str]) -> bool:
 
 def edits_state_by_key(source: str, keys: frozenset[str]) -> bool:
     """`state["<key>"]...` を代入（拡張代入、タプルやリストへの分解を含む）の左辺にしているか。"""
+    # 添字への代入は import でも名前の参照でもなく、
+    # ruff の banned-api と import-linter が見ないため、ここで走査する
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Assign):
             targets = node.targets

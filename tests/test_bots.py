@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from fakes import run_command_stub
-from pr_support import git
+from pr_support import clone_bare, git
 from store_format_support import check_upgrades
 
 from jigane.git import process
@@ -72,7 +72,7 @@ def repo(tmp_path: Path) -> dict[str, Any]:
     git(origin, "commit", "-m", "old")
     old_sha = git(origin, "rev-parse", "HEAD")
     cache = tmp_path / "cache.git"
-    git(tmp_path, "clone", "--bare", "--no-local", str(origin), str(cache))
+    clone_bare(origin, cache)
     head_tree = tmp_path / "head"
     head_tree.mkdir()
     (head_tree / "a.py").write_text(HEAD, encoding="utf-8")

@@ -1,0 +1,6 @@
+from table import Table
+
+
+def print_report(rows):
+    table = Table(rows)
+    print(table.render(header=["name", "score"]))

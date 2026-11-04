@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 PACKAGE = Path(__file__).resolve().parent.parent / "jigane"
 # 副コマンドと表示の部品は、親の commands の README が扱う
 COVERED_BY_PARENT = {PACKAGE / "commands" / "subcommands", PACKAGE / "commands" / "views"}
 
 
+@pytest.mark.whole_tree
 def test_every_package_has_a_readme() -> None:
     packages = [init.parent for init in PACKAGE.rglob("__init__.py")]
     missing = [

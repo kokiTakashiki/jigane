@@ -1,4 +1,4 @@
-"""機能、範囲、PR、設計書のレビューを作り、run を偽の claude で走らせた起動の記録を返す。"""
+"""ファイル、範囲、PR、設計書のレビューを作り、run を偽の claude で走らせた起動の記録を返す。"""
 
 import io
 import json
@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import write_fake_claude_wrapper
-from pr_support import URL, commit_all, git
+from fakes import launching_placeholders, write_fake_claude_wrapper
+from pr_support import URL, clone_bare, commit_all, git
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -19,6 +19,8 @@ from jigane.git.process import CLAUDE_BINARY_ENVIRONMENT
 from jigane.groups.definitions import GroupId
 from jigane.languages.grammars import CACHE_ENV
 from jigane.llm_runs.claude import REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES
+from jigane.skills import policy_principles
+from jigane.skills.policy_principle_shapes import Shape
 from jigane.storage.store import ReviewKind
 
 FAKE_SCRIPT = Path(__file__).parent / "claude_inputs_fake.py"
@@ -139,7 +141,7 @@ def _make_pull_request(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     head = commit_all(origin, "head")
     cache = home / "repositories" / "octo" / "hello.git"
     cache.parent.mkdir(parents=True)
-    git(home.parent, "clone", "--bare", "--no-local", str(origin), str(cache))
+    clone_bare(origin, cache)
     comment = {
         "id": 101,
         "user": {"login": "review-bot", "type": "Bot"},
@@ -185,7 +187,10 @@ def _new_review(arguments: list[str]) -> str:
 
 @contextmanager
 def recorded_launches(work: Path) -> Iterator[list[Launch]]:
-    """4 種類のレビューを作り、macro、micro、security を走らせる。機能は MCP ありも走らせる。"""
+    """4 種類のレビューを作り、macro、micro、security を走らせる。
+
+    ファイルのレビューは MCP ありも走らせる。
+    """
     monkeypatch = pytest.MonkeyPatch()
     launches: list[Launch] = []
     try:
@@ -193,16 +198,19 @@ def recorded_launches(work: Path) -> Iterator[list[Launch]]:
         monkeypatch.setenv("JIGANE_HOME", str(home))
         monkeypatch.setattr("jigane.commands.context.stdio_is_terminal", lambda: True)
         monkeypatch.setattr("jigane.commands.context.read_answer", lambda _prompt: "y")
+        # 題材によらず、原則の起動の入力も記録する
+        monkeypatch.setattr(policy_principles, "present_shapes", lambda *_: frozenset(Shape))
         # 除かれる変数が親にあるときだけ、除いたことが記録に現れる
         for name in REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES:
             monkeypatch.setenv(name, "dummy")
         repository = work / "proj"
         _make_repository(repository)
         monkeypatch.chdir(repository)
+        monkeypatch.setattr("subprocess.run", launching_placeholders())
         assert main(["new", "files", *FILES, "--name", "probe"]) == EXIT_OK
         launches += _run_groups(REVIEW_NAME, ReviewKind.FEATURE, work, monkeypatch)
         # MCP の案内とサーバの定義は、どの種類のレビューでも同じ組み立てを通る。
-        # そのため機能のレビューだけで走らせる
+        # そのためファイルのレビューだけで走らせる
         servers = {MCP_SERVER: {"command": "no-such-mcp-server-binary", "args": ["--x"]}}
         mcp_json = home / "mcp.json"
         _write(mcp_json, json.dumps({"mcpServers": servers}))

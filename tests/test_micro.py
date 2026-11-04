@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from string import Template
 
 import pytest
 from fakes import MicroFake, clear_policy, d_finding, settings_for
@@ -12,7 +13,7 @@ from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK, EXIT_P
 from jigane.findings.records import FINDINGS_FILE, triaged_dicts
 from jigane.groups.definitions import MICRO
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import micro, shards
+from jigane.skills import micro, shards, shared_rules
 from jigane.skills.assembly import AssemblyInput
 
 
@@ -74,10 +75,10 @@ def test_viewpoint_outside_micro_is_schema_failure(project: Path) -> None:
 
 
 def test_viewpoints_match_the_prompt_viewpoint_lines() -> None:
-    prompt = (
-        Path(micro.__file__).parent.joinpath("prompts", "micro.md").read_text(encoding="utf-8")
+    prompt = Template(shared_rules.prompt_text("micro")).safe_substitute(
+        shared_rules.values_for("micro")
     )
-    listed = [item.split(maxsplit=1)[0] for item in items(prompt) if re.match(r"[DT]\d+ ", item)]
+    listed = [item.split(maxsplit=1)[0] for item in items(prompt) if re.match(r"[DTP]\d+ ", item)]
     assert tuple(listed) == micro.VIEWPOINTS
 
 
@@ -223,11 +224,13 @@ def _ranges(prefix: str) -> list[str]:
             runs[-1].append(number)
         else:
             runs.append([number])
-    return [f"{prefix}{run[0]}〜{prefix}{run[-1]}" for run in runs]
+    return [
+        f"{prefix}{run[0]}" if run[0] == run[-1] else f"{prefix}{run[0]}〜{prefix}{run[-1]}"
+        for run in runs
+    ]
 
 
 def test_readme_lists_the_viewpoints_of_micro() -> None:
     readme = (Path(micro.__file__).parents[2] / "README.md").read_text(encoding="utf-8")
-    assert f"実装（{'、'.join(_ranges('D') + _ranges('T'))}）" in section_prose(
-        readme, "## 実装済みの機能"
-    )
+    listed = "、".join(_ranges("D") + _ranges("P") + _ranges("T"))
+    assert f"実装（{listed}）" in section_prose(readme, "### 機能")

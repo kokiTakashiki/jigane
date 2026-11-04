@@ -42,13 +42,40 @@ class RunShape:
     max_turns: int | None
     # 真なら、CLI に渡す上限から次の一往復の余裕を引く
     reserve_margin: bool
+    # 出力の見込みのトークン数。値があれば、起動の前の検査と見積もりが課金に合わせた単価で数える。
+    # None は入力だけで数える
+    output_allowance_tokens: int | None = None
 
 
-# 方針は図だけの形の一回の起動で、道具を渡さないので応答は一回で終わる。
+# 方針の図の形は、どの起動にも道具を渡さないので、応答は起動ごとに一回で終わる。
 # 一回の再試行を許す（max_turns）。
-# 往復を絞るため、次の一往復の余裕は引かない（reserve_margin）
-DIAGRAM_SHAPE = RunShape(effort=Effort.HIGH, max_budget_usd=0.5, max_turns=2, reserve_margin=False)
-# 設計書の形も道具を渡さない一回の起動で、往復と余裕の扱いは図の形と同じ。
+# 往復を絞るため、次の一往復の余裕は引かない（reserve_margin）。
+# 出力の見込み 3000 は、図の起動の測りの出力の最大 2,800 トークンに合わせる
+DIAGRAM_SHAPE = RunShape(
+    effort=Effort.HIGH,
+    max_budget_usd=0.36,
+    max_turns=2,
+    reserve_margin=False,
+    output_allowance_tokens=3000,
+)
+
+
+@dataclass(frozen=True)
+class PrincipleRun:
+    model: str
+    max_budget_usd: float
+    output_allowance_tokens: int | None = None
+
+
+# 図の形の原則の起動のモデルと、1 本の上限。鍵は原則の番号で、図の起動とは別の値で走らせる。
+# 出力の見込み 12000 は、Haiku の測りの段 33 の出力の最大 11,589 トークンに合わせる
+PRINCIPLE_RUNS: dict[str, PrincipleRun] = {
+    "P1": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
+    "P2": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
+    "P3": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
+    "P4": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
+}
+# 設計書の形は道具を渡さない一回の起動で、往復と余裕の扱いは図の形と同じ。
 # 上限と effort は形ごとに持つため、別の値として並べる
 DESIGN_SHAPE = RunShape(effort=Effort.HIGH, max_budget_usd=0.5, max_turns=2, reserve_margin=False)
 

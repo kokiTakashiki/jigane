@@ -16,6 +16,7 @@ from jigane.findings.records import (
     load_findings_state,
 )
 from jigane.groups.definitions import GROUP_IDS, GroupId
+from jigane.groups.viewpoints import viewpoint_fields
 from jigane.reviews.lifecycle import ReviewError
 from jigane.storage.store import review_lock, write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
@@ -202,6 +203,7 @@ class StaleFinding:
             "ran_at": past.ran_at,
             "severity": past.severity,
             "viewpoint": past.viewpoint,
+            **viewpoint_fields(past.viewpoint),
             "claim": past.claim,
             "body": past.body,
             "evidence": past.evidence,

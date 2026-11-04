@@ -449,3 +449,74 @@ def test_store_accesses_skips_sources_ast_cannot_parse() -> None:
     nested = "x = " + "(" * 3000 + "1" + ")" * 3000 + "\n"
     sources = {"deep.py": deep, "nested.py": nested, "nul.py": "x = 1\0\n"}
     assert python_stores.store_accesses(sources) == []
+
+
+def _read_sides(source: str) -> dict[str, tuple[str, frozenset[str]]]:
+    return {
+        side.function: (side.kind.name, side.keys)
+        for access in python_stores.store_accesses({"m.py": source})
+        for side in access.sides
+        if side.role.name == "READ"
+    }
+
+
+def test_csv_reader_callers_are_csv_read_sides_without_keys() -> None:
+    source = (
+        "import csv\n\n\n"
+        "def header_of(path):\n"
+        "    with open(path) as f:\n"
+        "        return next(csv.reader(f))\n\n\n"
+        "def rows_of(path):\n"
+        "    with open(path) as f:\n"
+        "        return [row[0] for row in csv.reader(f)]\n"
+    )
+    assert _read_sides(source) == {
+        "header_of": ("CSV", frozenset()),
+        "rows_of": ("CSV", frozenset()),
+    }
+
+
+def test_csv_reader_imported_by_name_is_a_csv_read_side() -> None:
+    source = (
+        "from csv import reader as read_rows\n\n\n"
+        "def header_of(path):\n"
+        "    with open(path) as f:\n"
+        "        return next(read_rows(f))\n"
+    )
+    assert _read_sides(source) == {"header_of": ("CSV", frozenset())}
+
+
+def test_csv_module_alias_reader_is_a_csv_read_side() -> None:
+    source = (
+        "import csv as c\n\n\n"
+        "def header_of(path):\n"
+        "    with open(path) as f:\n"
+        "        return next(c.reader(f))\n"
+    )
+    assert _read_sides(source) == {"header_of": ("CSV", frozenset())}
+
+
+def test_reader_attribute_of_local_csv_variable_is_not_a_read_side() -> None:
+    source = "def header_of(path, csv):\n    return next(csv.reader(path))\n"
+    assert _read_sides(source) == {}
+
+
+def test_csv_reader_on_fixed_file_name_is_a_read_side_with_empty_keys() -> None:
+    source = (
+        "import csv\n\n\n"
+        "def rows_of():\n"
+        '    with open("rows.csv") as f:\n'
+        "        return [row[0] for row in csv.reader(f)]\n"
+    )
+    assert _read_sides(source) == {"rows_of": ("CSV", frozenset())}
+
+
+def test_reader_calls_unrelated_to_csv_are_not_read_sides() -> None:
+    source = (
+        "from tools import reader\n\n\n"
+        "def a(path):\n"
+        "    return next(reader(path))\n\n\n"
+        "def b(path, parser):\n"
+        "    return parser.reader(path)\n"
+    )
+    assert _read_sides(source) == {}

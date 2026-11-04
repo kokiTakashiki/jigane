@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import re
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -30,6 +31,7 @@ from jigane.findings.discard import (
     summary_of_counts,
 )
 from jigane.groups.definitions import GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
+from jigane.groups.viewpoints import VIEWPOINTS, Viewpoint, by_legacy_number, by_number, by_uuid
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store import review_lock, write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
@@ -38,7 +40,7 @@ from jigane.storage.store_format import Upgrade, upgrade_mapping
 LOGGER = logging.getLogger(__name__)
 
 FINDINGS_FILE = "findings.json"
-FINDINGS_FORMAT = 3
+FINDINGS_FORMAT = 4
 # 群の結果を差し替えるたびに、差し替えられる側の指摘を足して残す。findings.json の形は変えない
 HISTORY_FILE = "findings_history.json"
 # skills が書く保存物。群の結果を消す口（reviews）が一覧に入れるため、読む側の層に置く
@@ -1288,7 +1290,10 @@ class StoredFindings:
             _KEY_FORMAT: FINDINGS_FORMAT,
             _KEY_LAST_NUMBER: self.last_number,
             _KEY_GROUPS: {
-                **{name: finding_dicts(findings) for name, findings in self.groups.items()},
+                **{
+                    name: _with_stored_viewpoints(finding_dicts(findings))
+                    for name, findings in self.groups.items()
+                },
                 **self.unknown_groups,
             },
             _KEY_STALE_GROUPS: list(self.stale_groups),
@@ -1358,15 +1363,17 @@ def read_findings_json(raw: dict[str, Any], where: str = "") -> StoredFindings:
 
     移した結果は書き戻さない。書くのは常に今の版である。
     """
-    return StoredFindings.from_json(
-        upgrade_mapping(
-            _stored_file_name(where, FINDINGS_FILE),
-            raw,
-            current=FINDINGS_FORMAT,
-            upgrades=_UPGRADES,
-        ),
-        where,
+    upgraded = upgrade_mapping(
+        _stored_file_name(where, FINDINGS_FILE),
+        raw,
+        current=FINDINGS_FORMAT,
+        upgrades=_UPGRADES,
     )
+    groups = {
+        name: _with_memory_viewpoints(findings) if name in GROUP_IDS else findings
+        for name, findings in upgraded[_KEY_GROUPS].items()
+    }
+    return StoredFindings.from_json({**upgraded, _KEY_GROUPS: groups}, where)
 
 
 def load_findings_state(directory: Path) -> FilledFindings:
@@ -1497,8 +1504,84 @@ def _upgrade_findings_v2(raw: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+# 観点の欠けは版 1 の移しが空文字で入れる。表に無いので、捨てた印と並べて変換しない
+_UNCONVERTED_VIEWPOINTS = (DISCARDED_VIEWPOINT, "")
+
+
+def _stored_viewpoint(number: str) -> str:
+    """メモリの観点の番号を保存する UUID の文字列にする。捨てた印と観点の欠けはそのまま書く。"""
+    if number in _UNCONVERTED_VIEWPOINTS:
+        return number
+    return str(by_number(number).uuid)
+
+
+def _with_stored_viewpoints(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """指摘の辞書の写しを、観点を UUID にして返す。渡された辞書は書き換えない。"""
+    return [{**f, _KEY_VIEWPOINT: _stored_viewpoint(f[_KEY_VIEWPOINT])} for f in findings]
+
+
+def _with_memory_viewpoints(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """指摘の辞書の写しを、観点をメモリの番号にして返す。渡された辞書は書き換えない。"""
+    return [{**f, _KEY_VIEWPOINT: _viewpoint_from_stored(f.get(_KEY_VIEWPOINT))} for f in findings]
+
+
+def _viewpoint_from_stored(value: object) -> str:
+    """保存された UUID の文字列を観点の番号へ戻す。表に無い値と壊れた値は値を書いて落ちる"""
+    if value in _UNCONVERTED_VIEWPOINTS:
+        return str(value)
+    try:
+        return by_uuid(uuid.UUID(str(value))).number
+    except (KeyError, ValueError, TypeError, AttributeError) as error:
+        raise ValueError(f"観点の UUID を読めません: {value!r}") from error
+
+
+def _upgrade_finding_v3(finding: dict[str, Any]) -> dict[str, Any]:
+    """版 3 の指摘一件を版 4 の形へ移す。純粋な関数で、渡された辞書は書き換えない。
+
+    版 4 は観点を番号でなく UUID で保存する。版 3 の番号は 0.1.x の置き場の旧い番号で読む。
+    """
+    data = copy.deepcopy(finding)
+    number = data.get(_KEY_VIEWPOINT)
+    if number in _UNCONVERTED_VIEWPOINTS:
+        return data
+    try:
+        data[_KEY_VIEWPOINT] = str(by_legacy_number(str(number)).uuid)
+    except KeyError as error:
+        named = _viewpoint_by_numbered_name(str(number))
+        if named is None:
+            raise ValueError(f"表に無い旧い観点の番号です: {number!r}") from error
+        data[_KEY_VIEWPOINT] = str(named.uuid)
+    return data
+
+
+def _viewpoint_by_numbered_name(value: str) -> Viewpoint | None:
+    """「旧い番号＋半角空白一つ＋表の name」の文字列に当たる観点を返す。
+
+    実際の置き場には、観点が番号だけでなくこの形で残っている。
+    name が空の観点はこの形を取らない。
+    """
+    for viewpoint in VIEWPOINTS:
+        if viewpoint.name and value == f"{viewpoint.legacy_number} {viewpoint.name}":
+            return viewpoint
+    return None
+
+
+def _upgrade_findings_v3(raw: dict[str, Any]) -> dict[str, Any]:
+    """版 3 の findings.json を版 4 の形へ移す。現行に無い群は移さない。"""
+    data = copy.deepcopy(raw)
+    for name, findings in data[_KEY_GROUPS].items():
+        if name in GROUP_IDS:
+            data[_KEY_GROUPS][name] = [_upgrade_finding_v3(f) for f in findings]
+    data[_KEY_FORMAT] = 4
+    return data
+
+
 # 保存された版から一つ上の版へ移す関数。読む境がここを順にたどる
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_findings_v1, 2: _upgrade_findings_v2}
+_UPGRADES: dict[int, Upgrade] = {
+    1: _upgrade_findings_v1,
+    2: _upgrade_findings_v2,
+    3: _upgrade_findings_v3,
+}
 
 
 def _upgrade_history_v1(raw: dict[str, Any]) -> dict[str, Any]:
@@ -1526,8 +1609,22 @@ def _upgrade_history_v2(raw: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _upgrade_history_v3(raw: dict[str, Any]) -> dict[str, Any]:
+    """版 3 の findings_history.json を版 4 の形へ移す。指摘一件の移しは findings.json と共通。"""
+    data = copy.deepcopy(raw)
+    for rounds in data[_KEY_GROUPS].values():
+        for entry in rounds:
+            entry[_KEY_FINDINGS] = [_upgrade_finding_v3(f) for f in entry[_KEY_FINDINGS]]
+    data[_KEY_FORMAT] = 4
+    return data
+
+
 # findings_history.json の版 → 一つ上の版へ移す関数。版は findings.json と同じ FINDINGS_FORMAT
-_HISTORY_UPGRADES: dict[int, Upgrade] = {1: _upgrade_history_v1, 2: _upgrade_history_v2}
+_HISTORY_UPGRADES: dict[int, Upgrade] = {
+    1: _upgrade_history_v1,
+    2: _upgrade_history_v2,
+    3: _upgrade_history_v3,
+}
 
 
 # 古い形は書かれた時点の規則で読む。現行の表を引くと、表の変更で古い保存物の読みが変わる
@@ -1662,7 +1759,7 @@ class HistoryRound:
     def to_json(self) -> dict[str, Any]:
         raw: dict[str, Any] = {
             _KEY_RAN_AT: self.ran_at,
-            _KEY_FINDINGS: finding_dicts(self.findings),
+            _KEY_FINDINGS: _with_stored_viewpoints(finding_dicts(self.findings)),
         }
         if self.discard.state is not DiscardState.UNRECORDED:
             # 状態と比は数から導けるので保存しない。キーが無いことが UNRECORDED を表す
@@ -1714,14 +1811,20 @@ def read_history_json(raw: dict[str, Any], where: str = "") -> HistoryFile:
 
     移した結果は書き戻さない。書くのは常に今の版である。
     """
-    return HistoryFile.from_json(
-        upgrade_mapping(
-            _stored_file_name(where, HISTORY_FILE),
-            raw,
-            current=FINDINGS_FORMAT,
-            upgrades=_HISTORY_UPGRADES,
-        )
+    upgraded = upgrade_mapping(
+        _stored_file_name(where, HISTORY_FILE),
+        raw,
+        current=FINDINGS_FORMAT,
+        upgrades=_HISTORY_UPGRADES,
     )
+    groups = {
+        name: [
+            {**entry, _KEY_FINDINGS: _with_memory_viewpoints(entry[_KEY_FINDINGS])}
+            for entry in rounds
+        ]
+        for name, rounds in upgraded[_KEY_GROUPS].items()
+    }
+    return HistoryFile.from_json({**upgraded, _KEY_GROUPS: groups})
 
 
 @dataclass(frozen=True)

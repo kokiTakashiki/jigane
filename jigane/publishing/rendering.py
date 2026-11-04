@@ -146,7 +146,7 @@ def render(entry: TemplateEntry, context: dict[str, Any]) -> str:
         return _environment().get_template(str(entry.path)).render(context)
     except TemplateSyntaxError as error:
         raise ReviewError(
-            f"テンプレート {entry.name}（{entry.path}）の {error.lineno} 行目が構文の誤りです: "
+            f"テンプレート {entry.name}（{entry.path}）の {error.lineno} 行目が構文のエラーです: "
             f"{error.message}"
         ) from error
     except TemplateNotFound as error:
@@ -269,7 +269,7 @@ def _gate_context(entry: GateEntry) -> dict[str, Any]:
 def _pull_request(review: Review) -> dict[str, Any] | None:
     origin = review.origin
     if not isinstance(origin, PullRequestOrigin):
-        # PR の情報は PR の出所だけが持つ。範囲と機能は null
+        # PR の情報は PR の出所だけが持つ。範囲とファイルのレビューは null
         return None
     info = origin.info
     return {

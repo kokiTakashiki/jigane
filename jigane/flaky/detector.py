@@ -133,7 +133,7 @@ def detect(
     catalog: list[Item],
     scope: LineScope,
 ) -> list[Detection]:
-    """scope が全行ならファイル全体（機能レビュー式）、変えた行なら差分レビュー式。"""
+    """scope が全行ならファイル全体（ファイルのレビュー）、変えた行なら差分のレビュー。"""
     found: list[Detection] = []
     contexts: dict[str, FileContext] = {}
     for path in paths:

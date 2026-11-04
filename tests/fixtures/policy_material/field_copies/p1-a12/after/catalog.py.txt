@@ -1,0 +1,13 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class Book:
+    isbn: str
+    title: str
+    author: str
+    pages: int
+
+
+def total_pages(books):
+    return sum(b.pages for b in books)

@@ -152,9 +152,9 @@ class FileSummary:
 
 @dataclass(frozen=True)
 class TreeFigure:
-    """ツリー図のうち、機能レビュー式の形。変更後の木が一枚だけで、変更前は無い。
+    """ツリー図のうち、ファイルのレビューの形。変更後の木が一枚だけで、変更前は無い。
 
-    差分レビュー式は変更前の木を足した `DiffTreeFigure`。変更前が無いことは、
+    差分のレビューは変更前の木を足した `DiffTreeFigure`。変更前が無いことは、
     型で表し、欄を空にして表さない。files は変更したファイルで、資料の文にだけ使う。
     files が空のときは描くものが無く、木の原文は空文字列になる。
     files の状態がすべて `FileState.UNCHANGED` のときは差分を持たない現状の木で、
@@ -168,7 +168,7 @@ class TreeFigure:
     intro: ClassVar[str] = TREE_INTRO
 
     def _tree_blocks(self) -> list[str]:
-        """資料の文に並べる、木ごとの見出しつきの囲み。機能レビュー式は見出しを付けない。"""
+        """資料の文に並べる、木ごとの見出しつきの囲み。ファイルのレビューは見出しを付けない。"""
         return [self._fenced(self.after, NO_AFTER_TREE_TEXT)]
 
     @staticmethod
@@ -201,7 +201,7 @@ class TreeFigure:
 
 @dataclass(frozen=True)
 class DiffTreeFigure(TreeFigure):
-    """差分レビュー式のツリー図。変更前の木と変更後の木の二枚。"""
+    """差分のレビューのツリー図。変更前の木と変更後の木の二枚。"""
 
     before: Panel
 

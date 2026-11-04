@@ -1,6 +1,8 @@
 import argparse
 import pkgutil
 
+import pytest
+
 from jigane.commands import build_parser, subcommands
 
 
@@ -12,6 +14,7 @@ def registered_names() -> set[str]:
     raise AssertionError("副コマンドの登録が無い")
 
 
+@pytest.mark.whole_tree
 def test_modules_and_registered_subcommands_match_one_to_one() -> None:
     modules = {info.name.replace("_", "-") for info in pkgutil.iter_modules(subcommands.__path__)}
     assert registered_names() == modules

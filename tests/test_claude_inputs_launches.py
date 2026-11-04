@@ -58,7 +58,11 @@ LAUNCHED_ROLES = {
     for group, roles in (
         (
             GroupId.MACRO,
-            (Role.MACRO_DESIGN if kind is ReviewKind.DESIGN_DOC else Role.MACRO_DIAGRAM,),
+            (
+                (Role.MACRO_DESIGN,)
+                if kind is ReviewKind.DESIGN_DOC
+                else (Role.MACRO_DIAGRAM, Role.MACRO_PRINCIPLES)
+            ),
         ),
         *_FOLLOWERS.items(),
     )

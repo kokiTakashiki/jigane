@@ -657,6 +657,34 @@ def test_short_section_lists_only_changed_technologies(review: Review) -> None:
     assert len(text) < len(full)
 
 
+def _removed_csv_review(tmp_path: Path, *, reader_uses_csv: bool) -> Review:
+    after, before = tmp_path / "after", tmp_path / "before"
+    reader = "import csv\n" if reader_uses_csv else "import os\n"
+    _write(after, {"src/writer.py": "import os\n", "src/reader.py": reader})
+    _write(before, {"src/writer.py": "import csv\n", "src/reader.py": reader})
+    return make_review(after, ["src/writer.py"], base_tree=before, kind=ReviewKind.RANGE)
+
+
+def test_short_section_says_where_a_removed_technology_is_still_used(tmp_path: Path) -> None:
+    text = materials.short_section_text(_removed_csv_review(tmp_path, reader_uses_csv=True))
+    row = next(line for line in text.splitlines() if line.startswith("| csv "))
+    assert "他では使い続けている: src/reader.py" in row
+    assert "| csv | 言語と OS | 消えた |" not in text
+
+
+def test_short_section_says_removed_when_no_file_keeps_the_technology(tmp_path: Path) -> None:
+    text = materials.short_section_text(_removed_csv_review(tmp_path, reader_uses_csv=False))
+    assert "| csv | 言語と OS | 消えた | - |" in text
+
+
+def test_short_section_caps_listed_places_of_a_still_used_technology(tmp_path: Path) -> None:
+    review = _removed_csv_review(tmp_path, reader_uses_csv=False)
+    for name in "abcde":
+        _write(Path(review.repository_root), {f"src/{name}.py": "import csv\n"})
+    text = materials.short_section_text(review)
+    assert "src/a.py、src/b.py、src/c.py ほか 2 件" in text
+
+
 def test_short_section_in_feature_review_skips_language_and_os(review: Review) -> None:
     review.origin = FeatureOrigin()
     text = materials.short_section_text(review)

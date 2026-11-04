@@ -1,0 +1,7 @@
+def fetch_user(directory, user_id, default=None, strict=False, normalize=None):
+    if strict and user_id not in directory:
+        raise KeyError(user_id)
+    value = directory.get(user_id, default)
+    if normalize:
+        value = normalize(value)
+    return value

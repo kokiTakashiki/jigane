@@ -71,7 +71,8 @@ def test_builtins_listed_first() -> None:
 
 
 def test_states_without_externals_are_only_builtins(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 開発の環境には例のパッケージの entry point が載っている。外の言語が無い環境にするため空にする
+    # 開発の環境には例のパッケージの entry point が載っている。
+    # 追加の言語が無い環境にするため空にする
     monkeypatch.setattr(registry, "entry_points", lambda **_kwargs: [])
     assert [type(state) for state in registry.states()] == [LanguageReady] * len(registry._plugins)
     assert registry.adapter_for("a.zig") is None

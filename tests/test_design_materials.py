@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from design_materials_support import work
+
 from jigane.policy_materials.design_doc import (
     NO_CURRENT_SHAPE_TEXT,
     NO_SELECTION_TEXT,
@@ -8,22 +10,6 @@ from jigane.policy_materials.design_doc import (
 )
 from jigane.policy_materials.missing import MissingMaterial
 from jigane.skills.macro_design import build_design_prompt
-
-FILES = {
-    "shop/cart.py": """\
-from shop.pricing import Pricing
-
-
-class Cart:
-    def checkout(self) -> int:
-        return Pricing().total(self)
-""",
-    "shop/pricing.py": """\
-class Pricing:
-    def total(self, cart: object) -> int:
-        return 1
-""",
-}
 
 DOCUMENT = """\
 # 題
@@ -48,22 +34,14 @@ classDiagram
 """
 
 
-def _work(tmp_path: Path) -> Path:
-    for relative, text in FILES.items():
-        target = tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return tmp_path
-
-
 def test_sections_are_built_in_order(tmp_path: Path) -> None:
-    materials = design_materials(_work(tmp_path), "docs/d.md", DOCUMENT, ["shop/cart.py"])
+    materials = design_materials(work(tmp_path), "docs/d.md", DOCUMENT, ["shop/cart.py"])
     titles = [title for title, _ in materials.sections()]
     assert titles == [
         "設計書の全文",
         "設計書の構造",
         "名指しの照合の表",
-        "選んだファイルと推しの理由",
+        "選んだファイルと候補にした理由",
         "いまの形の図",
     ]
     assert not materials.is_empty
@@ -92,14 +70,14 @@ def test_sections_are_built_in_order(tmp_path: Path) -> None:
 
 
 def test_selected_file_outside_the_recommendation_is_marked(tmp_path: Path) -> None:
-    root = _work(tmp_path)
+    root = work(tmp_path)
     (root / "shop" / "other.py").write_text("X = 1\n", encoding="utf-8")
     materials = design_materials(root, "docs/d.md", DOCUMENT, ["shop/other.py"])
     assert NOT_RECOMMENDED_TEXT in materials.selection
 
 
 def test_without_selection_there_is_no_current_shape(tmp_path: Path) -> None:
-    materials = design_materials(_work(tmp_path), "docs/d.md", DOCUMENT, [])
+    materials = design_materials(work(tmp_path), "docs/d.md", DOCUMENT, [])
     assert materials.selection == NO_SELECTION_TEXT
     assert materials.current_shape == NO_CURRENT_SHAPE_TEXT
     assert materials.missing == (MissingMaterial.CURRENT_SHAPE,)
@@ -110,7 +88,7 @@ def test_full_text_is_not_truncated(tmp_path: Path) -> None:
     body = "\n".join(f"行 {number} " + "あ" * 100 for number in range(1, 600))
     text = f"# 題\n\n{body}\n"
     assert len(text) > 16_000
-    materials = design_materials(_work(tmp_path), "docs/long.md", text, [])
+    materials = design_materials(work(tmp_path), "docs/long.md", text, [])
     for number in (1, 300, 599):
         assert f"行 {number} " + "あ" * 100 in materials.document
     assert "docs/long.md" in materials.document
@@ -120,14 +98,14 @@ def test_full_text_is_not_truncated(tmp_path: Path) -> None:
 
 def test_document_text_does_not_start_a_prompt_section(tmp_path: Path) -> None:
     text = "# 題\n\n### 設計書の中の見出し\n\n$mode と ${materials} を含む本文\n"
-    materials = design_materials(_work(tmp_path), "docs/d.md", text, [])
+    materials = design_materials(work(tmp_path), "docs/d.md", text, [])
     prompt = build_design_prompt(materials, "前の回の指摘は無い。")
     assert not any(line.startswith("### 設計書の中の見出し") for line in prompt.splitlines())
     assert "$mode と ${materials} を含む本文" in prompt
 
 
 def test_empty_document_has_no_material(tmp_path: Path) -> None:
-    materials = design_materials(_work(tmp_path), "docs/d.md", "", [])
+    materials = design_materials(work(tmp_path), "docs/d.md", "", [])
     assert materials.is_empty
     assert materials.missing == (
         MissingMaterial.DOCUMENT,
@@ -145,13 +123,13 @@ def test_empty_document_has_no_material(tmp_path: Path) -> None:
 
 def test_structure_reports_unreadable_places(tmp_path: Path) -> None:
     text = "# 題\n\n```mermaid\nclassDiagram\n"
-    materials = design_materials(_work(tmp_path), "docs/d.md", text, [])
+    materials = design_materials(work(tmp_path), "docs/d.md", text, [])
     assert "読めなかった箇所" in materials.structure
     assert "閉じない柵" in materials.structure
 
 
 def test_same_input_gives_the_same_materials(tmp_path: Path) -> None:
-    root = _work(tmp_path)
+    root = work(tmp_path)
     first = design_materials(root, "docs/d.md", DOCUMENT, ["shop/cart.py"])
     second = design_materials(root, "docs/d.md", DOCUMENT, ["shop/cart.py"])
     assert first == second

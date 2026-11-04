@@ -1,6 +1,6 @@
 import difflib
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from fnmatch import fnmatchcase
@@ -301,7 +301,7 @@ def _segment(
 
 
 def _opcodes(old_lines: list[str], new_lines: list[str]) -> list[tuple[int, int, int, int]]:
-    # git に頼らず、Windows でも機能レビュー式でも同じ計算にするため difflib を使う
+    # git に頼らず、Windows でもファイルのレビューでも同じ計算にするため difflib を使う
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     return [(i1, i2, j1, j2) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal"]
 
@@ -808,7 +808,7 @@ def build_regions(
             continue
         path = segment.new_path or segment.old_path
         path = required(path)
-        # 機能レビュー式は全行が追加で、宣言ごとだと公開の宣言の数だけ箇所が並ぶ
+        # ファイルのレビューは全行が追加で、宣言ごとだと公開の宣言の数だけ箇所が並ぶ
         name = "" if is_feature else segment.qualified_name
         groups.setdefault((path, name, segment.kind), []).append(segment)
     regions: list[CodeRegion] = []
@@ -840,39 +840,53 @@ def build_regions(
     return regions
 
 
+def _overlay_signal[T](
+    segments: Sequence[Segment],
+    touching_of: Callable[[Segment], list[T]],
+    kind: Kind,
+    raises: Callable[[list[T]], bool],
+    attach: Callable[[Segment, list[T]], Segment],
+) -> list[Segment]:
+    """外の信号（ボットのコメント、静的検査の指摘）を segment に重ねる共通の口。
+
+    信号に触れた segment のうち、上げる信号があり要判断でないものは kind へ上げ、
+    既に要判断のものは種類を変えない。識別子の持たせ方は attach が決める。
+    """
+    result: list[Segment] = []
+    for segment in segments:
+        touching = touching_of(segment)
+        if not touching:
+            result.append(segment)
+            continue
+        base = segment
+        if segment.level != Level.REQUIRED and raises(touching):
+            base = replace(segment, kind=kind, level=LEVEL_OF_KIND[kind])
+        result.append(attach(base, touching))
+    return result
+
+
 def apply_bot_touches(segments: Sequence[Segment], touches: Sequence[BotTouch]) -> list[Segment]:
     """ボットの指摘の後に触れた行と重なる segment に、コメントの id を持たせる。
 
     要判断でない segment は bot_response へ上げ、既に要判断のものは種類を変えない。
     行数は segment 単位で数えるため、種類を変えても二重には数えない。
     """
-    result: list[Segment] = []
-    for segment in segments:
+
+    def touching_of(segment: Segment) -> list[BotTouch]:
         span = segment.new_span
-        ids = (
-            tuple(
-                sorted(
-                    touch.comment_id
-                    for touch in touches
-                    if touch.path == segment.new_path
-                    and any(span.start_line <= n <= span.end_line for n in touch.lines)
-                )
-            )
-            if span is not None
-            else ()
-        )
-        if not ids:
-            result.append(segment)
-            continue
-        base = segment
-        if segment.level != Level.REQUIRED:
-            base = replace(
-                segment,
-                kind=Kind.BOT_RESPONSE,
-                level=LEVEL_OF_KIND[Kind.BOT_RESPONSE],
-            )
-        result.append(replace(base, bot_comment_ids=ids))
-    return result
+        if span is None:
+            return []
+        return [
+            touch
+            for touch in touches
+            if touch.path == segment.new_path
+            and any(span.start_line <= n <= span.end_line for n in touch.lines)
+        ]
+
+    def attach(segment: Segment, touching: list[BotTouch]) -> Segment:
+        return replace(segment, bot_comment_ids=tuple(sorted(t.comment_id for t in touching)))
+
+    return _overlay_signal(segments, touching_of, Kind.BOT_RESPONSE, lambda _: True, attach)
 
 
 @dataclass(frozen=True)
@@ -892,33 +906,31 @@ def apply_static_findings(
     既に要判断のものは種類を変えない。行数は segment 単位で数えるため、二重には数えない。
     """
     hit: set[str] = set()
-    result: list[Segment] = []
-    for segment in segments:
+
+    def touching_of(segment: Segment) -> list[FindingTouch]:
         span = segment.new_span
-        touching = (
-            [
-                finding
-                for finding in findings
-                if finding.path == segment.new_path
-                and finding.start_line <= span.end_line
-                and span.start_line <= finding.end_line
-            ]
-            if span is not None
-            else []
-        )
-        if not touching:
-            result.append(segment)
-            continue
+        if span is None:
+            return []
+        return [
+            finding
+            for finding in findings
+            if finding.path == segment.new_path
+            and finding.start_line <= span.end_line
+            and span.start_line <= finding.end_line
+        ]
+
+    def attach(segment: Segment, touching: list[FindingTouch]) -> Segment:
         hit.update(finding.finding_id for finding in touching)
-        base = segment
-        if segment.level != Level.REQUIRED and any(f.raises for f in touching):
-            base = replace(
-                segment,
-                kind=Kind.STATIC_FINDING,
-                level=LEVEL_OF_KIND[Kind.STATIC_FINDING],
-            )
         ids = {*segment.static_finding_ids, *(f.finding_id for f in touching)}
-        result.append(replace(base, static_finding_ids=tuple(sorted(ids, key=_finding_number))))
+        return replace(segment, static_finding_ids=tuple(sorted(ids, key=_finding_number)))
+
+    result = _overlay_signal(
+        segments,
+        touching_of,
+        Kind.STATIC_FINDING,
+        lambda touching: any(f.raises for f in touching),
+        attach,
+    )
     outside = len({finding.finding_id for finding in findings} - hit)
     return StaticFindingOverlay(tuple(result), outside)
 

@@ -50,11 +50,15 @@ def _unsupported(review: Review) -> dict[str, tuple[str, ...]]:
     }
 
 
-def test_csharp_only_change_is_unsupported_for_both_tables(
+def test_csharp_only_change_is_unsupported_for_the_interface_tables(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP})
-    assert _unsupported(review) == {"commands": ("C#",), "file_paths": ("C#",), "stores": ("C#",)}
+    assert _unsupported(review) == {
+        "commands": ("C#",),
+        "file_paths": ("C#",),
+        "stores": ("C#",),
+    }
     text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
     assert NOTE in text
 
@@ -125,6 +129,7 @@ def test_language_without_any_interface_is_unsupported_for_every_interface_figur
         "file_paths",
         "stores",
         "regex",
+        "value_sets",
     )
     # ツリーとシグネチャは言語の口に依らないので、対応外に載らない。
     # クラス図などは SequenceAdapter の索引から宣言を引くので、その口の無い言語では対応外に載る
@@ -152,10 +157,16 @@ def test_prompt_names_the_language_without_an_interface_in_the_new_figures(
 
 
 def test_every_figure_states_its_language_interface() -> None:
-    # 既定値に頼らず、12 種の図がすべて自分の口（または言語に依らないこと）を書いている
-    assert len(REGISTRY) == 12
+    # 既定値に頼らず、16 種の図がすべて自分の口（または言語に依らないこと）を書いている
+    assert len(REGISTRY) == 16
     assert all(e.interface is LANGUAGE_AGNOSTIC or isinstance(e.interface, type) for e in REGISTRY)
-    assert {e.key for e in REGISTRY if e.interface is LANGUAGE_AGNOSTIC} == {"tree", "signatures"}
+    assert {e.key for e in REGISTRY if e.interface is LANGUAGE_AGNOSTIC} == {
+        "tree",
+        "signatures",
+        "cochange",
+        "field_copies",
+        "callers",
+    }
 
 
 def test_sequence_section_names_the_language_without_an_interface(
@@ -205,7 +216,7 @@ def test_mixed_origins_put_the_builtin_sentence_first_in_every_user(
     assert BOTH_NOTE in capsys.readouterr().out
     assert main(["diagrams", "--json", str(review.id)]) == 0
     payload = json.loads(capsys.readouterr().out)
-    # Swift が口を持つ図では外の言語の文だけが残る
+    # Swift が口を持つ図では追加の言語の文だけが残る
     assert {u["note"] for u in payload["unsupported"]} == {BOTH_NOTE, PLUGIN_NOTE}
     entry = next(u for u in payload["unsupported"] if u["key"] == "commands")
     assert entry["note"] == BOTH_NOTE

@@ -57,7 +57,7 @@ commands = [
   "uv run --locked python scripts/generate_import_contracts.py --check",
   "uv run --locked python scripts/generate_package_readme.py --check",
   "uv run --locked python scripts/generate_readme_dependencies.py --check",
-  "uv run --locked lint-imports",
+  "uv run --locked python scripts/run_lint_imports.py",
   "uv run --locked python scripts/check_workflows.py",
   "uv run --locked python scripts/check_egress.py",
   "uv run --locked python scripts/check_dependency_licenses.py",
@@ -122,12 +122,12 @@ commands = [
 [[task]]
 name = "changed-tests"
 show_commands = true
-description = "変更に関わる試験だけを走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。全体は CI で確かめる）"
+description = "変更に関わる試験と、全体を縛る試験（whole_tree の印）を走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。残りの全体は CI で確かめる）"
 commands = ["uv run --locked --project {project_dir} python {project_dir}/scripts/with_temp_jigane_home.py uv run --locked --directory {project_dir} python scripts/changed_tests.py {args}"]
 
 [[task]]
 name = "quick-check"
-description = "軽い機械のゲート。lint と、変更に関わる試験だけを通す（全体の試験は push して CI で確かめる）"
+description = "軽い機械のゲート。lint と、変更に関わる試験と全体を縛る試験（whole_tree の印）を通す（残りの全体は push して CI で確かめる）"
 depends = ["preflight", "lint", "changed-tests"]
 
 [[task]]

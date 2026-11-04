@@ -201,15 +201,14 @@ def test_consumers_read_the_three_source_shapes(
     (directory / "changes.diff").write_text("-removed_line\n+kept_line\n", encoding="utf-8")
     assert (review.is_diff, review.is_pull_request) == (is_diff, is_pull_request)
     assert ("kept_line" in macro.changes_prompt_text(review)) == is_diff
-    assert ("機能レビュー式では背景の材料を集めない" in macro.background_prompt_text(review)) == (
-        not is_diff
-    )
+    background = macro.background_prompt_text(review)
+    assert ("ファイルのレビューでは背景の材料を集めない" in background) == (not is_diff)
     monkeypatch.setattr(generation, "resolve_review", lambda _name: review.id)
     monkeypatch.setattr(generation, "load_review", lambda _id: review)
     if is_diff:
-        # PR と範囲のレビューは差分レビュー式なので、export-reply が文を作れる
+        # PR と範囲のレビューは差分のレビューなので、export-reply が文を作れる
         return
-    with pytest.raises(ReviewError, match="差分レビュー式"):
+    with pytest.raises(ReviewError, match="差分のレビュー"):
         generation.generate("unused", "default", None, generation.ExportKind.REPLY, as_json=False)
 
 
@@ -279,7 +278,7 @@ def test_shards_are_built_from_the_three_source_shapes(
     )
     units = shards.build_units(review)
     assert [unit.path for unit in units] == ["edit.py"]
-    # 差分レビュー式は変更前後の差分、機能レビュー式は本文そのものを単位にする
+    # 差分のレビューは変更前後の差分、ファイルのレビューは本文そのものを単位にする
     assert ("-old_line" in units[0].text) == base
     assert ("=== edit.py ===" in units[0].text) == (not base)
     [shard] = shards.build_plan(review, GroupId.MICRO).shards

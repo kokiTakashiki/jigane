@@ -15,7 +15,7 @@ from jigane.groups.policy_runs import PolicyRole, PolicyShape, role_of
 from jigane.llm_runs import claude
 from jigane.policy_materials.missing import MissingMaterial
 from jigane.reviews.lifecycle import Review, ReviewError, load_review
-from jigane.skills import macro
+from jigane.skills import macro, macro_principles_run
 from jigane.skills.assembly import AssemblyInput
 
 DOCUMENT = "# 題\n\n## 1. 序論\n\n`Cart` を持つ。\n\n" + "長い段落。\n" * 400 + "末尾の一行。\n"
@@ -149,6 +149,14 @@ def test_estimate_uses_the_design_prompt(repo: Path, capsys: pytest.CaptureFixtu
     assert "設計書の全文" in estimate["note"]
     assert main(["estimate", "hello+shop-design", "macro", "--json"]) == EXIT_OK
     assert json.loads(capsys.readouterr().out)["materials_bytes"] == estimate["materials_bytes"]
+
+
+def test_policy_estimate_of_the_design_form_stays_one_run(repo: Path) -> None:
+    review = create_design_doc_review(repo, DOCUMENT_PATH)
+    assembly = AssemblyInput.load(review)
+    estimate = macro_principles_run.estimate_policy(assembly)
+    assert estimate == macro.estimate_macro(assembly)
+    assert estimate.to_record()["planned_invocations"] == 1
 
 
 def test_missing_document_stops_before_calling(repo: Path) -> None:

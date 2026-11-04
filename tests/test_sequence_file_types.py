@@ -4,7 +4,7 @@ from review_fakes import changed_segment
 
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.swift import SwiftAdapter
-from jigane.policy_materials.classes import _changed_types
+from jigane.policy_materials.type_deltas import _changed_types
 from jigane.sequence.index import TypeKey, build_index
 from jigane.sequence.indexes import Indexes
 

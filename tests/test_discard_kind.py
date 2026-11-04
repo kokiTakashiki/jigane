@@ -634,7 +634,7 @@ def test_history_read_keeps_a_legacy_nit_of_an_unknown_kind_and_other_findings(
     other = {
         "id": "F2",
         "severity": "warning",
-        "viewpoint": "V",
+        "viewpoint": "M2",
         "claim": "B。" + HANDOFF_NOTE,
         "discard_kind": "gone",
     }

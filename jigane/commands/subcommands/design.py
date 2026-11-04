@@ -1,4 +1,4 @@
-"""`jigane design`: 設計書を読む部品の入口。いまは突き合わせるファイルの推しだけを持つ。"""
+"""`jigane design`: 設計書を読む部品の入口。いまは突き合わせるファイルの候補だけを持つ。"""
 
 import argparse
 import json
@@ -59,11 +59,11 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     design = subparsers.add_parser("design", help="設計書を読みます")
     actions = design.add_subparsers(dest="action", required=True, metavar="<action>")
     suggest = actions.add_parser(
-        "suggest", help="設計書の名指しから、突き合わせるファイルを推します"
+        "suggest", help="設計書の名指しから、設計書のレビューで読むファイルの候補を挙げます"
     )
     suggest.add_argument("design", help="設計書（Markdown）のパスです")
     suggest.add_argument(
-        "--limit", type=_positive_int, default=DEFAULT_LIMIT, help="推しの上限です"
+        "--limit", type=_positive_int, default=DEFAULT_LIMIT, help="候補の上限です"
     )
     suggest.add_argument("--json", action="store_true")
     suggest.set_defaults(handler=run_suggest)
@@ -212,7 +212,7 @@ def _match_line(match: Match) -> str:
 
 
 def render(recommendation: Recommendation) -> str:
-    lines = ["推し"]
+    lines = ["候補"]
     for number, candidate in enumerate(recommendation.candidates, start=1):
         lines.extend(_candidate_lines(number, candidate))
     if not recommendation.candidates:
@@ -286,7 +286,7 @@ def to_dict(recommendation: Recommendation) -> dict[str, Any]:
 
 
 def run_suggest(args: argparse.Namespace, context: Context) -> int:
-    del context  # 推しは決定的な処理で、LLM を呼ばない
+    del context  # 候補は決定的な処理で、LLM を呼ばない
     document = parse_design(Path(args.design).read_text(encoding="utf-8"))
     root = repository.identify(Path.cwd()).root
     result = recommend(root, document, args.limit)

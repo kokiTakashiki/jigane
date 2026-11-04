@@ -31,7 +31,7 @@ def _nit_reason(candidate: DiscardedCandidate) -> DisclosedNitReason | OrdinaryN
 
 
 def test_conclude_schema_accepts_disclosed_at_on_discarded_items() -> None:
-    item = macro.conclude_schema()["properties"]["discarded"]["items"]
+    item = macro.CONCLUDE.schema()["properties"]["discarded"]["items"]
     field = item["properties"][KEY_DISCLOSED_AT]
     assert field["type"] == "string"
     assert field["minLength"] == 1

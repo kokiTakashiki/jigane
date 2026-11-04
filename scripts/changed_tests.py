@@ -2,7 +2,7 @@
 
 基準は、main（無ければ origin/main）との merge-base からの差分と、
 未コミットの変更（追跡外の新規ファイルを含む）。
-選ぶのは次の三つで、一つも無ければ pytest を走らせない。
+選ぶのは次の三つ。
 
 - 変わった tests/ 直下の test_*.py
 - 変わった jigane/ のモジュールに対応する tests/ 直下の試験。
@@ -10,7 +10,11 @@
 - 変わった jigane/ のモジュールを import している tests/ 直下の test_*.py。
   名前の対応では拾えない、別名の試験が使う側のモジュールを確かめるため
 
-テストの全体は走らせない。全体は push して CI で確かめる。
+これに加えて、`@pytest.mark.whole_tree`（モジュール全体なら `pytestmark`）の印が付いた試験を
+常に走らせる。印は、jigane/ の全モジュールや全ファイルを走査して全体の約束を縛る試験に付ける。
+変更したファイルに関わらず崩れるため、名前や import の対応では選べない。
+
+上の以外の試験は走らせない。全体は push して CI で確かめる。
 
 使い方: changed_tests.py [--list]
 --list は選んだ試験を出すだけで、pytest を走らせない。
@@ -27,6 +31,7 @@ from dev_launch import run_tool
 from jigane.git.process import CommandError, run_command
 
 _TOP_LEVEL_TEST_PARTS = 2  # tests とファイル名
+WHOLE_TREE_MARK = "whole_tree"
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE_BRANCHES = ("main", "origin/main")
@@ -138,6 +143,65 @@ def select_tests(changed: Iterable[str], root: Path) -> list[str]:
     return sorted(selected)
 
 
+def _is_whole_tree_mark(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == WHOLE_TREE_MARK
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+    )
+
+
+def whole_tree_marks(source: str) -> list[str] | None:
+    """試験のソースにある whole_tree の印の置き場。
+
+    None は印が無い。空の list はモジュール全体に印がある。
+    名前の入った list は、印の付いた最上位の試験関数の名前。
+    読めないソースは印なしとして扱う。構文の誤りは、その試験自身の実行が示す。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    names: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and _is_whole_tree_mark(node.value):
+            if any(
+                isinstance(target, ast.Name) and target.id == "pytestmark"
+                for target in node.targets
+            ):
+                return []
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+            _is_whole_tree_mark(decorator) for decorator in node.decorator_list
+        ):
+            names.append(node.name)
+    return names or None
+
+
+def whole_tree_targets(root: Path) -> list[str]:
+    """印の付いた試験の pytest への指定。ファイル全体か `ファイル::関数名`。"""
+    targets: list[str] = []
+    for candidate in sorted((root / "tests").glob("test_*.py")):
+        marks = whole_tree_marks(candidate.read_text(encoding="utf-8"))
+        relative = candidate.relative_to(root).as_posix()
+        if marks is None:
+            continue
+        if marks:
+            targets.extend(f"{relative}::{name}" for name in marks)
+        else:
+            targets.append(relative)
+    return targets
+
+
+def merge_targets(selected: list[str], whole_tree: list[str]) -> list[str]:
+    """選んだ試験に印の試験を足す。選んだファイルの中の印の試験は、ファイルごと走るので足さない。"""
+    selected_files = set(selected)
+    return [
+        *selected,
+        *(target for target in whole_tree if target.split("::")[0] not in selected_files),
+    ]
+
+
 def run_pytest(tests: list[str], root: Path) -> int:
     try:
         output = run_tool([sys.executable, "-m", "pytest", *tests], cwd=root)
@@ -152,11 +216,15 @@ def run_pytest(tests: list[str], root: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    tests = select_tests(changed_files(git_runner(ROOT)), ROOT)
+    selected = select_tests(changed_files(git_runner(ROOT)), ROOT)
+    whole_tree = whole_tree_targets(ROOT)
+    tests = merge_targets(selected, whole_tree)
     if not tests:
         print("変更に関わる試験は無い。pytest は走らせない。")
         return 0
-    print(f"変更に関わる試験 {len(tests)} 件:")
+    print(
+        f"変更に関わる試験 {len(selected)} 件、全体を縛る試験（whole_tree）{len(whole_tree)} 件:"
+    )
     for test in tests:
         print(f"  {test}")
     if "--list" in argv:

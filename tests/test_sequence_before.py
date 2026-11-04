@@ -150,11 +150,12 @@ def test_before_diagram_keeps_existing_calls_when_the_before_changed_set_is_empt
 
 def test_root_with_no_after_arrows_gets_the_after_empty_note() -> None:
     review = _Review(with_base=True)
-    _set_segments(review, [_segment("App.Quiet")])
+    # 呼び出しを一つも持たない入口。呼び出しを持つ入口は、変更に関わらなくても関係の矢印を持つ
+    _set_segments(review, [_segment("App.Plain")])
     review.repository_root = str(FIXTURES / "base")
     quiet = _by_root(
         build_model(review, None, None, 4, full=False, include_tests=False, side=Side.BOTH)
-    )["App.Quiet"]
+    )["App.Plain"]
     assert quiet["arrows"] == []
     assert quiet["before"] is None
     assert quiet["before_note"] == "変更後の図に呼び出しがありません"

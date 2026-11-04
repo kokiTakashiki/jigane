@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pr_support import commit_all, git
 from sarif_support import log, result, run, write
+from static_findings_support import MESSAGE, sarif_file, sarif_request_for
 
 from jigane.commands.subcommands.refresh import refresh_review
 from jigane.design.review_documents import create_design_doc_review
@@ -15,20 +16,18 @@ from jigane.static_analysis.intake import (
     NO_STATIC,
     STATIC_FINDINGS_FILE,
     ImportedStatic,
-    SarifRequest,
     StaleStatic,
     StoredStatic,
     import_sarif,
+    load_static_findings,
     read_static_findings,
-    sarif_request,
     select_for_refresh,
     static_to_save,
     static_touches,
     static_warnings,
 )
+from jigane.static_analysis.models import DropReason
 from jigane.storage.store import ReviewId
-
-MESSAGE = "UNIQUE-FINDING-MESSAGE-7731"
 
 
 @pytest.fixture
@@ -36,18 +35,6 @@ def repo(repo_template: dict[str, str], tmp_path: Path) -> dict[str, str]:
     root = tmp_path / "work"
     shutil.copytree(repo_template["root"], root, symlinks=True)
     return {**repo_template, "root": str(root)}
-
-
-def _sarif(root: Path, name: str, *, revision: str | None, level: str = "error") -> Path:
-    extra: dict[str, object] = {}
-    if revision is not None:
-        extra["versionControlProvenance"] = [{"revisionId": revision}]
-    document = log(run([result("edit.py", 2, MESSAGE, level=level)], **extra))
-    return write(root.parent, name, document)
-
-
-def _request(root: Path, path: Path) -> SarifRequest | None:
-    return sarif_request([path], None, root)
 
 
 def _static_ids(review_id: ReviewId) -> set[str]:
@@ -58,18 +45,18 @@ def _static_ids(review_id: ReviewId) -> set[str]:
 
 def test_revision_id_mismatch_stops_the_import(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision="0" * 40)
+    path = sarif_file(root, "a.sarif", revision="0" * 40)
     with pytest.raises(ReviewError, match="revisionId"):
         create_range_review(
-            root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+            root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
         )
 
 
 def test_missing_revision_id_warns_and_stores_the_head_commit(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=None)
+    path = sarif_file(root, "a.sarif", revision=None)
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     assert any("revisionId が無く" in warning for warning in review.warnings)
     stored = read_static_findings(review.id.directory())
@@ -80,9 +67,9 @@ def test_missing_revision_id_warns_and_stores_the_head_commit(repo: dict[str, st
 
 def test_static_findings_file_version_1_reads_back(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     raw = json.loads((review.id.directory() / STATIC_FINDINGS_FILE).read_text(encoding="utf-8"))
     assert raw["format"] == 1
@@ -93,6 +80,43 @@ def test_static_findings_file_version_1_reads_back(repo: dict[str, str]) -> None
     assert [finding.id for finding in stored.findings] == ["S1"]
 
 
+def test_stored_drop_reasons_keep_the_json_strings_and_read_back_as_drop_reason(
+    repo: dict[str, str],
+) -> None:
+    root = Path(repo["root"])
+    document = log(
+        run(
+            [
+                result("edit.py", 2, MESSAGE, level="error"),
+                result("https://example.invalid/a.py", 1, "remote", level="error"),
+            ],
+            versionControlProvenance=[{"revisionId": repo["head"]}],
+        )
+    )
+    path = write(root.parent, "drop.sarif", document)
+    review = create_range_review(
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
+    )
+    raw = json.loads((review.id.directory() / STATIC_FINDINGS_FILE).read_text(encoding="utf-8"))
+    assert raw["dropped"] == {"unsupported_scheme": 1}
+    stored = read_static_findings(review.id.directory())
+    assert stored is not None
+    assert dict(stored.dropped) == {DropReason.UNSUPPORTED_SCHEME: 1}
+    assert all(isinstance(reason, DropReason) for reason in stored.dropped)
+
+
+def test_unknown_stored_drop_reason_is_a_review_error() -> None:
+    raw = {
+        "format": 1,
+        "analyzed_commit": "0" * 40,
+        "files": [],
+        "dropped": {"no_such_reason": 1},
+        "findings": [],
+    }
+    with pytest.raises(ReviewError, match=STATIC_FINDINGS_FILE):
+        load_static_findings(raw)
+
+
 def test_review_without_sarif_writes_no_file(repo: dict[str, str]) -> None:
     review = create_range_review(Path(repo["root"]), "main..feature", "mine")
     assert not (review.id.directory() / STATIC_FINDINGS_FILE).exists()
@@ -101,9 +125,9 @@ def test_review_without_sarif_writes_no_file(repo: dict[str, str]) -> None:
 
 def test_new_range_with_sarif_raises_a_segment(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     assert _static_ids(review.id) == {"S1"}
     segments = json.loads((review.id.directory() / "map.json").read_text(encoding="utf-8"))[
@@ -114,9 +138,9 @@ def test_new_range_with_sarif_raises_a_segment(repo: dict[str, str]) -> None:
 
 def test_refresh_at_the_same_commit_overlays_again(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     refreshed = refresh_review(review.id)
     assert _static_ids(refreshed.review.id) == {"S1"}
@@ -124,9 +148,9 @@ def test_refresh_at_the_same_commit_overlays_again(repo: dict[str, str]) -> None
 
 def test_refresh_after_a_new_commit_warns_and_does_not_overlay(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     (root / "extra.py").write_text("def delta():\n    return 4\n", encoding="utf-8")
     commit_all(root, "add delta")
@@ -140,9 +164,9 @@ def test_refresh_after_a_new_commit_warns_and_does_not_overlay(repo: dict[str, s
 
 def test_refresh_with_sarif_replaces_and_renumbers(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    first = _sarif(root, "a.sarif", revision=repo["head"])
+    first = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, first))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, first))
     )
     (root / "extra.py").write_text("def delta():\n    return 4\n", encoding="utf-8")
     new_head = commit_all(root, "add delta")
@@ -157,7 +181,7 @@ def test_refresh_with_sarif_replaces_and_renumbers(repo: dict[str, str]) -> None
             )
         ),
     )
-    refreshed = refresh_review(review.id, DeclaredInputs(sarif=_request(root, second)))
+    refreshed = refresh_review(review.id, DeclaredInputs(sarif=sarif_request_for(root, second)))
     stored = read_static_findings(refreshed.review.id.directory())
     assert stored is not None
     assert stored.analyzed_commit == new_head
@@ -166,9 +190,9 @@ def test_refresh_with_sarif_replaces_and_renumbers(repo: dict[str, str]) -> None
 
 def test_finding_message_is_not_in_the_policy_group_materials(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     sections = policy_sections(review)
     text = "\n".join(
@@ -187,14 +211,14 @@ def test_refresh_of_a_design_doc_review_refuses_sarif(repo: dict[str, str]) -> N
     (root / "docs").mkdir(exist_ok=True)
     (root / "docs" / "plan.md").write_text("# 題\n\n## 1. 序論\n\n本文。\n", encoding="utf-8")
     review = create_design_doc_review(root, "docs/plan.md")
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     with pytest.raises(ReviewError, match="設計書のレビュー"):
-        refresh_review(review.id, DeclaredInputs(sarif=_request(root, path)))
+        refresh_review(review.id, DeclaredInputs(sarif=sarif_request_for(root, path)))
 
 
 def test_static_selection_kinds_decide_overlay_warnings_and_save(repo: dict[str, str]) -> None:
     root = Path(repo["root"])
-    request = _request(root, _sarif(root, "a.sarif", revision=repo["head"]))
+    request = sarif_request_for(root, sarif_file(root, "a.sarif", revision=repo["head"]))
     assert request is not None
     imported = import_sarif(request, repo["head"])
     assert isinstance(imported, ImportedStatic)

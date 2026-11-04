@@ -180,10 +180,14 @@ def test_run_pytest_reraises_when_pytest_did_not_start(
 
 
 def patch_main(
-    monkeypatch: pytest.MonkeyPatch, tests: list[str], run_pytest: Callable[..., int]
+    monkeypatch: pytest.MonkeyPatch,
+    tests: list[str],
+    run_pytest: Callable[..., int],
+    whole_tree: list[str] | None = None,
 ) -> None:
     monkeypatch.setattr(changed_tests, "changed_files", lambda _git: set())
     monkeypatch.setattr(changed_tests, "select_tests", lambda _changed, _root: tests)
+    monkeypatch.setattr(changed_tests, "whole_tree_targets", lambda _root: whole_tree or [])
     monkeypatch.setattr(changed_tests, "run_pytest", run_pytest)
 
 
@@ -219,3 +223,54 @@ def test_main_returns_pytest_failure_code(monkeypatch: pytest.MonkeyPatch) -> No
     patch_main(monkeypatch, ["tests/test_a.py"], fake_run_pytest)
     assert changed_tests.main([]) == 5
     assert calls == [["tests/test_a.py"]]
+
+
+def test_whole_tree_marks_are_read_from_function_and_module_forms() -> None:
+    function_form = (
+        "import pytest\n\n@pytest.mark.whole_tree\ndef test_a() -> None: ...\n\n"
+        "def test_b() -> None: ...\n"
+    )
+    module_form = (
+        "import pytest\n\npytestmark = pytest.mark.whole_tree\n\ndef test_a() -> None: ...\n"
+    )
+    assert changed_tests.whole_tree_marks(function_form) == ["test_a"]
+    assert changed_tests.whole_tree_marks(module_form) == []
+    assert changed_tests.whole_tree_marks("def test_a() -> None: ...\n") is None
+    assert changed_tests.whole_tree_marks("@pytest.mark.slow\ndef test_a(): ...\n") is None
+    assert changed_tests.whole_tree_marks("def (") is None
+
+
+def test_whole_tree_targets_list_marked_tests_of_every_file(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "tests/test_a.py",
+        "import pytest\n\n@pytest.mark.whole_tree\ndef test_x(): ...\n",
+    )
+    write(tmp_path, "tests/test_b.py", "import pytest\n\npytestmark = pytest.mark.whole_tree\n")
+    write(tmp_path, "tests/test_c.py", "def test_y(): ...\n")
+    assert changed_tests.whole_tree_targets(tmp_path) == [
+        "tests/test_a.py::test_x",
+        "tests/test_b.py",
+    ]
+
+
+def test_merge_targets_drops_marked_tests_of_files_already_selected() -> None:
+    merged = changed_tests.merge_targets(
+        ["tests/test_a.py"],
+        ["tests/test_a.py::test_x", "tests/test_b.py::test_y", "tests/test_c.py"],
+    )
+    assert merged == ["tests/test_a.py", "tests/test_b.py::test_y", "tests/test_c.py"]
+
+
+def test_main_runs_whole_tree_tests_even_when_nothing_is_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run_pytest(tests: list[str], _root: Path) -> int:
+        calls.append(tests)
+        return 0
+
+    patch_main(monkeypatch, [], fake_run_pytest, whole_tree=["tests/test_w.py::test_x"])
+    assert changed_tests.main([]) == 0
+    assert calls == [["tests/test_w.py::test_x"]]

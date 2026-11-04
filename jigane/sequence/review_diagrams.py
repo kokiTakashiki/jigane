@@ -130,7 +130,7 @@ def _assemble(
         )
     adapter = _required_adapter(review)
     tree_root = Path(review.repository_root)
-    # 差分レビュー式は変更後のツリー全体を、機能レビュー式は対象のファイルを索引にする。
+    # 差分のレビューは変更後のツリー全体を、ファイルのレビューは対象のファイルを索引にする。
     # 索引は口を持つ言語のファイルだけを読む
     paths = (
         walk_tree_files(tree_root, tree_root)
@@ -209,7 +209,13 @@ def _attach_before(
         # 新しいメソッドを足す PR では変更前の C が空に近く、C だけでは既存の流れが消える
         targets = {**changed, **_after_targets(diagram, index.callables.values())}
         before = build_diagrams(
-            index, RootSelection(targets, [root]), [], depth, full=full, roots=[root]
+            index,
+            RootSelection(targets, [root]),
+            [],
+            depth,
+            full=full,
+            roots=[root],
+            relations=False,
         )
         found = before["diagrams"][0]
         if not found["arrows"]:
@@ -242,7 +248,7 @@ def build_model(
 
 def review_sequences(review: Review) -> SequenceFigure:
     """入口ごとの流れと、図を出せなかった理由などの一文の一覧を持つ図。"""
-    # 変更前のツリーがある差分レビュー式だけが、変更前と変更後の二つのパネルを持てる
+    # 変更前のツリーがある差分のレビューだけが、変更前と変更後の二つのパネルを持てる
     side = Side.BOTH if review.base_tree_path is not None else Side.AFTER
     try:
         model, changed_count = _assemble(

@@ -52,7 +52,7 @@ def _launch(directory: Path, fake: FakeClaude, monkeypatch: pytest.MonkeyPatch) 
     claude.run(make_invocation(directory))
 
 
-@pytest.mark.parametrize("output", ["2.1.257 (Claude Code)\n", "2.1.292 (Claude Code)\n"])
+@pytest.mark.parametrize("output", ["2.1.308 (Claude Code)\n", "2.1.309 (Claude Code)\n"])
 def test_supported_version_launches_the_same_resolved_binary(
     directory: Path, monkeypatch: pytest.MonkeyPatch, output: str
 ) -> None:
@@ -71,9 +71,9 @@ def test_supported_version_launches_the_same_resolved_binary(
 @pytest.mark.parametrize(
     ("output", "returncode", "expected"),
     [
-        ("2.1.256 (Claude Code)\n", 0, "Claude Code 2.1.256 は"),
+        ("2.1.307 (Claude Code)\n", 0, "Claude Code 2.1.307 は"),
         ("Claude Code\n", 0, "版を読み取れない"),
-        ("2.1.292 (Claude Code)\n", 1, "版を読み取れない"),
+        ("2.1.308 (Claude Code)\n", 1, "版を読み取れない"),
     ],
 )
 def test_old_or_unreadable_version_stops_before_launch(
@@ -87,7 +87,7 @@ def test_old_or_unreadable_version_stops_before_launch(
     with pytest.raises(CommandError) as raised:
         _launch(directory, fake, monkeypatch)
     assert expected in raised.value.stderr
-    assert "2.1.257 以降" in raised.value.stderr
+    assert "2.1.308 以降" in raised.value.stderr
     assert [command[1:] for command in fake.commands] == [["--version"]]
     # 起動の失敗と同じ分類で利用者に示す
     launch_failure = CommandError([NAME, "-p"], "起動できませんでした")

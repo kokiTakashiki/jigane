@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 from sarif_support import log, result, run, write
-from test_static_findings_import import MESSAGE, _request, _sarif, repo  # noqa: F401 pytest が fixture を名前で引くため import が要る
+from static_findings_support import MESSAGE, sarif_file, sarif_request_for
+from test_static_findings_import import (
+    repo,  # noqa: F401 pytest が fixture を名前で引くため import が要る
+)
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -13,9 +16,9 @@ from jigane.storage.store import ReviewId
 
 def _with_sarif_review(repo: dict[str, str]) -> ReviewId:  # noqa: F811 import した fixture の値を受ける
     root = Path(repo["root"])
-    path = _sarif(root, "a.sarif", revision=repo["head"])
+    path = sarif_file(root, "a.sarif", revision=repo["head"])
     return create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     ).id
 
 
@@ -82,7 +85,7 @@ def test_show_counts_outside_and_dropped_and_keeps_one_line_per_finding(
     )
     path = write(root.parent, "mixed.sarif", document)
     review = create_range_review(
-        root, "main..feature", "mine", DeclaredInputs(sarif=_request(root, path))
+        root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
     capsys.readouterr()
     assert main(["show", str(review.id)]) == EXIT_OK

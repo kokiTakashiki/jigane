@@ -35,13 +35,17 @@ def reserved_settings(calls: list[claude.Invocation]) -> set[tuple[str, str | No
     return {(c.model, c.effort) for c in calls}
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_macro_defaults_reach_every_invocation(project: Path) -> None:
     review = review_of(project)
     fake = MacroFake([discovered("M2")])
     arguments = ["run", str(review.id), "macro"]
     assert main(arguments, invoke=fake) == EXIT_OK
-    assert len(fake.calls) == 1
-    assert settings(fake.calls) == {("claude-sonnet-5-5", "high", 0.5)}
+    assert len(fake.calls) == 5
+    assert settings(fake.calls) == {
+        ("claude-sonnet-5-5", "high", 0.36),
+        ("claude-haiku-5-5", "high", 0.02),
+    }
     runs = json.loads((review.id.directory() / "runs.json").read_text("utf-8"))
     assert runs["macro"]["model"] == "claude-sonnet-5-5"
     assert runs["macro"]["effort"] == "high"
@@ -120,7 +124,7 @@ def test_command_carries_effort(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("group", "model", "effort", "budget"),
     [
-        ("macro", "claude-sonnet-5-5", "high", 0.5),
+        ("macro", "claude-sonnet-5-5", "high", 0.36),
         ("micro", "claude-sonnet-5-5", None, 0.5),
         ("security", "claude-sonnet-5-5", None, 0.5),
     ],
@@ -153,8 +157,19 @@ def test_run_help_is_built_from_defaults(capsys: pytest.CaptureFixture[str]) -> 
     out = "".join(capsys.readouterr().out.split())
     assert "方針はclaude-sonnet-5-5" in out
     assert "方針はhigh、実装は渡さない、セキュリティは渡さない" in out
-    assert "方針は0.5USD、実装は0.5USD、セキュリティは0.5USD" in out
-    assert "方針は起動が1回なので、この値が実行全体の目安になります" in out
+    assert "方針は0.36USD、実装は0.5USD、セキュリティは0.5USD" in out
+    assert (
+        "方針の図の形は、既定では図の起動に0.36USD、"
+        "原則の起動に1本0.02USD（P1〜P4）で、和は0.44USDです。"
+        "原則の起動は、その原則を問える図の形があるときだけ走ります。"
+        "この値を渡すと図と原則のすべての起動の上限になり、実行全体の目安は最大でこの値の5倍です"
+    ) in out
+    assert (
+        "方針の図の形の原則の起動は既定でP1〜P4がclaude-haiku-5-5です。"
+        "`--model`を渡すと図と原則のすべての起動がそのモデルで走り、"
+        "上限はそのままなので、原則の起動が上限で見送られることがあります"
+    ) in out
+    assert "設計書の形は起動が1回なので、この値が実行全体の目安になります" in out
     assert "上限の目安" in out
     assert "超えることがあります" in out
     assert "方針はxhigh" not in out

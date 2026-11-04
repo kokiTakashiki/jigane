@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from jigane.git.tree_files import read_tree_bytes
+from jigane.git.tree_files import read_tree_bytes, walk_tree_files
 from jigane.languages import registry
 from jigane.languages.base import ImportAdapter, parse
 from jigane.reviews.lifecycle import Review
@@ -56,6 +56,27 @@ def _usages(root: Path, paths: Iterable[str]) -> _Usages:
     return usages
 
 
+def still_used_elsewhere(
+    review: Review, keys: set[tuple[str, str]]
+) -> dict[tuple[str, str], list[str]]:
+    """変更したファイルから消えた技術を、変更後の木の他のファイルが使い続けている場所。
+
+    keys は (言語の名前, 技術の名前)。使われていない技術は結果に入れない。
+    モデル（JSON に出す形）には載せず、資料が必要なときにだけ木を読む。
+    """
+    if not keys:
+        return {}
+    root = Path(review.repository_root)
+    changed = set(review.paths)
+    others = [
+        path
+        for path in walk_tree_files(root, root, skip_hidden=True, skip_nested_repositories=True)
+        if path not in changed
+    ]
+    usages = _usages(root, others)
+    return {key: sorted(usages[key].lines) for key in keys if key in usages}
+
+
 def _change(after: _Usage | None, before: _Usage | None) -> str:
     if before is None:
         return ADDED
@@ -83,7 +104,7 @@ def _evidence(
 
 
 def build_model(review: Review) -> dict[str, Any]:
-    """技術の表を返す。変更前のツリーが無い機能レビュー式では before と change が None。"""
+    """技術の表を返す。変更前のツリーが無いファイルのレビューでは before と change が None。"""
     after_root = Path(review.repository_root)
     before_root = review.base_tree_path
     after = _usages(after_root, review.paths)
@@ -132,7 +153,7 @@ def build_model(review: Review) -> dict[str, Any]:
     )
     model: dict[str, Any] = {
         "technologies": technologies,
-        # 変更前のツリーが無い機能レビュー式では None
+        # 変更前のツリーが無いファイルのレビューでは None
         "manifest_changes": (
             None
             if before_dependencies is None

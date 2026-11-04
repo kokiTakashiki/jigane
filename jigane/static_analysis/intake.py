@@ -8,7 +8,7 @@ from typing import Any
 
 from jigane.git.repository import identify_git
 from jigane.judgment_map.classification import FindingTouch
-from jigane.static_analysis.models import SarifFileRecord, SarifImport, StaticFinding
+from jigane.static_analysis.models import DropReason, SarifFileRecord, SarifImport, StaticFinding
 from jigane.static_analysis.reader import SarifError, read_sarif
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import Upgrade, upgrade_mapping
@@ -51,7 +51,7 @@ class StaticFindingsStore:
 
     analyzed_commit: str
     files: tuple[SarifFileRecord, ...]
-    dropped: Mapping[str, int]
+    dropped: Mapping[DropReason, int]
     findings: tuple[StaticFinding, ...]
 
     def touches(self) -> list[FindingTouch]:
@@ -71,7 +71,7 @@ class StaticFindingsStore:
             "format": STATIC_FINDINGS_FORMAT,
             "analyzed_commit": self.analyzed_commit,
             "files": [item.model_dump(mode="json") for item in self.files],
-            "dropped": dict(self.dropped),
+            "dropped": {reason.value: count for reason, count in self.dropped.items()},
             "findings": [item.model_dump(mode="json") for item in self.findings],
         }
 
@@ -160,7 +160,7 @@ def import_sarif(request: SarifRequest, commit: str) -> ImportedStatic:
     store = StaticFindingsStore(
         commit,
         imported.files,
-        {str(reason): count for reason, count in imported.dropped.items()},
+        dict(imported.dropped),
         imported.findings,
     )
     return ImportedStatic(store, tuple(warnings))
@@ -201,7 +201,8 @@ def load_static_findings(raw: Mapping[str, Any]) -> StaticFindingsStore:
         return StaticFindingsStore(
             stored["analyzed_commit"],
             tuple(SarifFileRecord.model_validate(item) for item in stored["files"]),
-            dict(stored["dropped"]),
+            # 知らない理由は ValueError になり、下の except で他の欄と同じく ReviewError にする
+            {DropReason(reason): count for reason, count in stored["dropped"].items()},
             tuple(StaticFinding.model_validate(item) for item in stored["findings"]),
         )
     except (KeyError, TypeError, ValueError) as error:

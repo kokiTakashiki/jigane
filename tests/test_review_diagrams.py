@@ -182,19 +182,22 @@ def test_csharp_review_returns_sequences_per_entry(
     )
     result = diagrams_of(review)
     sequences = _sequence_figure_of(result).flows
-    # 呼び出しの多い Runner.Solo（3 本）が、Runner.Run（2 本）より先に来る
-    assert [s.title.split("（")[0] for s in sequences] == ["Runner.Solo", "Runner.Run"]
-    # 機能レビュー式は一つのパネルで、注記は無い
+    # 呼び出しの多い入口が先に来る。変更に関わらない呼び出しだけの入口と、
+    # 呼び先を解けない呼び出しを持つ入口も、入口の直接の呼び出しを関係の矢印にして図に出る
+    assert [s.title.split("（")[0] for s in sequences] == [
+        "Rules.Rule2",
+        "Rules.Lambdas",
+        "Rules.Overloads",
+        "Rules.Rule1",
+        "Runner.Solo",
+        "Runner.Run",
+    ]
+    # ファイルのレビューは一つのパネルで、注記は無い
     assert all(s.note is None for s in sequences)
     assert all([p.title for p in s.panels] == ["シーケンス図"] for s in sequences)
     assert all(s.panels[0].mermaid.startswith("sequenceDiagram") for s in sequences)
-    assert all("Chain.cs" in s.title for s in sequences)
-    notes = _sequence_figure_of(result).notes
-    # 変更に届く呼び出しの無い 3 件と、受け手の型を解けない呼び出しを持つ 1 件に分かれる
-    assert notes[0].material.startswith("変更に関わる呼び出しの無い入口 3 件は図にしない: Rules.")
-    assert notes[1].material.startswith(
-        "呼び先を解けない呼び出しがある入口 1 件は図にしない: Rules."
-    )
+    assert any("Chain.cs" in s.title for s in sequences)
+    assert _sequence_figure_of(result).notes == ()
 
 
 def test_csharp_review_without_entries_says_so(

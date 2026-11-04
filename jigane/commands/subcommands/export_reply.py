@@ -10,7 +10,7 @@ from jigane.commands.generation import ExportKind, generate
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     reply = subparsers.add_parser(
-        "export-reply", help="最終的な指摘から返信の文面を作ります（差分レビュー式）"
+        "export-reply", help="最終的な指摘から返信の文面を作ります（差分のレビュー）"
     )
     reply.add_argument("review")
     reply.add_argument("--template", required=True)

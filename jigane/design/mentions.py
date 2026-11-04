@@ -55,7 +55,7 @@ _VIA_PRIORITY = {
     MentionVia.TABLE_CELL: 2,
     MentionVia.PROSE: 3,
 }
-# コードスパンの外から拾った出どころ。パスの形の語は候補にすぎず、実在の確認を推しの側で行う
+# コードスパンの外から拾った出どころ。パスの形の語は候補にすぎず、実在の確認は候補を挙げる側で行う
 PROSE_VIAS = frozenset({MentionVia.TABLE_CELL, MentionVia.PROSE})
 
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")

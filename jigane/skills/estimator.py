@@ -3,7 +3,7 @@
 from typing import assert_never
 
 from jigane.groups.definitions import GroupId
-from jigane.skills import macro, micro, security
+from jigane.skills import macro_principles_run, micro, security
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import Estimate
 from jigane.skills.mcp import NO_MCP, McpSelection
@@ -12,7 +12,7 @@ from jigane.skills.mcp import NO_MCP, McpSelection
 def estimate_of(assembly: AssemblyInput, group: GroupId, mcp: McpSelection = NO_MCP) -> Estimate:
     match group:
         case GroupId.MACRO:
-            return macro.estimate_macro(assembly)
+            return macro_principles_run.estimate_policy(assembly)
         case GroupId.MICRO:
             return micro.estimate_micro(assembly, group)
         case GroupId.SECURITY:

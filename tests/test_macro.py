@@ -5,7 +5,15 @@ from typing import Any
 
 import jsonschema
 import pytest
-from fakes import RECORD, RECORD_ROW, MacroFake, discovered, settings_for, with_budget
+from fakes import (
+    RECORD,
+    RECORD_ROW,
+    MacroFake,
+    _single_viewpoint,
+    discovered,
+    settings_for,
+    with_budget,
+)
 from legacy_schemas import load_finding_schema
 from review_fakes import with_map, with_range_source
 
@@ -26,7 +34,7 @@ from jigane.reviews.lifecycle import (
     Review,
     create_feature_review,
 )
-from jigane.skills import input_budget, macro, pipeline
+from jigane.skills import input_budget, macro, macro_principles_run, pipeline
 from jigane.skills.assembly import AssemblyInput
 from jigane.technology_list import materials as technology_materials
 from jigane.technology_list import tables as technology_tables
@@ -170,7 +178,7 @@ def test_estimate(project: Path) -> None:
     assert estimate["materials_bytes"] == prompt_bytes
     assert estimate["planned_invocations"] == 1
     assert estimate["shape"] == "diagram"
-    assert estimate["discovery_input_tokens"] == claude.estimate_input_tokens(prompt_bytes)
+    assert estimate["discovery_input_tokens"] == claude.billed_input_tokens(prompt_bytes)
     assert estimate["past_run"] is None
     assert "file_bytes" not in estimate
     assert "cached_input_multiplier" not in estimate
@@ -178,18 +186,19 @@ def test_estimate(project: Path) -> None:
     assert "materials_bytes_by_role" not in estimate
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_cli_estimate(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     create_feature_review(project, ["src"], "p")
     assert main(["estimate", "shop:p", "macro", "--json"]) == EXIT_OK
     data = json.loads(capsys.readouterr().out)
-    assert data["max_budget_usd_per_call"] == 0.5
-    assert data["planned_invocations"] == 1
+    assert data["max_budget_usd_per_call"] == 0.36
+    assert data["planned_invocations"] == 5
     assert data["shape"] == "diagram"
     assert "estimated_input_tokens_with_cache" not in data
     assert main(["estimate", "shop:p", "macro"]) == EXIT_OK
     out = capsys.readouterr().out
     assert "入力トークンの見積もり（素朴な推定）" in out
-    assert "0.5 USD" in out
+    assert "0.36 USD" in out
     # 倍率の行（×25）は出ない
     assert "×" not in out
     assert "キャッシュ込み" not in out
@@ -209,16 +218,17 @@ def test_policy_shape_argument_is_an_argument_error(
     assert fake.calls == []
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_cli_run_and_show(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     review = create_feature_review(project, ["src"], "p")
     key = review.map_kind.to_dict()["regions"][0]["key"]
     with_region = {**discovered("M2"), "judgment_region": key}
     fake = MacroFake([with_region, discovered("M4")])
     assert main(["run", "shop:p", "macro"], invoke=fake) == EXIT_OK
-    assert len(fake.calls) == 1
-    assert fake.calls[0].budget.cli_usd == 0.5
-    assert fake.calls[0].model == "claude-sonnet-5-5"
-    assert fake.calls[0].effort == "high"
+    assert len(fake.calls) == 5
+    assert fake.diagram_calls[0].budget.cli_usd == 0.36
+    assert fake.diagram_calls[0].model == "claude-sonnet-5-5"
+    assert fake.diagram_calls[0].effort == "high"
     out = capsys.readouterr().out
     assert "実行全体の金額" in out
     assert "所要 " in out
@@ -262,7 +272,7 @@ def test_cli_run_per_call_flag_and_totals(
     assert fake.calls[0].budget.cli_usd == 2.0
     invocations = output["run"]["invocations"]
     assert output["totals"]["invocation_count"] == len(invocations)
-    assert output["totals"]["cost_usd"] == sum(i["cost_usd"] for i in invocations)
+    assert output["totals"]["cost_usd"] == pytest.approx(sum(i["cost_usd"] for i in invocations))
     with pytest.raises(SystemExit):
         main(["run", "shop:p", "macro", "--max-budget-usd", "2"], invoke=fake)
 
@@ -335,9 +345,9 @@ def test_prompt_without_regions_says_so(project: Path) -> None:
 
 
 def test_discovery_schema_restricts_viewpoint_to_macro(project: Path) -> None:
-    schema = macro.conclude_schema()
+    schema = macro.CONCLUDE.schema()
     assert schema["properties"]["findings"]["items"]["properties"]["viewpoint"] == {
-        "enum": ["M0", "M1", "M2", "M3", "M4", "M5", "M6"],
+        "enum": ["M0", "M1", "M2", "M3", "M4", "M5", "M6", "M7"],
         "type": "string",
     }
     review = create_feature_review(project, ["src"], "q")
@@ -372,6 +382,7 @@ def test_verification_is_not_run(project: Path) -> None:
     assert [f["adjudication"] for f in saved["groups"]["macro"]] == [None, None]
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_show_json_has_no_adjudication_and_run_record(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -382,7 +393,7 @@ def test_show_json_has_no_adjudication_and_run_record(
     assert main(["show", "shop:p", "macro", "--json"]) == EXIT_OK
     shown = json.loads(capsys.readouterr().out)
     assert shown["findings"][0]["adjudication"] is None
-    assert shown["run"]["invocation_count"] == 1
+    assert shown["run"]["invocation_count"] == 5
     assert shown["run"]["model"]
     assert shown["run"]["elapsed_s"] >= 0
 
@@ -426,7 +437,7 @@ def test_technology_materials_show_deployment_minimum(project: Path) -> None:
 @pytest.mark.usefixtures("project")
 def test_m6_finding_passes_schema() -> None:
     item = {**discovered("M6"), "in_scope": True, "scope_reason": "r"}
-    macro.lenient_conclude_model().model_validate(
+    macro.CONCLUDE.lenient_model().model_validate(
         {"findings": [item], "merged": [], "discarded": []}
     )
 
@@ -614,20 +625,21 @@ def test_in_scope_evidence_stays_must_read(project: Path) -> None:
 
 
 def test_conclude_schema_requires_in_scope() -> None:
-    item = macro.conclude_schema()["properties"]["findings"]["items"]
+    item = macro.CONCLUDE.schema()["properties"]["findings"]["items"]
     assert "in_scope" in item["required"]
     assert "scope_reason" in item["required"]
     assert item["properties"]["in_scope"] == {"type": "boolean"}
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_run_passes_no_tools_and_one_call_with_turn_limit(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
     fake = MacroFake([discovered("M4")])
     assert main(["run", "shop:p", "macro", "--json"], invoke=fake) == EXIT_OK
-    assert len(fake.calls) == 1
-    call = fake.calls[0]
+    assert len(fake.calls) == 5
+    call = fake.diagram_calls[0]
     assert call.tools == ()
-    assert call.json_schema == macro.conclude_schema()
+    assert call.json_schema == macro.CONCLUDE.schema()
     assert call.max_turns == DIAGRAM_SHAPE.max_turns
     assert "--max-turns" in claude.build_command(call)
 
@@ -688,17 +700,20 @@ def test_run_stops_for_model_without_price_using_highest_price(project: Path) ->
     )
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_run_prints_assumed_price_line_for_model_without_price(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     create_feature_review(project, ["src"], "p")
     fake = MacroFake([discovered("M4")])
-    assert main(["run", "shop:p", "macro", "--model", "m"], invoke=fake) == EXIT_OK
+    # 表に無いモデルには最高の単価が当たり、既定の上限では見送られるため、上限を上げて走らせる
+    arguments = ["run", "shop:p", "macro", "--model", "m", "--max-budget-usd-per-call", "5"]
+    assert main(arguments, invoke=fake) == EXIT_OK
     err = capsys.readouterr().err
     assert (
-        "m は単価の表に無いため、表の最高の単価（10 USD / 100 万トークン）で見積もりました" in err
+        "m は単価の表に無いため、表の最高の単価（20 USD / 100 万トークン）で見積もりました" in err
     )
-    assert len(fake.calls) == 1
+    assert len(fake.calls) == 5
 
 
 def test_estimate_json_reports_assumed_price_for_model_without_price(
@@ -711,11 +726,11 @@ def test_estimate_json_reports_assumed_price_for_model_without_price(
     assert main([*arguments, "--json"]) == EXIT_OK
     data = json.loads(capsys.readouterr().out)
     assert data["input_price_assumed"] is True
-    assert data["input_price_usd_per_million_tokens"] == 10.0
+    assert data["input_price_usd_per_million_tokens"] == 20.0
     assert data["input_cost_usd"] > 0
     assert data["exceeds_budget"] is True
     assert main(arguments) == EXIT_OK
-    assert "表の最高の単価（10 USD / 100 万トークン）で見積もりました" in capsys.readouterr().out
+    assert "表の最高の単価（20 USD / 100 万トークン）で見積もりました" in capsys.readouterr().out
 
 
 def test_cli_run_reports_input_budget_failure(
@@ -726,7 +741,7 @@ def test_cli_run_reports_input_budget_failure(
     code = main(["run", "shop:p", "macro", "--max-budget-usd-per-call", "0.0001"], invoke=fake)
     assert code == EXIT_PROCESSING_FAILURE
     assert fake.calls == []
-    assert "入力だけで 1 回の起動の上限に達する見込み" in capsys.readouterr().err
+    assert "入力と出力の見込みで 1 回の起動の上限に達する見込み" in capsys.readouterr().err
 
 
 def test_estimate_json_marks_budget_excess(
@@ -787,3 +802,206 @@ def test_prompt_declaration_has_no_heading_above_the_section(project: Path) -> N
     marks = [line.split()[0] for line in body.splitlines() if line.startswith("#")]
     levels = [len(mark) for mark in marks]
     assert levels == [4, 5]
+
+
+@pytest.mark.usefixtures("all_principle_shapes")
+def test_principle_runs_one_launch_per_principle_with_single_viewpoint(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4"), discovered("P1")])
+    assert main(["run", "shop:p", "macro", "--json"], invoke=fake) == EXIT_OK
+    assert len(fake.diagram_calls) == 1
+    assert len(fake.principle_calls) == 4
+    assert "P1" not in str(fake.diagram_calls[0].json_schema)
+    assert sorted(str(_single_viewpoint(call)) for call in fake.principle_calls) == [
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+    ]
+    shown = json.loads(capsys.readouterr().out)
+    assert {item["viewpoint"] for item in shown["findings"]} == {"M4", "P1"}
+    principle_rows = [r for r in shown["run"]["invocations"] if r["role"] == "principle"]
+    assert sorted(r["viewpoint"] for r in principle_rows) == ["P1", "P2", "P3", "P4"]
+
+
+@pytest.mark.usefixtures("all_principle_shapes")
+def test_one_failed_principle_keeps_other_findings(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4")], fail_principles=True)
+    result = macro_principles_run.run_policy(AssemblyInput.load(review), settings_for(fake))
+    assert [f.finding.viewpoint for f in result.findings] == ["M4"]
+    assert len(result.run_state.launch_failures or ()) == 4
+
+
+HUGE_PROMPT = "x" * 5_000_000
+
+
+def _extra(number: int, prompt: str) -> macro.ExtraLaunch:
+    return macro.ExtraLaunch(f"P{number}", prompt, number)
+
+
+def test_run_skips_only_the_over_budget_launch_and_keeps_the_others(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4")])
+    result = macro.run_macro(
+        AssemblyInput.load(review),
+        known_model_settings(fake, 0.5),
+        extras=[_extra(1, "短い"), _extra(2, HUGE_PROMPT)],
+    )
+    assert len(fake.calls) == 2
+    assert [f["viewpoint"] for f in triaged_dicts(result.findings)] == ["M4"]
+    assert result.run_state.budget_stops is not None
+    assert [stop["index"] for stop in result.run_state.budget_stops] == [2]
+    assert result.notice is not None
+    assert "原則 P2 の起動を上限のために見送りました" in result.notice
+
+
+def test_run_skips_a_principle_launch_that_reaches_the_principle_limit_alone(
+    project: Path,
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4")])
+    prompt = "x" * 150_000
+    tokens = claude.estimate_input_tokens(len(prompt))
+    # 原則の起動の上限は、この入力の費用そのもの。図の起動の上限 0.5 USD には収まる
+    principle_limit = claude.input_cost_usd("claude-haiku-5-5", tokens).usd
+    settings = known_model_settings(fake, 0.5)
+    settings = replace(
+        settings,
+        budget=replace(
+            settings.budget,
+            principles={
+                "P1": claude.RunBudget("claude-haiku-5-5", principle_limit, reserve_margin=True),
+                "P2": claude.RunBudget("claude-haiku-5-5", principle_limit, reserve_margin=True),
+            },
+        ),
+    )
+    assert not settings.budget.input_stops_run(tokens)
+    assert settings.budget.for_principle("P2").input_stops_run(tokens)
+    result = macro.run_macro(
+        AssemblyInput.load(review),
+        settings,
+        extras=[_extra(1, "短い"), _extra(2, prompt)],
+    )
+    assert len(fake.calls) == 2
+    assert [f["viewpoint"] for f in triaged_dicts(result.findings)] == ["M4"]
+    assert result.run_state.budget_stops is not None
+    assert [stop["index"] for stop in result.run_state.budget_stops] == [2]
+
+
+def test_run_stops_without_launching_when_every_launch_is_over_budget(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4")])
+    extras = [_extra(number, HUGE_PROMPT) for number in range(1, 6)]
+    settings = known_model_settings(fake, 0.0001)
+    with pytest.raises(pipeline.InputBudgetError) as raised:
+        macro.run_macro(AssemblyInput.load(review), settings, extras=extras)
+    assert fake.calls == []
+    assert "全 6 起動が失敗しました（6 個は起動しませんでした）" in str(raised.value)
+    assert raised.value.stop is not None
+
+
+def test_run_stops_for_design_shape_over_budget_as_before(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([])
+    with pytest.raises(pipeline.InputBudgetError):
+        macro.run_macro(AssemblyInput.load(review), known_model_settings(fake, 0.0001))
+    assert fake.calls == []
+
+
+def _finding_fields(schema: dict[str, Any]) -> set[str]:
+    return set(schema["properties"]["findings"]["items"]["properties"])
+
+
+def _discarded_fields(schema: dict[str, Any]) -> set[str]:
+    return set(schema["properties"]["discarded"]["items"]["properties"])
+
+
+def test_the_principle_launch_schema_omits_fields_the_later_stages_do_not_read() -> None:
+    spec = replace(
+        macro.CONCLUDE,
+        only_viewpoint="P1",
+        model_written=macro.PRINCIPLE_WRITTEN,
+        omit_unread=True,
+    )
+    schema = spec.schema()
+    finding = _finding_fields(schema)
+    assert not {"nit_reason", "from_concern", "out_of_scope", "triage_reason"} & finding
+    assert {"deepens", "in_scope", "scope_reason"} <= finding
+    assert "merged" not in schema["properties"]
+    discarded = _discarded_fields(schema)
+    assert "disclosed_at" not in discarded
+    assert {"kind", "concern"} <= discarded
+
+
+def test_the_diagram_launch_schema_keeps_every_field() -> None:
+    schema = macro.CONCLUDE.schema()
+    finding = _finding_fields(schema)
+    assert {"nit_reason", "from_concern", "out_of_scope", "triage_reason", "deepens"} <= finding
+    assert "merged" in schema["properties"]
+    assert "disclosed_at" in _discarded_fields(schema)
+
+
+def test_a_principle_launch_output_with_deepens_is_stored_as_a_deepening(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    deepening = {**discovered("P1"), "deepens": "F1"}
+    fake = MacroFake([discovered("M4"), deepening])
+    result = macro.run_macro(
+        AssemblyInput.load(review), known_model_settings(fake, 0.5), extras=[_extra(1, "短い")]
+    )
+    stored = [f for f in triaged_dicts(result.findings) if f["viewpoint"] == "P1"]
+    assert [f["deepens"] for f in stored] == ["F1"]
+
+
+def _deepens_types(schema: dict[str, Any]) -> list[str]:
+    deepens = schema["properties"]["findings"]["items"]["properties"]["deepens"]
+    return [option.get("type") for option in deepens.get("anyOf", [deepens])]
+
+
+def test_only_the_principle_launch_schema_accepts_a_null_deepens() -> None:
+    principle = replace(
+        macro.CONCLUDE,
+        only_viewpoint="P1",
+        model_written=macro.PRINCIPLE_WRITTEN,
+        omit_unread=True,
+    )
+    assert _deepens_types(principle.schema()) == ["string", "null"]
+    assert _deepens_types(macro.CONCLUDE.schema()) == ["string"]
+
+
+def test_a_principle_launch_output_with_a_null_deepens_is_not_a_deepening(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    fake = MacroFake([discovered("M4"), {**discovered("P1"), "deepens": None}])
+    result = macro.run_macro(
+        AssemblyInput.load(review), known_model_settings(fake, 0.5), extras=[_extra(1, "短い")]
+    )
+    stored = [f for f in triaged_dicts(result.findings) if f["viewpoint"] == "P1"]
+    assert len(stored) == 1
+    assert "deepens" not in stored[0]
+    assert stored[0]["triage"] == "must_read"
+
+
+def test_a_principle_launch_drops_only_its_unverifiable_discards(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    unverifiable = {"reason": "図だけでは確かめられない", "kind": "unverifiable_from_diagram"}
+    other = {"reason": "別の理由", "kind": "other"}
+
+    class Discarding(MacroFake):
+        def __call__(self, invocation: claude.Invocation) -> claude.InvocationResult:
+            if "merged" in invocation.json_schema["properties"]:
+                sources = [{"source": "S1", **unverifiable}]
+                output = {"findings": [], "merged": [], "discarded": sources}
+                return claude.InvocationResult(output, RECORD)
+            sources = [{"source": "S2", **unverifiable}, {"source": "S3", **other}]
+            return claude.InvocationResult({"findings": [], "discarded": sources}, RECORD)
+
+    result = macro.run_macro(
+        AssemblyInput.load(review),
+        known_model_settings(Discarding([]), 0.5),
+        extras=[_extra(1, "短い")],
+    )
+    assert result.run_state.discarded is not None
+    assert [item.source for item in result.run_state.discarded] == ["S1", "S3"]
+    assert result.run_state.discovered == 3

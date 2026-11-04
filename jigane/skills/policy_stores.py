@@ -13,7 +13,13 @@ from pathlib import Path
 from jigane.figures.models import RowChange, TableFigure, TableRow
 from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.languages import registry
-from jigane.languages.base import StoreAccessReader, StoreFormat, StoreRole, StoreSide
+from jigane.languages.base import (
+    PARAMETER_STORE_MARK,
+    StoreAccessReader,
+    StoreFormat,
+    StoreRole,
+    StoreSide,
+)
 from jigane.policy_materials import changed_files
 from jigane.reviews.lifecycle import Review
 
@@ -36,8 +42,15 @@ INTRO = (
     '`x.get("鍵")`、`"鍵" in x`。入れ子の鍵は区別しない。'
     "「書くだけの鍵」は読む側が参照しない鍵、"
     "「読むだけの鍵」は書く側が書かない鍵で、食い違いはこの二つの欄に出る。"
-    "相手側の関数が見つからなければ「（見つからない）」。"
+    "ファイル名が固定の文字列で、リポジトリの中に相手側の関数が無ければ「（見つからない）」。"
     "テストのファイルは載せない。"
+    "ファイル名が関数の引数で渡る保存物は、「関数名 の引数 引数名」の名前で関数ごとに載せた。"
+    "「形式」の欄は、JSON、CSV、または独自の形式。"
+    "独自の形式は、開いたファイルへ文字列を組んで書き（連結、f 文字列、join）、"
+    "`split` で読み戻す形で、区切りや列の並びは載せていない。"
+    "独自の形式は、書く側と読む側の片方が特定できないことがある。"
+    "ファイル名が引数で渡る保存物も、形式によらず、相手側は呼ぶ側の引数の先にあって拾えない。"
+    "そのときは「見つからない」でなく「特定できていない」と書く。"
 )
 HEADER = (
     "保存物",
@@ -45,8 +58,10 @@ HEADER = (
     "読む側（関数: 鍵、作る型）",
     "書くだけの鍵",
     "読むだけの鍵",
+    "形式",
 )
 NOT_FOUND = "（見つからない）"
+UNIDENTIFIED = "（特定できていない）"
 PAIR_LABEL = "（to_json と from_json）"
 
 
@@ -87,9 +102,14 @@ def _collect(root: Path, paths: list[str], changed: set[str]) -> dict[str, _Stor
     return {name: store for name, store in sorted(stores.items()) if name in touched}
 
 
-def _cell(sides: list[StoreSide], *, with_types: bool) -> str:
+def _cell(
+    sides: list[StoreSide], *, with_types: bool, other: list[StoreSide], by_parameter: bool
+) -> str:
     if not sides:
-        return NOT_FOUND
+        # 独自の形式は読み書きの相手を拾う手がかりが弱く、無いと言い切れない。
+        # 引数で渡るファイルの相手は、呼ぶ側の引数の先にあり、この関数の名前からは辿れない
+        has_custom = any(s.kind is StoreFormat.CUSTOM for s in other)
+        return UNIDENTIFIED if has_custom or by_parameter else NOT_FOUND
     parts = []
     for side in sorted(sides, key=lambda s: (s.path, s.function)):
         detail = ", ".join(sorted(side.keys))
@@ -123,15 +143,27 @@ def store_table(review: Review) -> TableFigure | None:
     ]
     rows = []
     for name, store in _collect(root, paths, changed).items():
+        by_parameter = PARAMETER_STORE_MARK in name
         written, read = _union(store.writers), _union(store.readers)
         rows.append(
             TableRow(
                 (
                     name,
-                    _cell(store.writers, with_types=False),
-                    _cell(store.readers, with_types=True),
+                    _cell(
+                        store.writers,
+                        with_types=False,
+                        other=store.readers,
+                        by_parameter=by_parameter,
+                    ),
+                    _cell(
+                        store.readers,
+                        with_types=True,
+                        other=store.writers,
+                        by_parameter=by_parameter,
+                    ),
                     ", ".join(sorted(written - read)) if store.readers else "",
                     ", ".join(sorted(read - written)) if store.writers else "",
+                    "、".join(sorted({s.kind for s in [*store.writers, *store.readers]})),
                 ),
                 RowChange.UNCHANGED,
             )

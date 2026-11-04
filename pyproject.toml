@@ -1,6 +1,6 @@
 [project]
 name = "jigane"
-version = "0.1.3"
+version = "0.1.4"
 description = "GitHub の PR のレビューを助ける CLI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -36,9 +36,9 @@ dev = [
     # 入口の検証をモデルに替えた。受け付けの一致の試験が旧のスキーマを比べ相手に使う
     "jsonschema",
     "import-linter>=2.5",
-    # 試験と開発の台本が Markdown をトークンで読む（rich の推移の依存で入っていたものを直接にした）
+    # 試験と開発のスクリプトが Markdown をトークンで読む（rich の推移の依存で入っていたものを直接にした）
     "markdown-it-py>=4.0",
-    # 外の言語の例。entry point のメタデータを仮想環境に載せ、例の試験を通常の道で走らせる
+    # 追加の言語の例。entry point のメタデータを仮想環境に載せ、例の試験を通常の道で走らせる
     "jigane-language-kotlin",
     "mypy>=2.4.0",
     "pip-audit>=2.10.1",
@@ -205,7 +205,7 @@ containers = ["jigane"]
 layers = [
     "commands",
     "design : flaky : judgment_map : llm_runs : policy_materials : pull_request_context : regex : reviews : sequence : skills : technology_list : publishing : static_analysis",
-    "storage : groups : git : preconditions : gates : markdown : findings : languages : figures",
+    "storage : groups : git : preconditions : gates : markdown : findings : languages : figures : text",
 ]
 # 層の契約に入っていないサブパッケージを落とす。足したサブパッケージはどれかの層に入れる。
 exhaustive = true
@@ -226,7 +226,7 @@ exhaustive_ignores = ["__main__"]
 # キーは import する側のサブパッケージ、値は import してよい同じ層の兄弟。書いていないサブパッケージは兄弟を import しない。
 figures = ["markdown"]
 findings = ["storage", "groups"]
-languages = ["storage", "preconditions"]
+languages = ["storage", "preconditions", "text"]
 design = ["judgment_map", "reviews", "sequence"]
 flaky = ["judgment_map", "regex"]
 policy_materials = ["design", "judgment_map", "reviews", "sequence"]
@@ -254,6 +254,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -270,6 +271,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -286,6 +288,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -302,6 +305,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -318,6 +322,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -334,6 +339,7 @@ forbidden_modules = [
     "jigane.findings",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -348,6 +354,7 @@ forbidden_modules = [
     "jigane.markdown",
     "jigane.languages",
     "jigane.figures",
+    "jigane.text",
 ]
 allow_indirect_imports = true
 
@@ -377,6 +384,24 @@ forbidden_modules = [
     "jigane.gates",
     "jigane.findings",
     "jigane.languages",
+    "jigane.text",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "text は宣言した兄弟だけを読む"
+type = "forbidden"
+source_modules = ["jigane.text"]
+forbidden_modules = [
+    "jigane.storage",
+    "jigane.groups",
+    "jigane.git",
+    "jigane.preconditions",
+    "jigane.gates",
+    "jigane.markdown",
+    "jigane.findings",
+    "jigane.languages",
+    "jigane.figures",
 ]
 allow_indirect_imports = true
 
@@ -642,6 +667,9 @@ pythonpath = ["tests", "scripts"]
 addopts = "-q --strict-markers --strict-config -n auto -p no:randomly"
 xfail_strict = true
 filterwarnings = ["error"]
+markers = [
+    "whole_tree: jigane/ の全モジュールや全ファイルを走査して全体の約束を縛る試験。quick-check は変更に関わらず常に走らせる",
+]
 
 [tool.mypy]
 python_version = "3.12"

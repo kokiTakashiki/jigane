@@ -18,7 +18,7 @@ from pathlib import Path
 
 LOG_ENVIRONMENT = "JIGANE_FAKE_CLAUDE_LOG"
 EXIT_CODE = 1
-VERSION = "2.1.292"
+VERSION = "2.1.308"
 
 
 def main(argv: list[str]) -> int:

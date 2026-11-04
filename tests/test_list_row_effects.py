@@ -76,7 +76,7 @@ def pr_review(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Review:
-    # 偽の PR の取り込み（pr フィクスチャ）で作る差分レビュー式。作業場所は PR と無関係な場所へ移す
+    # 偽の PR の取り込み（pr フィクスチャ）で作る差分のレビュー。作業場所は PR と無関係な場所へ移す
     root = tmp_path / "shop"
     (root / "src").mkdir(parents=True)
     (root / "src" / "a.py").write_text("# a\n", encoding="utf-8")

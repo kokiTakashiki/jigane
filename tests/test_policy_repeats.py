@@ -25,7 +25,7 @@ def block(indent: str = "    ") -> str:
 
 @pytest.fixture
 def seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
-    """識別子と宣言を借りるためだけの機能レビュー。"""
+    """識別子と宣言を借りるためだけのファイルのレビュー。"""
     root = tmp_path / "seed"
     root.mkdir()
     (root / "a.py").write_text("def build_widget():\n    return 1\n", encoding="utf-8")
@@ -88,6 +88,37 @@ def test_removed_line_gone_everywhere_says_so(seed: Review, tmp_path: Path) -> N
     text = repeats_text(make_pair(seed, tmp_path, {}))
     assert policy_repeats.NO_REMAINS_TEXT in text
     assert policy_repeats.NO_REPEATS_TEXT in text
+
+
+def test_nothing_found_for_removed_lines_names_the_threshold_and_the_unchecked_range(
+    seed: Review, tmp_path: Path
+) -> None:
+    short = "name = name.lower()"
+    assert len(short) < policy_repeats.MIN_LINE_LENGTH
+    base = {
+        "a.py": f"def f(name):\n    {short}\n    return name\n",
+        "b.py": f"def g(name):\n    {short}\n",
+    }
+    head = {"a.py": "def f(name):\n    return name\n", "b.py": f"def g(name):\n    {short}\n"}
+    text = repeats_text(diff_review(seed, tmp_path, base, head))
+    assert policy_repeats.NO_REMAINS_TEXT in text
+    assert f"{policy_repeats.MIN_LINE_LENGTH} 字以上の行は" in text
+    assert "それより短い行は照らしていない" in text
+    assert "消した行と同じ行は、他の場所に残っていない" not in text
+
+
+def test_nothing_found_for_added_lines_names_the_thresholds_and_the_unchecked_range(
+    seed: Review, tmp_path: Path
+) -> None:
+    short = "    a = 1\n    b = 2\n    c = 3\n"
+    base = {"a.py": "def f():\n    pass\n", "d.py": f"def g(x):\n{short}"}
+    head = {"a.py": f"def f():\n{short}", "d.py": f"def g(x):\n{short}"}
+    text = repeats_text(diff_review(seed, tmp_path, base, head))
+    assert policy_repeats.NO_REPEATS_TEXT in text
+    assert f"{policy_repeats.MIN_LINE_LENGTH} 字以上の行を含み" in text
+    assert f"{policy_repeats.MIN_BLOCK_LINES} 行以上続く並び" in text
+    assert "照らしていない" in text
+    assert "足した行と同じ並びは、他の場所に無い" not in text
 
 
 def test_added_block_repeated_elsewhere(seed: Review, tmp_path: Path) -> None:

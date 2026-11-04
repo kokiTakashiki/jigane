@@ -44,7 +44,7 @@ DIFF_FIELDS: dict[str, str] = {
 # 版 4 で保存から外した鍵。id や宣言から導けるか、読み口が無い
 DERIVED_REVIEW_KEYS = {"kind", "mode", "is_diff", "is_pull_request", "warnings"}
 
-# 版 1 の各形の最小の辞書。鍵の欠け方が違う順に、機能、古い PR、新しい形の PR
+# 版 1 の各形の最小の辞書。鍵の欠け方が違う順に、ファイル、古い PR、新しい形の PR
 MINIMAL_REVIEW_V1: dict[str, dict[str, Any]] = {
     "feature": {
         "id": "owner/repo:sample",

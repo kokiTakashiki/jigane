@@ -1,0 +1,14 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class BookRow:
+    isbn: str
+    title: str
+    author: str
+    pages: int
+
+
+def parse_row(line):
+    isbn, title, author, pages = line.split(",")
+    return BookRow(isbn, title, author, int(pages))

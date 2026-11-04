@@ -34,6 +34,7 @@ def copy_readmes(destination: Path) -> Path:
     return destination
 
 
+@pytest.mark.whole_tree
 def test_every_readme_matches_the_generated_dependencies() -> None:
     generator = load_generator()
     expected = generator.generate(ROOT, generator.measure(ROOT))
@@ -67,7 +68,7 @@ def write_small_tree(root: Path, begin: str, end: str) -> None:
 
 
 def run_generator(root: Path, *flags: str) -> None:
-    # 台本は子プロセスで走らせる。測りが sys.modules と sys.path を変えるため
+    # スクリプトは子プロセスで走らせる。測りが sys.modules と sys.path を変えるため
     run_tool([sys.executable, str(SCRIPT), "--root", str(root), *flags])
 
 

@@ -1,12 +1,11 @@
 import json
 import os
-import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
-from dev_launch import run_tool
+from run_record_support import dead_pid, read, settings
 
 from jigane.commands import main
 from jigane.findings.records import IN_PROGRESS_FILE
@@ -16,22 +15,6 @@ from jigane.llm_runs.cost import Measured
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import run_record
 from jigane.storage.review_error import ReviewError
-
-
-def _settings(invoke: claude.Invoke | None = None) -> claude.RunSettings:
-    def refuse(_invocation: claude.Invocation) -> claude.InvocationResult:
-        raise AssertionError("LLM は呼ばない")
-
-    return claude.RunSettings(
-        budget=claude.RunBudget("m", 1.0, reserve_margin=True),
-        effort=None,
-        invoke=invoke or refuse,
-    )
-
-
-def _dead_pid() -> int:
-    # 終わったプロセスの番号。直後に別のプロセスが同じ番号を得る可能性は無視できる
-    return int(run_tool([sys.executable, "-c", "import os; print(os.getpid())"]))
 
 
 @pytest.fixture
@@ -48,22 +31,17 @@ def review(tmp_path: Path) -> Review:
     return FakeReview()  # type: ignore[return-value]
 
 
-def _read(review: Review, name: str) -> dict[str, Any]:
-    data: dict[str, Any] = json.loads((review.id.directory() / name).read_text("utf-8"))
-    return data
-
-
 def test_interrupt_keeps_stopped_record_and_previous_runs(review: Review) -> None:
     directory = review.id.directory()
     (directory / "runs.json").write_text('{"macro": {"ran_at": "before"}}', encoding="utf-8")
-    with pytest.raises(KeyboardInterrupt), run_record.tracking(review, MACRO, _settings()):
+    with pytest.raises(KeyboardInterrupt), run_record.tracking(review, MACRO, settings()):
         raise KeyboardInterrupt
-    stopped = _read(review, run_record.STOPPED_FILE)["macro"]
+    stopped = read(review, run_record.STOPPED_FILE)["macro"]
     assert "cost_usd" not in stopped[0]
     assert stopped[0]["kind"] == "interrupt"
     assert stopped[0]["stopped_at"] is not None
     assert stopped[0]["pid"] == os.getpid()
-    assert _read(review, IN_PROGRESS_FILE) == {"format": 2}
+    assert read(review, IN_PROGRESS_FILE) == {"format": 2}
     assert json.loads((directory / "runs.json").read_text("utf-8")) == {
         "macro": {"ran_at": "before"}
     }
@@ -83,30 +61,30 @@ def test_completed_invocation_costs_are_attached(review: Review) -> None:
         permission_denials=0,
         max_budget_usd=0.5,
     )
-    settings = _settings(lambda _: claude.InvocationResult(None, record))
+    tracked_settings = settings(lambda _: claude.InvocationResult(None, record))
 
     def interrupted() -> None:
-        with run_record.tracking(review, MICRO, settings) as tracked:
+        with run_record.tracking(review, MICRO, tracked_settings) as tracked:
             tracked.invoke(None)  # type: ignore[arg-type]
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
         interrupted()
-    stopped = _read(review, run_record.STOPPED_FILE)["micro"]
+    stopped = read(review, run_record.STOPPED_FILE)["micro"]
     assert stopped[0]["completed_invocation_costs"] == [0.25]
     assert "completed_cost_usd" not in stopped[0]
 
 
 def test_normal_end_and_failure_clear_in_progress(review: Review) -> None:
-    with run_record.tracking(review, MACRO, _settings()):
-        assert "macro" in _read(review, IN_PROGRESS_FILE)
-    assert _read(review, IN_PROGRESS_FILE) == {"format": 2}
+    with run_record.tracking(review, MACRO, settings()):
+        assert "macro" in read(review, IN_PROGRESS_FILE)
+    assert read(review, IN_PROGRESS_FILE) == {"format": 2}
     with (
         pytest.raises(ValueError, match="failed"),
-        run_record.tracking(review, MACRO, _settings()),
+        run_record.tracking(review, MACRO, settings()),
     ):
         raise ValueError("failed")
-    assert _read(review, IN_PROGRESS_FILE) == {"format": 2}
+    assert read(review, IN_PROGRESS_FILE) == {"format": 2}
     assert not (review.id.directory() / run_record.STOPPED_FILE).exists()
 
 
@@ -127,7 +105,7 @@ def test_undeterminable_process_keeps_its_record_without_stopping_it(
         "model": "m",
         "effort": None,
         "max_budget_usd": 1.0,
-        "pid": _dead_pid(),
+        "pid": dead_pid(),
     }
     path = directory / IN_PROGRESS_FILE
     path.write_text(json.dumps({"macro": started}), encoding="utf-8")

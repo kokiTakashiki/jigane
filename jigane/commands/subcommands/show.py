@@ -40,6 +40,7 @@ from jigane.findings.records import (
     triage_sort_key,
 )
 from jigane.groups.definitions import MACRO, MICRO, SECURITY, GroupId
+from jigane.groups.viewpoints import viewpoint_fields
 from jigane.llm_runs import launch_failure
 from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review, load_review, resolve_review
@@ -207,6 +208,7 @@ def with_in_reply(
     return [
         {
             **_with_derived_nit_reason(f),
+            **viewpoint_fields(f.finding.viewpoint),
             # 古い記録から組み立てた nit は返信とレポートの候補に入れない
             "in_reply": not is_legacy_nit_id(f.finding.id),
             "selection_note": selection_note_of(f.finding.id),

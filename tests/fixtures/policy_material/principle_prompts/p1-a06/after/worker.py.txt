@@ -1,0 +1,15 @@
+from typing import NamedTuple
+
+from server import ServerConfig
+
+
+class WorkerConfig(NamedTuple):
+    host: str
+    port: int
+    timeout_s: float
+    use_tls: bool
+    workers: int
+
+
+def worker_from(server: ServerConfig, workers: int) -> WorkerConfig:
+    return WorkerConfig(server.host, server.port, server.timeout_s, server.use_tls, workers)

@@ -1,0 +1,10 @@
+import enum
+
+
+class Level(enum.Enum):
+    INFO = 1
+    ERROR = 2
+
+
+def emit(level, message):
+    return "[%s] %s" % (level.name, message)

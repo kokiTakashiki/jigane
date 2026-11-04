@@ -29,7 +29,7 @@ class Launches:
             raise self.raises
         if command[1:] == ["--version"]:
             # claude の版の確かめに、確かめを通る版で答える
-            return subprocess.CompletedProcess(command, 0, "2.1.292 (Claude Code)", "")
+            return subprocess.CompletedProcess(command, 0, "2.1.308 (Claude Code)", "")
         return subprocess.CompletedProcess(command, 0, "{}", "")
 
 

@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.findings.records import Triage, load_findings_state, mark_stale, read_stored_state
 from jigane.groups.definitions import MACRO, GroupId
+from jigane.groups.viewpoints import by_uuid
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
@@ -181,6 +183,8 @@ def test_old_findings_without_triage_give_the_notice_and_show_the_same_triage(
     def edit(raw: dict[str, Any]) -> None:
         for finding in raw["groups"]["macro"]:
             del finding["triage"]
+            # 版を外した書き換えは版 1 として読まれ、観点は旧い番号で読まれる
+            finding["viewpoint"] = by_uuid(uuid.UUID(finding["viewpoint"])).legacy_number
 
     rewrite_raw_findings(review.id.directory(), edit)
     # 区分の無い古い findings.json でも、読み込みで補われた必読が案内に出る

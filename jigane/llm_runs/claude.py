@@ -69,6 +69,8 @@ class StoredInvocationRecord:
     permission_denials: int
     # この起動が持っていた上限。上限の欄が無い古い記録は None
     max_budget_usd: float | None
+    # この起動のモデル。実行の中で起動ごとにモデルが違う形があるので起動で残す。古い記録は None
+    model: str | None = None
 
     def usage_fields(self) -> dict[str, Any]:
         """額を除く欄。額と出所は cost_as_record が書く。"""
@@ -76,6 +78,8 @@ class StoredInvocationRecord:
         del usage["cost"]
         if usage["max_budget_usd"] is None:
             del usage["max_budget_usd"]
+        if usage["model"] is None:
+            del usage["model"]
         return usage
 
     def as_row(self) -> dict[str, Any]:
@@ -92,6 +96,7 @@ class StoredInvocationRecord:
         return cls(
             **{
                 "max_budget_usd": None,
+                "model": None,
                 **{key: row[key] for key in names if key in row},
             },
             cost=cost_from_record(dict(row)),
@@ -141,15 +146,47 @@ class RunBudget:
     max_budget_usd: float
     # 真なら、CLI に渡す上限から次の一往復の余裕を引く（cli_budget_usd）
     reserve_margin: bool
+    # 原則の番号ごとの組。図の形の方針の実行だけが持ち、他は None
+    principles: "Mapping[str, RunBudget] | None" = None
+    # 出力の見込みのトークン数。値のある組（方針の図の形）は、課金に合わせたトークン数と
+    # 単価で起動の費用を見積もる。None の組は入力だけの見積もりのまま
+    output_allowance_tokens: int | None = None
+
+    @property
+    def counts_output(self) -> bool:
+        """費用に出力の見込みを含めるか。真なら課金に合わせた係数と単価で見積もる。"""
+        return self.output_allowance_tokens is not None
+
+    def prompt_tokens(self, prompt_bytes: int) -> int:
+        """プロンプトのバイト数から、この組が検査と見積もりに使うトークン数。"""
+        if not self.counts_output:
+            return estimate_input_tokens(prompt_bytes)
+        return billed_input_tokens(prompt_bytes)
+
+    def launch_cost(self, prompt_tokens: int) -> "InputCost":
+        """起動の費用の見込み。値のある組は入力に見込みの出力を足し、None の組は入力だけ。"""
+        if self.output_allowance_tokens is None:
+            return input_cost_usd(self.model, prompt_tokens)
+        return billed_launch_cost(self.model, prompt_tokens, self.output_allowance_tokens)
+
+    def for_principle(self, number: str) -> "RunBudget":
+        """原則の起動に使う組。表に無ければ自分自身。"""
+        if self.principles is None or number not in self.principles:
+            return self
+        return self.principles[number]
 
     def cli_usd(self, prompt_tokens: int) -> float | None:
         return cli_budget_usd(self.model, prompt_tokens, self.max_budget_usd)
 
     def input_stops_run(self, prompt_tokens: int) -> bool:
-        """入力の費用だけで、その起動を止めるか。実行前の検査と見積もりが、止めの判定をここから引く。"""
+        """プロンプトの大きさから見積もった費用で、その起動を止めるか。実行前の検査と見積もりが、止めの判定をここから引く。
+
+        reserve_margin が真なら、CLI に渡す上限が下限を割るときに止める。偽なら、launch_cost
+        （出力の見込みのある組は、それを足した額）が上限以上のときに止める。
+        """
         if self.reserve_margin:
             return self.cli_usd(prompt_tokens) is None
-        return input_cost_usd(self.model, prompt_tokens).usd >= self.max_budget_usd
+        return self.launch_cost(prompt_tokens).usd >= self.max_budget_usd
 
 
 @dataclass(frozen=True)
@@ -182,7 +219,7 @@ class RunSettings:
         """self.budget.reserve_margin が偽なら、CLI に上限そのものを渡す（余裕を引かない）。"""
         budget = self.budget.max_budget_usd
         if self.budget.reserve_margin:
-            tokens = estimate_input_tokens(len(prompt.encode("utf-8")))
+            tokens = self.budget.prompt_tokens(len(prompt.encode("utf-8")))
             reduced = self.budget.cli_usd(tokens)
             # None は余裕を引くと下限を割る入力。走らせる前の検査（skills/input_budget）が先に
             # 止める約束で、検査の無い起動でも下限の値を渡し、上限を超える側へは倒さない。
@@ -446,7 +483,9 @@ def build_command(invocation: Invocation) -> list[str]:
     return command
 
 
-def failure_record(payload: dict[str, Any] | None, limit_usd: float) -> InvocationRecord:
+def failure_record(
+    payload: dict[str, Any] | None, limit_usd: float, model: str | None = None
+) -> InvocationRecord:
     """失敗した起動の記録。
 
     金額が報告されない失敗（タイムアウト、出力が JSON でない）は、上限の額で代える。
@@ -454,7 +493,7 @@ def failure_record(payload: dict[str, Any] | None, limit_usd: float) -> Invocati
     代用の額は厳密な上界ではない。
     結果が往復ゼロ、トークンゼロで額も無いときだけは、API を呼ぶ前に止まったので課金なしとする。
     """
-    record = parse_record(payload or {}, limit_usd)
+    record = parse_record(payload or {}, limit_usd, model)
     if _stopped_before_api(payload, record):
         return replace(record, cost=NotCharged())
     return replace(record, cost=with_limit(record.cost, limit_usd))
@@ -473,7 +512,9 @@ def _stopped_before_api(payload: dict[str, Any] | None, record: InvocationRecord
     )
 
 
-def parse_record(payload: dict[str, Any], limit_usd: float) -> InvocationRecord:
+def parse_record(
+    payload: dict[str, Any], limit_usd: float, model: str | None = None
+) -> InvocationRecord:
     usage = payload.get("usage") or {}
     return InvocationRecord(
         input_tokens=usage.get("input_tokens", 0),
@@ -487,6 +528,7 @@ def parse_record(payload: dict[str, Any], limit_usd: float) -> InvocationRecord:
         terminal_reason=payload.get("terminal_reason"),
         permission_denials=len(payload.get("permission_denials") or []),
         max_budget_usd=limit_usd,
+        model=model,
     )
 
 
@@ -571,7 +613,7 @@ def run(
     except subprocess.TimeoutExpired as error:
         raise ClaudeInvocationError(
             f"claude が {timeout_seconds} 秒でタイムアウトしました",
-            failure_record(None, invocation.budget.limit_usd),
+            failure_record(None, invocation.budget.limit_usd, invocation.model),
             FailureKind.TIMEOUT,
         ) from error
     if completed.returncode != 0:
@@ -580,7 +622,7 @@ def run(
         raise ClaudeInvocationError(
             f"claude の終了コードが {completed.returncode} でした: {reason}",
             # 上限での失敗は終了コードが 0 でないことがあり、標準出力の結果に使った額が入る
-            failure_record(failed_payload, invocation.budget.limit_usd),
+            failure_record(failed_payload, invocation.budget.limit_usd, invocation.model),
             _is_error_kind(
                 None if failed_payload is None else failed_payload.get("subtype"), reason
             ),
@@ -591,30 +633,30 @@ def run(
     except json.JSONDecodeError as error:
         raise ClaudeInvocationError(
             f"出力が JSON ではありません: {error}",
-            failure_record(None, invocation.budget.limit_usd),
+            failure_record(None, invocation.budget.limit_usd, invocation.model),
             FailureKind.BAD_OUTPUT,
         ) from error
     if not isinstance(payload, dict):
         raise ClaudeInvocationError(
             "出力が JSON オブジェクトではありません",
-            failure_record(None, invocation.budget.limit_usd),
+            failure_record(None, invocation.budget.limit_usd, invocation.model),
             FailureKind.BAD_OUTPUT,
         )
-    record = parse_record(payload, invocation.budget.limit_usd)
+    record = parse_record(payload, invocation.budget.limit_usd, invocation.model)
     if record.is_error:
         # subtype と result に失敗の理由（過負荷、上限の超過など）が書かれる
         reasons = [str(payload[key]) for key in ("subtype", "result") if payload.get(key)]
         detail = f": {_tail(' '.join(reasons))}" if reasons else ""
         raise ClaudeInvocationError(
             f"claude が is_error を返しました{detail}",
-            failure_record(payload, invocation.budget.limit_usd),
+            failure_record(payload, invocation.budget.limit_usd, invocation.model),
             _is_error_kind(payload.get("subtype"), " ".join(reasons)),
         )
     structured_output = payload.get("structured_output")
     if not isinstance(structured_output, dict):
         raise ClaudeInvocationError(
             "structured_output がありません",
-            failure_record(payload, invocation.budget.limit_usd),
+            failure_record(payload, invocation.budget.limit_usd, invocation.model),
             FailureKind.BAD_OUTPUT,
         )
     return InvocationResult(structured_output=structured_output, record=record)
@@ -674,13 +716,40 @@ def estimate_input_tokens(text_bytes: int) -> int:
     return math.ceil(text_bytes / 3)
 
 
-# モデルごとの入力の単価（USD / 100 万トークン）。出所は Anthropic の第一者の API の価格
-# （2026-10-06 時点）。表に無いモデルには、表の最高の単価を仮に当てる。
+@dataclass(frozen=True)
+class PriceTier:
+    """プロンプトのトークン数の段階ごとの単価（USD / 100 万トークン）。"""
+
+    # この段階に入るプロンプトのトークン数の上限（含む）。None は上限なし
+    up_to_prompt_tokens: int | None
+    cache_write_1h: float
+    output: float
+
+
+@dataclass(frozen=True)
+class ModelPrices:
+    # 入力の単価（USD / 100 万トークン）。プロンプトの大きさの見積もりと安全弁に使う
+    input: float
+    # 1 時間のキャッシュの書き込みと出力の単価。上限の小さい順に並べる
+    tiers: tuple[PriceTier, ...]
+
+
+# モデルごとの単価の表。出典 https://platform.claude.com/docs/en/about-claude/pricing
+# 入力の単価は 2026-10-06 時点、段階の単価は 2026-11-04 に確認した。表に無いモデルには、
+# 表の最高の単価を仮に当てる。Haiku 5.5 は、プロンプトが 100,000 トークンを超える起動の
+# 入力全体と出力全体に高い単価が掛かる
+MODEL_PRICES: dict[str, ModelPrices] = {
+    "claude-sonnet-5-5": ModelPrices(2.00, (PriceTier(None, 4.00, 10.00),)),
+    "claude-opus-5-5": ModelPrices(4.00, (PriceTier(None, 8.00, 20.00),)),
+    "claude-haiku-5-5": ModelPrices(
+        0.10, (PriceTier(100_000, 0.20, 0.50), PriceTier(None, 1.00, 2.50))
+    ),
+    "claude-fable-5-1": ModelPrices(10.00, (PriceTier(None, 20.00, 50.00),)),
+}
+
+# 名前を変えない口。値は MODEL_PRICES から導く
 INPUT_USD_PER_MILLION_TOKENS: dict[str, float] = {
-    "claude-sonnet-5-5": 2.00,
-    "claude-opus-5-5": 4.00,
-    "claude-haiku-5-5": 0.10,
-    "claude-fable-5-1": 10.00,
+    model: prices.input for model, prices in MODEL_PRICES.items()
 }
 
 
@@ -699,6 +768,36 @@ def input_cost_usd(model: str, input_tokens: int) -> InputCost:
         # 表の手入れに安全弁が左右されないよう、安全側に倒して最高の単価で見積もる
         price = max(INPUT_USD_PER_MILLION_TOKENS.values())
     return InputCost(input_tokens * price / 1_000_000, price, assumed)
+
+
+# 実際の課金に合わせた見積もりの係数。方針の起動の大きなプロンプトの実測（起動 3 本）で、
+# 2.24〜2.30 バイトが 1 トークンだった。
+BILLED_BYTES_PER_TOKEN = 2.25
+
+
+def billed_input_tokens(text_bytes: int) -> int:
+    return math.ceil(text_bytes / BILLED_BYTES_PER_TOKEN)
+
+
+def billed_launch_cost(model: str, prompt_tokens: int, output_tokens: int) -> "InputCost":
+    """入力を 1 時間のキャッシュの書き込みの単価、見込みの出力を出力の単価で見積もる。"""
+    prices = MODEL_PRICES.get(model)
+    assumed = prices is None
+    if prices is None:
+        # 表の手入れに安全弁が左右されないよう、全段階の最高の単価で見積もる
+        every = [tier for each in MODEL_PRICES.values() for tier in each.tiers]
+        write = max(tier.cache_write_1h for tier in every)
+        output = max(tier.output for tier in every)
+    else:
+        tier = next(
+            item
+            for item in prices.tiers
+            if item.up_to_prompt_tokens is None or prompt_tokens <= item.up_to_prompt_tokens
+        )
+        write, output = tier.cache_write_1h, tier.output
+    # 浮動小数の誤差で上限ちょうどの判定が揺れないよう、百万分の一 USD の下で丸める
+    usd = round((prompt_tokens * write + output_tokens * output) / 1_000_000, 9)
+    return InputCost(usd, write, assumed)
 
 
 def assumed_price_notice(model: str, cost: InputCost) -> str:

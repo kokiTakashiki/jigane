@@ -9,7 +9,8 @@ from pathlib import Path
 from jigane.figures.models import MermaidFigure, Panel
 from jigane.git.tree_files import walk_tree_files
 from jigane.policy_materials import classes
-from jigane.policy_materials.classes import _changed_types, distinct_members
+from jigane.policy_materials.classes import distinct_members
+from jigane.policy_materials.type_deltas import _changed_types
 from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import Member, TypeInfo
 from jigane.sequence.indexes import Indexes

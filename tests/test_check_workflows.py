@@ -163,7 +163,7 @@ def test_actionlint_receives_the_workflow_files_of_the_copy(
     monkeypatch.setattr(checker, "fetch_actionlint", lambda: Path("/pinned/actionlint"))
     monkeypatch.setattr(checker, "run_tool", calls.append)
     assert checker.run_actionlint(directory.parent) == 0
-    assert calls == [["/pinned/actionlint", "-no-color", str(directory / "t.yml")]]
+    assert calls == [[str(Path("/pinned/actionlint")), "-no-color", str(directory / "t.yml")]]
 
 
 def test_actionlint_is_not_given_composite_actions(
@@ -176,7 +176,7 @@ def test_actionlint_is_not_given_composite_actions(
     monkeypatch.setattr(checker, "fetch_actionlint", lambda: Path("/pinned/actionlint"))
     monkeypatch.setattr(checker, "run_tool", calls.append)
     assert checker.run_actionlint(directory.parent) == 0
-    assert calls == [["/pinned/actionlint", "-no-color", str(directory / "t.yml")]]
+    assert calls == [[str(Path("/pinned/actionlint")), "-no-color", str(directory / "t.yml")]]
 
 
 def test_actionlint_fails_on_a_flawed_expression(

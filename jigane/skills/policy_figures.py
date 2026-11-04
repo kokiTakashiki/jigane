@@ -5,7 +5,7 @@
 図の構造と、文と JSON への変換は `jigane.figures.models` が持つ。
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any
@@ -24,17 +24,22 @@ from jigane.languages.base import (
     RegexAdapter,
     SequenceAdapter,
     StoreAccessReader,
+    ValueSetReader,
 )
 from jigane.policy_materials import changed_files, classes, discriminators, er
 from jigane.policy_materials.changed_files import PrebuiltSection
 from jigane.reviews.lifecycle import Review
 from jigane.sequence import review_diagrams
 from jigane.skills import (
+    policy_callers,
+    policy_cochange,
     policy_commands,
     policy_concurrency,
+    policy_field_copies,
     policy_file_paths,
     policy_regex,
     policy_stores,
+    policy_value_sets,
 )
 
 
@@ -184,11 +189,39 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         interface=LANGUAGE_AGNOSTIC,
     ),
     PolicyFigure(
+        "cochange",
+        policy_cochange.SECTION_COCHANGE,
+        policy_cochange.cochange_table,
+        FigureSlot.AFTER_REGIONS,
+        interface=LANGUAGE_AGNOSTIC,
+    ),
+    PolicyFigure(
         "regex",
         policy_regex.SECTION_REGEX,
         policy_regex.regex_table,
         FigureSlot.AFTER_REGIONS,
         interface=RegexAdapter,
+    ),
+    PolicyFigure(
+        "value_sets",
+        policy_value_sets.SECTION_VALUE_SETS,
+        policy_value_sets.value_set_table,
+        FigureSlot.AFTER_REGIONS,
+        interface=ValueSetReader,
+    ),
+    PolicyFigure(
+        "field_copies",
+        policy_field_copies.SECTION_FIELD_COPIES,
+        policy_field_copies.field_copy_table,
+        FigureSlot.AFTER_REGIONS,
+        interface=LANGUAGE_AGNOSTIC,
+    ),
+    PolicyFigure(
+        "callers",
+        policy_callers.SECTION_CALLERS,
+        policy_callers.caller_table,
+        FigureSlot.AFTER_REGIONS,
+        interface=LANGUAGE_AGNOSTIC,
     ),
 )
 
@@ -237,11 +270,18 @@ def unsupported_note(languages: Sequence[UnsupportedLanguage]) -> str:
     return " ".join(sentences)
 
 
-def section_texts(review: Review, slot: FigureSlot) -> list[str]:
-    """資料に載せる、その置き場の図の節。描くものが無い図の節は載せない。"""
+def section_texts(
+    review: Review, slot: FigureSlot, keys: Collection[FigureKey] | None = None
+) -> list[str]:
+    """資料に載せる、その置き場の図の節。描くものが無い図の節は載せない。
+
+    keys を渡したときは、その鍵の図だけを登録簿の順で載せる。
+    """
     sections = []
     for figure in REGISTRY:
         if figure.slot != slot or figure.key in PROMPT_OMITTED:
+            continue
+        if keys is not None and figure.key not in keys:
             continue
         built = figure.build(review)
         languages = unsupported_languages(review, figure)
@@ -267,18 +307,32 @@ def _with_unsupported_note(review: Review, place: PrebuiltSection, section: str)
     return section
 
 
-def prompt_figure_texts(review: Review, prebuilt: Mapping[PrebuiltSection, str]) -> list[str]:
+def prompt_figure_texts(
+    review: Review,
+    prebuilt: Mapping[PrebuiltSection, str],
+    keys: Collection[FigureKey] | None = None,
+) -> list[str]:
     """プロンプトの資料に載せる図の節を、`PROMPT_ORDER` と登録簿の順で並べる。
 
     prebuilt は事前に組んだ節を `PrebuiltSection` で引く辞書。ツリー図、シーケンス図、
     判断の箇所の一覧は重いので組み直さず、ここから引く。登録簿の順を替えると、同じ置き場の節の順が替わる。
+    keys を渡したときは、その鍵の図の節だけを載せる。登録簿に無い鍵は ValueError。
+    判断の箇所の一覧は登録簿の図ではないので、keys を渡すと載らない。
     """
+    if keys is not None:
+        unknown = sorted(set(keys) - {figure.key for figure in REGISTRY})
+        if unknown:
+            raise ValueError(f"登録簿に無い図の鍵: {', '.join(unknown)}")
     texts = []
     for place in PROMPT_ORDER:
         if isinstance(place, PrebuiltSection):
+            if keys is not None and not any(
+                figure.slot == place and figure.key in keys for figure in REGISTRY
+            ):
+                continue
             texts.append(_with_unsupported_note(review, place, prebuilt[place]))
         else:
-            texts.extend(section_texts(review, place))
+            texts.extend(section_texts(review, place, keys))
     return texts
 
 

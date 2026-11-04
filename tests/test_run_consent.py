@@ -328,6 +328,7 @@ def _consent_err(review_name: str, group: str, capsys: pytest.CaptureFixture[str
     return capsys.readouterr().err
 
 
+@pytest.mark.usefixtures("all_principle_shapes")
 def test_consent_text_breaks_the_estimate_down_by_role_and_group(
     review_name: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -337,10 +338,20 @@ def test_consent_text_breaks_the_estimate_down_by_role_and_group(
     assert "検証役: 回数は見つかった指摘の数で決まり、事前には分かりません" in err
     assert "事前に分かる" not in err
     assert "同じレビューの群ごとの内訳:" in err
-    for label in ("方針", "実装", "セキュリティ"):
+    # 方針は図の形で、図の起動と原則の起動の和を出す。他の群は発見役の回数だけ
+    assert (
+        "  方針: 図の起動 1 回 × 1 回の目安 0.36 USD + 原則の起動 4 回 × 1 回の目安 0.02 USD"
+        " = 0.44 USD、検証役なし"
+    ) in err
+    for label in ("実装", "セキュリティ"):
         assert f"  {label}: 発見役" in err
     assert "発見役の回数 × 1 回の目安の和（検証役の分を含まない）:" in err
-    assert err.count("実際の額は、検証役の回数と出力の量で変わり") == 1
+    assert (
+        err.count(
+            "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"
+        )
+        == 1
+    )
     assert "前回の実績" not in err
 
 
@@ -397,3 +408,84 @@ def test_eof_at_the_question_is_a_refusal(
     assert code != EXIT_OK
     assert fake.calls == []
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_consent_text_for_policy_shows_diagram_and_principle_runs_and_their_sum() -> None:
+    plan = LaunchPlan(
+        MACRO,
+        (
+            GroupBreakdown(
+                MACRO,
+                6,
+                0.4,
+                has_verifier=False,
+                past_cost_usd=None,
+                principle_limits_usd=(0.02,) * 5,
+            ),
+        ),
+        can_increase=False,
+        effort=None,
+    )
+    lines = consent_text(plan)
+    expression = (
+        "図の起動 1 回 × 1 回の目安 0.4 USD + 原則の起動 5 回 × 1 回の目安 0.02 USD = 0.5 USD"
+    )
+    assert f"  発見役: {expression}" in lines
+    assert f"  方針: {expression}、検証役なし" in lines
+    assert "  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: 0.5 USD" in lines
+
+
+def test_consent_sum_with_a_per_call_override_covers_all_six_runs() -> None:
+    breakdown = GroupBreakdown(
+        MACRO,
+        6,
+        0.3,
+        has_verifier=False,
+        past_cost_usd=None,
+        principle_limits_usd=(0.3,) * 5,
+    )
+    assert breakdown.known_usd == 1.8
+    assert breakdown.calls_text() == (
+        "図の起動 1 回 × 1 回の目安 0.3 USD + 原則の起動 5 回 × 1 回の目安 0.3 USD = 1.8 USD"
+    )
+
+
+def test_consent_expression_groups_principle_runs_by_limit() -> None:
+    default = GroupBreakdown(
+        MACRO,
+        6,
+        0.36,
+        has_verifier=False,
+        past_cost_usd=None,
+        principle_limits_usd=(0.02,) * 4 + (0.06,),
+    )
+    assert default.known_usd == 0.5
+    assert default.calls_text() == (
+        "図の起動 1 回 × 1 回の目安 0.36 USD + 原則の起動 4 回 × 1 回の目安 0.02 USD"
+        " + 原則の起動 1 回 × 1 回の目安 0.06 USD = 0.5 USD"
+    )
+
+
+def test_consent_expression_sums_only_the_assembled_principle_runs() -> None:
+    none = GroupBreakdown(
+        MACRO, 1, 0.36, has_verifier=False, past_cost_usd=None, principle_limits_usd=()
+    )
+    assert none.known_usd == 0.36
+    assert none.calls_text() == "1 回 × 1 回の目安 0.36 USD = 0.36 USD"
+    assert none.row_calls_text().startswith("発見役 ")
+    two = GroupBreakdown(
+        MACRO, 3, 0.36, has_verifier=False, past_cost_usd=None, principle_limits_usd=(0.02, 0.06)
+    )
+    assert two.known_usd == 0.44
+    assert two.calls_text() == (
+        "図の起動 1 回 × 1 回の目安 0.36 USD + 原則の起動 1 回 × 1 回の目安 0.02 USD"
+        " + 原則の起動 1 回 × 1 回の目安 0.06 USD = 0.44 USD"
+    )
+
+
+@pytest.mark.usefixtures("all_principle_shapes")
+def test_consent_other_groups_rows_use_the_policy_sum_when_the_run_group_is_not_policy(
+    review_name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    err = _consent_err(review_name, "security", capsys)
+    assert "原則の起動 4 回 × 1 回の目安 0.02 USD = 0.44 USD、検証役なし" in err

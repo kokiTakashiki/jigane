@@ -642,3 +642,21 @@ def test_stored_file_trace_skips_sources_ast_cannot_parse(tmp_path: Path) -> Non
         target.write_text(text, encoding="utf-8")
     result = recommend(tmp_path, parse_design("# 題\n\n## 1. 序論\n\n`notes.json` を保存する。\n"))
     assert "lib/paths.py" in {c.path for c in result.candidates}
+
+
+@pytest.mark.parametrize("depth", [3000, 100000])
+def test_stored_file_trace_skips_a_file_with_a_deep_attribute_chain(
+    tmp_path: Path, depth: int
+) -> None:
+    chain = "a" + ".b" * depth
+    body = f"{chain}.NOTES_FILE\n        return {chain}(1)"
+    deep = f"from lib import paths\n\n\ndef f():\n    def g(a):\n        {body}\n"
+    files = {**STORE_FILES, "lib/deep.py": deep}
+    for relative, text in files.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    result = recommend(tmp_path, parse_design("# 題\n\n## 1. 序論\n\n`notes.json` を保存する。\n"))
+    paths = {c.path for c in result.candidates}
+    assert "lib/paths.py" in paths
+    assert "lib/deep.py" not in paths

@@ -22,7 +22,7 @@ class Builtin:
 
 @dataclass(frozen=True)
 class Distribution:
-    """外のパッケージ（配布名と版）から来た言語。"""
+    """プラグインのパッケージ（配布名と版）から来た言語。"""
 
     name: str
     version: str

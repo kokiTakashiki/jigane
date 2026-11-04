@@ -190,7 +190,7 @@ def test_mermaid_for_a_small_fixture(index: Index) -> None:
         "sequenceDiagram\n"
         "    participant P0 as Service [J2]\n"
         "    P0->>P0: Helper()\n"
-        "    Note over P0: 変更に関わらない呼び出し 3 件\n"
+        "    Note over P0: 変更に関わらない呼び出し 3 件: Line、Log\n"
     )
 
 

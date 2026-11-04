@@ -362,7 +362,7 @@ def test_mermaid_for_a_change_across_two_classes(tmp_path: Path) -> None:
         "    participant P0 as Service\n"
         "    participant P1 as Repo\n"
         "    P0->>P1: save() [J1]\n"
-        "    Note over P0: 変更に関わらない呼び出し 1 件\n"
+        "    Note over P0: 変更に関わらない呼び出し 1 件: touch\n"
     )
 
 

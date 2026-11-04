@@ -26,7 +26,7 @@ def model(before: Sequence[Platform] | None, after: Sequence[Platform]) -> list[
         current = new.get(key, [])
         previous = None if old is None else old.get(key, [])
         if previous is None:
-            # 機能レビュー式には変更前が無く、比べられない
+            # ファイルのレビューには変更前が無く、比べられない
             change = None
         else:
             # 下限を持つ対象は、前後とも変わらないものも一覧に残す

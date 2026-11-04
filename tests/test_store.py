@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -220,7 +222,7 @@ def test_kinds_never_share_a_directory(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 
 # (種類, キー, 保存先のディレクトリ名)。
-# 数字だけの機能は PR と同じ保存先になる。種類は保存先の名前からは引かず、
+# 数字だけのファイルのレビューは PR と同じ保存先になる。種類は保存先の名前からは引かず、
 # 保存した記録の id が決める
 ROUND_TRIP_TABLE = [
     (ReviewKind.PULL_REQUEST, "7", "7"),
@@ -319,3 +321,36 @@ def test_directory_stays_under_data_home(
     directory = ReviewId.parse(text).directory()
     assert directory.resolve().is_relative_to(tmp_path.resolve())
     assert directory != tmp_path.resolve()
+
+
+_POSIX_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows の chmod は読み取り専用の印しか変えず、POSIX の権限の値を持たないため",
+)
+
+
+@_POSIX_ONLY
+def test_ensure_data_home_creates_root_with_mode_0700(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "parent" / "jigane"
+    monkeypatch.setenv("JIGANE_HOME", str(home))
+    previous = os.umask(0o022)
+    try:
+        store.ensure_data_home()
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
+    assert stat.S_IMODE(home.parent.stat().st_mode) != 0o700
+
+
+@_POSIX_ONLY
+def test_ensure_data_home_keeps_mode_of_existing_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "jigane"
+    home.mkdir()
+    home.chmod(0o755)
+    monkeypatch.setenv("JIGANE_HOME", str(home))
+    store.ensure_data_home()
+    assert stat.S_IMODE(home.stat().st_mode) == 0o755

@@ -1,12 +1,12 @@
 """設計書のレビューの受け持ちの表と、見出しの語から導く受け持ちの印。
 
 三つの群（方針、実装、セキュリティ）のどれがどの懸念を問うかを、ここだけに置く。
-設計書の形のレビューで使う観点の文は、この表のほかに持たない。見出しの語は HEADING_WORDS に置く。
+設計書の形のレビューで使う観点の名前と文は、観点の表（groups/viewpoints.csv）が唯一の定義で、
+ここはそこから引く。見出しの語は HEADING_WORDS に置く。
 LLM は呼ばない。
 
-「ここだけ」の範囲は設計書の形の観点の文と表であり、観点の識別子の組には及ばない。
-`jigane.skills.macro.VIEWPOINTS`（M5 を含む文字列の組で、指摘のスキーマの enum に使う）と、
-図だけの雛形にも観点が残る。識別子の組を `ViewpointId` から導かないのは、図の形が M5 を使うため。
+`ViewpointId` は設計書の形で使う観点の識別子で、M5 を含まない。
+指摘のスキーマの enum に使う `jigane.skills.macro.VIEWPOINTS` は M5 を含むので、ここから導かない。
 """
 
 from collections.abc import Callable, Mapping
@@ -17,6 +17,7 @@ from typing import assert_never
 
 from jigane.design.parse import Section
 from jigane.groups.definitions import GROUP_BY_ID, GROUP_IDS, MACRO, SECURITY, GroupId
+from jigane.groups.viewpoints import of_group
 from jigane.judgment_map.kinds import Level, SectionKind
 
 
@@ -37,33 +38,12 @@ class Viewpoint:
     text: str
 
 
-# 観点の文の唯一の定義。雛形の `$viewpoints` と表の方針の行が、ここから引く
+# 設計書の形の観点。名前と文は groups/viewpoints.csv の name と design_question から引く
 VIEWPOINTS: Mapping[ViewpointId, Viewpoint] = MappingProxyType(
     {
-        ViewpointId.M0: Viewpoint("前提", "なぜこの設計が要るのか。既存の仕組みで補えないか。"),
-        ViewpointId.M1: Viewpoint(
-            "宣言と実現",
-            "宣言した目標を、提案設計が実現しているか。目標と非目標が食い違っていないか。"
-            "宣言が無いときは M1 を出さない。",
-        ),
-        ViewpointId.M2: Viewpoint(
-            "道筋",
-            "提案した分け方や依存の向きを続けた先で、目的に近づくか。"
-            "同じ形の手が他に残っていて、直す場所を一つにまとめるべきではないか。",
-        ),
-        ViewpointId.M3: Viewpoint(
-            "いまの構造との整合", "設計書が書いた形が、いまの形の図と矛盾しないか。"
-        ),
-        ViewpointId.M4: Viewpoint(
-            "利用者に向けたインターフェース",
-            "使う側の視点で、設計書の公開の契約の形や保存の形が、"
-            "後から直しにくい形になっているとき。",
-        ),
-        ViewpointId.M6: Viewpoint(
-            "技術選定",
-            "選んだ技術は、宣言した目的に最適か。"
-            "自作した仕組み（構文の読み、検証、依存の規則）は、既製の道具で置き換えられないか。",
-        ),
+        ViewpointId(row.number): Viewpoint(row.name, row.design_question)
+        for row in of_group(MACRO)
+        if row.design_question
     }
 )
 

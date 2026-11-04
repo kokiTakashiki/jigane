@@ -53,17 +53,23 @@ def fetch_metadata(owner: str, repo: str, number: int) -> PullRequestMetadata:
     )
 
 
-def ensure_repository_cache(owner: str, repo: str) -> Path:
+def repository_cache_path(owner: str, repo: str) -> Path:
+    """PR のために複製したリポジトリの場所。複製の有無は見ない。"""
     # URL の構文を通った名前が置き場の外へ出ないよう、パスを作るこの段でも名前の規則で確かめる
     for name in (owner, repo):
         if not store.COMPONENT_PATTERN.fullmatch(name):
             raise ValueError(f"リポジトリの名前が不正です: {name!r}")
-    cache_dir = store.data_home() / "repositories" / owner / f"{repo}.git"
+    return store.data_home() / "repositories" / owner / f"{repo}.git"
+
+
+def ensure_repository_cache(owner: str, repo: str) -> Path:
+    cache_dir = repository_cache_path(owner, repo)
     if cache_dir.exists():
         return cache_dir
     # gh repo clone は中で git を呼び、git が無いと gh の失敗として現れる。置き場を作る前に
     # git の有無を確かめ、無ければ「必要なコマンドが見つからない」として止める
     process.run_command(["git", "--version"])
+    store.ensure_data_home()
     cache_dir.parent.mkdir(parents=True, exist_ok=True)
     # 最終の名前へは clone が終わってから置き換えで載せる。途中で失敗しても、作りかけが
     # 最終の名前に現れて以後の git の実行を壊れたリポジトリへ向けることがない。

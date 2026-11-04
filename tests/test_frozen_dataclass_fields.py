@@ -11,6 +11,7 @@ tuple[X, ...] で持ち、組み立ての途中だけ list で溜める。
 import ast
 from pathlib import Path
 
+import pytest
 from ast_support import parse
 
 import jigane
@@ -66,9 +67,11 @@ def _list_annotated_fields() -> set[tuple[str, str]]:
     return found
 
 
+@pytest.mark.whole_tree
 def test_frozen_dataclass_fields_have_no_list_annotation() -> None:
     assert _list_annotated_fields() - set(EXCLUDED_FIELDS) == set()
 
 
+@pytest.mark.whole_tree
 def test_excluded_fields_still_exist() -> None:
     assert set(EXCLUDED_FIELDS) - _list_annotated_fields() == set()

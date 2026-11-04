@@ -188,8 +188,8 @@ def run_resolved(
     return _run_resolved(args, **kwargs)
 
 
-# blockReadsOutsideWorkingDirectories（jigane.llm_runs.claude の build_command）が効く最も古い版
-MINIMUM_CLAUDE_VERSION = (2, 1, 257)
+# claude-haiku-5-5 を知らない版は費用を誤って見積もり、上限で止まる。2.1.308 で正しいことを確かめた
+MINIMUM_CLAUDE_VERSION = (2, 1, 308)
 _CLAUDE_VERSION = re.compile(r"\s*(\d+)\.(\d+)\.(\d+)")
 _CLAUDE_VERSION_TIMEOUT_SECONDS = 60
 # 版を確かめ終えた claude の絶対パス。確かめは実体ごとにプロセスで一度だけ行う
@@ -250,15 +250,15 @@ def _require_claude_version(binary: str, kwargs: dict[str, Any]) -> None:
         raise CommandError(
             command,
             f"Claude Code の版を読み取れないため起動しません（{shown.strip()[-200:]}）。"
-            "`claude --version` が版を返すことを確かめ、2.1.257 以降を入れてください",
+            "`claude --version` が版を返すことを確かめ、2.1.308 以降を入れてください",
         )
     version = tuple(int(part) for part in match.groups())
     if version < MINIMUM_CLAUDE_VERSION:
         shown = ".".join(str(part) for part in version)
         raise CommandError(
             command,
-            f"Claude Code {shown} は作業ディレクトリの外の読み取りを拒む設定を無視するため、"
-            "起動しません。2.1.257 以降へ上げてください",
+            f"Claude Code {shown} は jigane の使うモデルの費用を誤って見積もることがあるため、"
+            "起動しません。2.1.308 以降へ上げてください",
         )
 
 

@@ -1,30 +1,36 @@
-"""方針のスキル（群の名前は macro）。道具を渡さない一回の起動で、図と表だけから外形を問う。"""
+"""方針のスキル（群の名前は macro）。道具を渡さない起動で、図と表だけから外形を問う。"""
 
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, assert_never
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from jigane.design.review_documents import read_attachments, read_document, version_drifts
+from jigane.figures.models import SequenceFigure
 from jigane.findings.discard import (
     KEY_FROM_CONCERN,
     Considered,
     DiscardedCandidate,
+    DiscardKind,
+    discard_kind_of,
 )
 from jigane.findings.discarded_nits import discarded_nit_candidate
 from jigane.findings.records import GroupResult, TriagedFinding, triaged
+from jigane.groups import viewpoints
 from jigane.groups.definitions import GROUP_BY_ID, MACRO
-from jigane.groups.policy_runs import PolicyShape, role_of
+from jigane.groups.policy_runs import PolicyRole, PolicyShape, role_of
 from jigane.judgment_map.changes import CHANGES_FILE, without_whole_deletions
 from jigane.judgment_map.declaration import demote_headings
 from jigane.llm_runs import claude
+from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import (
-    RoleShape,
-    role_findings_model,
+    KEY_DEEPENS,
+    RoleSpec,
 )
 from jigane.llm_runs.launch_failure import (
     DiscoveryLaunchFailed,
@@ -67,6 +73,7 @@ from jigane.skills import (
     policy_figures,
     policy_repeats,
     policy_tree,
+    shared_rules,
 )
 from jigane.skills import scope as scope_marks
 from jigane.skills.assembly import AssemblyInput
@@ -76,7 +83,6 @@ from jigane.skills.estimate_result import (
     PolicyEstimate,
 )
 from jigane.skills.macro_design import build_design_prompt, stamp_design_prompt
-from jigane.skills.output_models import json_schema_of
 from jigane.storage.store import review_lock
 from jigane.technology_list import materials as technology_materials
 
@@ -88,7 +94,22 @@ DIAGRAM_PROMPT = "macro_diagram"
 DIAGRAM_TOOLS = macro_shared.DIAGRAM_TOOLS
 SECTION_HISTORY = macro_shared.SECTION_HISTORY
 NO_HISTORY_TEXT = history.NO_HISTORY_TEXT
-VIEWPOINTS = ("M0", "M1", "M2", "M3", "M4", "M5", "M6")
+VIEWPOINTS = tuple(viewpoint.number for viewpoint in viewpoints.of_group(MACRO))
+# 結論の役。発見役の指摘と同じ形で、まとめた組と捨てた指摘を添える
+CONCLUDE = RoleSpec(group=GROUP, require_scope_fields=True, conclusion=True)
+# 原則の起動が書く指摘の欄。後段が読まない nit_reason、from_concern、out_of_scope、
+# triage_reason は外す。deepens は深掘りの区分を決めるので残す
+PRINCIPLE_WRITTEN = (
+    "severity",
+    "viewpoint",
+    "claim",
+    "body",
+    "evidence",
+    "declaration_ref",
+    "judgment_region",
+    "references",
+    "deepens",
+)
 DECLARATION_TOP_LEVEL = 4
 NO_DECLARATION_TEXT = macro_shared.NO_DECLARATION_TEXT
 NO_BOT_FINDINGS_TEXT = "無い。M5 は出さない。"
@@ -182,7 +203,7 @@ def verifier_changes_text(review: Review) -> str:
 
 
 NO_BACKGROUND_TEXT = "背景の材料は無い。"
-FEATURE_BACKGROUND_TEXT = "機能レビュー式では背景の材料を集めない。"
+FEATURE_BACKGROUND_TEXT = "ファイルのレビューでは背景の材料を集めない。"
 
 
 def background_prompt_text(review: Review) -> str:
@@ -236,6 +257,8 @@ class PolicySections:
     """
 
     figures: Mapping[changed_files.PrebuiltSection, str]
+    # 原則の起動の条件が、シーケンス図に流れがあるかを節の文でなく構造から読む
+    sequence: SequenceFigure
     repeats: str
     technology: str
 
@@ -253,11 +276,11 @@ def policy_sections(review: Review) -> PolicySections:
     外形だけに絞る。インターフェースは名前と位置、同じ形の箇所は短い塊だけ行の本文あり、技術選定は変化のあった技術だけ。
     """
     trees = policy_tree.trees_of(review)
-    prebuilt = changed_files.materials_sections(
-        review, review_diagrams.sequence_figure(review), folded=True
-    )
+    sequence = review_diagrams.sequence_figure(review)
+    prebuilt = changed_files.materials_sections(review, sequence, folded=True)
     return PolicySections(
         figures=prebuilt,
+        sequence=sequence,
         repeats=f"### {SECTION_REPEATS}\n\n"
         + policy_repeats.repeats_text(
             review, trees.after, line_limit=policy_repeats.POLICY_LINE_LIMIT
@@ -317,17 +340,22 @@ def build_diagram_prompt(
         materials=diagram_materials_text(assembly, sections),
         scope="\n".join(f"- {path}" for path in sorted(scope_files(review))),
         bot_findings=bot_findings(review) or NO_BOT_FINDINGS_TEXT,
+        **shared_rules.values_for(DIAGRAM_PROMPT),
         **prompt_parts(),
     )
 
 
-def check_input_budget(prompt: str, settings: claude.RunSettings) -> str | None:
-    """入力だけで 1 回の起動の上限の費用に達する見込みなら、起動の前に止める。切り詰めはしない。
+def check_input_budget(
+    prompt: str, settings: claude.RunSettings, index: int | None = None
+) -> str | None:
+    """プロンプトの大きさと出力の見込みから、1 回の起動の上限に達する見込みなら、起動の前に止める。
 
-    方針は 1 回の起動が実行の全体で、往復も 群の表の DIAGRAM_SHAPE.max_turns で絞るため、
+    切り詰めはしない。
+
+    方針は起動ごとに道具を渡さず、往復も 群の表の DIAGRAM_SHAPE.max_turns で絞るため、
     次の一往復の余裕は引かず、上限そのものと比べる（RunSettings.budget.reserve_margin が偽）。
     """
-    check = input_budget.check_input_budget(prompt, settings)
+    check = input_budget.check_input_budget(prompt, settings, index=index)
     if check.stop is not None:
         raise pipeline.InputBudgetError(GROUP, check.stop.message(), check.stop)
     return check.notice
@@ -376,19 +404,6 @@ def stamp_diagram_prompt(text: str) -> PromptStamp:
     return stamp_template(DIAGRAM_PROMPT, text)
 
 
-def conclude_schema() -> dict[str, Any]:
-    """結論の役の出力。findings は発見役の指摘と同じ形で、まとめた組と捨てた指摘を添える。"""
-    return json_schema_of(role_findings_model(_conclude_shape()))
-
-
-def _conclude_shape() -> RoleShape:
-    return RoleShape(viewpoints=VIEWPOINTS, require_scope_fields=True, conclusion=True)
-
-
-def lenient_conclude_model() -> type[BaseModel]:
-    return role_findings_model(_conclude_shape(), lenient=True)
-
-
 class LaunchFailed(pipeline.DiscoveryError):
     """方針の一回の起動が失敗した。実行の記録に残す失敗（額、出所、起動の記録を含む）を運ぶ。"""
 
@@ -402,7 +417,7 @@ def _failed_run(
     settings: claude.RunSettings,
     started: float,
     plan: "MacroPlan",
-    failed: LaunchFailed,
+    failures: Sequence[LaunchFailed],
 ) -> None:
     """起動が失敗した実行を runs.json の方針の記録に残す。指摘は触らない（前の回の結果が残る）。
 
@@ -411,7 +426,7 @@ def _failed_run(
     読むため。
     初回の失敗など、指摘を生んだ回が無ければ失敗だけの記録にする。
     """
-    failure = failed.failure
+    failure_records = tuple(failed.failure for failed in failures)
     with review_lock(review.id.directory()):
         runs = pipeline.read_runs(review.id.directory())
         previous = runs.get(GROUP)
@@ -421,7 +436,7 @@ def _failed_run(
         ):
             new_run = replace(
                 previous,
-                launch_failures=(failure,),
+                launch_failures=failure_records,
                 record_kind=RunRecordKind.SUCCEEDED_THEN_FAILED.value,
             )
         else:
@@ -434,12 +449,37 @@ def _failed_run(
                     drops=pipeline.DropCounts(),
                     elapsed_s=time.monotonic() - started,
                 ),
-                launch_failures=(failure,),
+                launch_failures=failure_records,
                 record_kind=RunRecordKind.FAILED_ONLY.value,
                 shape=plan.shape,
             )
         runs[GROUP] = new_run if previous is None else previous.next_round(new_run)
         pipeline.write_runs(review.id.directory(), runs)
+
+
+@dataclass(frozen=True)
+class ExtraLaunch:
+    """図の起動に加えて走らせる、一つの原則の起動。viewpoint はその原則の番号（"P1" など）。"""
+
+    viewpoint: str
+    prompt: str
+    # 起動の通し番号。図の起動が 0 で、原則の起動は 1 から
+    index: int
+
+
+PRINCIPLE_PROMPT = "macro_principles"
+
+
+@dataclass(frozen=True)
+class _Stopped:
+    """入力が上限を超え、起動しなかった一本。extra が None なら図の起動。"""
+
+    extra: ExtraLaunch | None
+    error: pipeline.InputBudgetError
+
+    def notice(self) -> str:
+        label = "図の起動" if self.extra is None else f"原則 {self.extra.viewpoint} の起動"
+        return f"{label}を上限のために見送りました。{self.error}"
 
 
 @dataclass(frozen=True)
@@ -452,6 +492,19 @@ class _Outcome:
     notice: str | None = None
 
 
+def _passes_on_from_principle(item: DiscardedCandidate) -> bool:
+    """原則の起動の「図から確かめられない」は、nit にも実装のレビューの懸念にもしない。"""
+    kind = discard_kind_of(item.reason) if item.kind is None else item.kind
+    return kind is not DiscardKind.UNVERIFIABLE_FROM_DIAGRAM
+
+
+def _without_null_deepens(finding: dict[str, Any]) -> dict[str, Any]:
+    """null の deepens を欄が無い形にする。保存の形は null を許さない。"""
+    if KEY_DEEPENS in finding and finding[KEY_DEEPENS] is None:
+        return {key: value for key, value in finding.items() if key != KEY_DEEPENS}
+    return finding
+
+
 def _outcome(
     review: Review,
     settings: claude.RunSettings,
@@ -460,15 +513,32 @@ def _outcome(
     drops: pipeline.DropCounts,
     *,
     has_bot_findings: bool,
+    extra: ExtraLaunch | None = None,
 ) -> _Outcome:
-    prompt = plan.build_prompt()
+    index = 0 if extra is None else extra.index
+    if extra is not None:
+        # 原則の起動は、検査も見積もりの警告も起動も、原則の組を通す
+        settings = replace(settings, budget=settings.budget.for_principle(extra.viewpoint))
+    prompt = plan.build_prompt() if extra is None else extra.prompt
+    spec = (
+        CONCLUDE
+        if extra is None
+        else replace(
+            CONCLUDE,
+            only_viewpoint=extra.viewpoint,
+            model_written=PRINCIPLE_WRITTEN,
+            omit_unread=True,
+        )
+    )
+    role = role_of(plan.shape) if extra is None else PolicyRole.PRINCIPLE
+    stamp = plan.stamp(prompt) if extra is None else stamp_template(PRINCIPLE_PROMPT, prompt)
     notice = join_notices(
-        check_input_budget(prompt, settings),
+        check_input_budget(prompt, settings, index),
         expected_budget_warning(review, plan.shape, prompt, settings),
     )
     invocation = settings.invocation(
         prompt=prompt,
-        json_schema=conclude_schema(),
+        json_schema=spec.schema(),
         working_directory=working_directory,
         tools=DIAGRAM_TOOLS,
     )
@@ -477,13 +547,11 @@ def _outcome(
     except claude.ClaudeInvocationError as error:
         # 起動の上限に達して止まったときもここに来る。部分の結果は使えず、指摘は保存しない。
         # 払った分と失敗の理由は run_macro が実行の記録だけに残す
-        role = role_of(plan.shape).value
-        stamp = plan.stamp(prompt)
         raise LaunchFailed(
             f"一回の起動が失敗しました。{error}",
             DiscoveryLaunchFailed(
-                0,
-                role,
+                index,
+                role.value,
                 error.kind,
                 str(error),
                 1,
@@ -494,7 +562,7 @@ def _outcome(
         ) from error
     output = result.structured_output or {}
     try:
-        validated = lenient_conclude_model().model_validate(output)
+        validated = spec.lenient_model().model_validate(output)
     except ValidationError as error:
         first = error.errors()[0]
         location = ".".join(str(part) for part in first["loc"])
@@ -504,8 +572,9 @@ def _outcome(
     # 下流（prepare_candidates など）は辞書を前提にする。検証した値を辞書に戻すのはここ一度だけ。
     # モデルは実行時に組み立てるため属性を静的に読めず、MISSING の欄は戻した辞書でキーが無くなる
     checked = validated.model_dump(mode="json")
+    written = [_without_null_deepens(finding) for finding in checked["findings"]]
     prepared = pipeline.prepare_candidates(
-        checked["findings"], working_directory, has_bot_findings=has_bot_findings, drops=drops
+        written, working_directory, has_bot_findings=has_bot_findings, drops=drops
     )
     # from_concern は実装の群が方針の懸念から作った指摘に付く欄で、方針の群の指摘には意味が無い
     final = [
@@ -515,10 +584,15 @@ def _outcome(
         for finding in prepared
     ]
     record = pipeline.stored_invocation(
-        role_of(plan.shape), None, result.record, plan.stamp(prompt)
+        role,
+        None,
+        result.record,
+        stamp,
+        viewpoint=None if extra is None else extra.viewpoint,
     )
     discarded = tuple(DiscardedCandidate.from_json(item) for item in checked["discarded"])
-    considered = Considered(len(checked["findings"]) + len(discarded), discarded)
+    kept = discarded if extra is None else tuple(filter(_passes_on_from_principle, discarded))
+    considered = Considered(len(written) + len(discarded), kept)
     return _Outcome(tuple(final), (record,), considered, notice)
 
 
@@ -549,9 +623,9 @@ class MacroPlan:
 
 
 ESTIMATE_NOTE = (
-    "図だけの形は 1 回の起動で、道具を渡しません。入力は宣言、背景、図と表、前の回の指摘で、"
-    "見積もりはそのプロンプトの大きさで数えます。道具の往復が無いので文脈の送り直しは無く、"
-    "倍率は掛けません。出力と推論の分は含みません。"
+    "図だけの形は図の起動 1 回と原則ごとの起動 4 回、計 5 回の起動で、道具を渡しません。"
+    "入力は宣言、背景、図と表、前の回の指摘で、見積もりは 5 本のプロンプトの大きさの和で数えます。"
+    "道具の往復が無いので文脈の送り直しは無く、倍率は掛けません。出力と推論の分は含みません。"
 )
 
 
@@ -666,7 +740,11 @@ def _no_material_run(
     return MacroRun((), run_state, join_notices(warning, notice))
 
 
-def run_macro(assembly: AssemblyInput, settings: claude.RunSettings) -> MacroRun:
+def run_macro(
+    assembly: AssemblyInput,
+    settings: claude.RunSettings,
+    extras: Sequence[ExtraLaunch] = (),
+) -> MacroRun:
     """assembly の履歴は縁が読んだもので、資料の組み立てで読み直さない。"""
     review = assembly.review
     started = time.monotonic()
@@ -679,13 +757,58 @@ def run_macro(assembly: AssemblyInput, settings: claude.RunSettings) -> MacroRun
         )
     drops = pipeline.DropCounts()
     has_bot_findings = bot_findings(review) is not None
-    try:
-        outcome = _outcome(
-            review, settings, working_directory, plan, drops, has_bot_findings=has_bot_findings
+    launches: list[ExtraLaunch | None] = [None, *extras]
+
+    def launch(index: int) -> tuple[_Outcome, pipeline.DropCounts] | LaunchFailed | _Stopped:
+        # 起動ごとに数え、合算は並列の後で行う
+        own = pipeline.DropCounts()
+        try:
+            outcome = _outcome(
+                review,
+                settings,
+                working_directory,
+                plan,
+                own,
+                has_bot_findings=has_bot_findings,
+                extra=launches[index],
+            )
+        except LaunchFailed as failed:
+            return failed
+        except pipeline.InputBudgetError as over:
+            # 上限を超える一本は起動しない。他の起動は止めず、その結果を使う
+            return _Stopped(launches[index], over)
+        return outcome, own
+
+    with ThreadPoolExecutor(max_workers=len(launches)) as pool:
+        results = list(pool.map(launch, range(len(launches))))
+    stopped = [r for r in results if isinstance(r, _Stopped)]
+    failures = [r for r in results if isinstance(r, LaunchFailed)]
+    succeeded = [r for r in results if isinstance(r, tuple)]
+    if stopped and not succeeded and not failures:
+        # 一本も起動しなかったので、記録に残す実行が無い（シャードと同じ）
+        if len(launches) == 1:
+            raise stopped[0].error
+        raise pipeline.InputBudgetError(
+            GROUP,
+            f"全 {len(launches)} 起動が失敗しました"
+            f"（{len(stopped)} 個は起動しませんでした）。" + str(stopped[0].error),
+            stopped[0].error.stop,
         )
-    except LaunchFailed as failed:
-        _failed_run(review, settings, started, plan, failed)
-        raise
+    if not succeeded:
+        _failed_run(review, settings, started, plan, failures)
+        raise failures[0]
+    # 一部が失敗しても、成功した起動の指摘を使い、失敗は launch_failures に積む
+    for _, own in succeeded:
+        drops.without_evidence += own.without_evidence
+        drops.without_bot_findings += own.without_bot_findings
+        drops.invalid_schema += own.invalid_schema
+    merged_discarded = tuple(item for o, _ in succeeded for item in o.considered.discarded)
+    outcome = _Outcome(
+        tuple(f for o, _ in succeeded for f in o.final),
+        tuple(i for o, _ in succeeded for i in o.invocations),
+        Considered(sum(o.considered.discovered for o, _ in succeeded), merged_discarded),
+        join_notices(*(o.notice for o, _ in succeeded), *(s.notice() for s in stopped)),
+    )
 
     def shape_finding(candidate: dict[str, Any]) -> dict[str, Any]:
         # in_scope と scope_reason は起動そのものが書く。
@@ -721,6 +844,8 @@ def run_macro(assembly: AssemblyInput, settings: claude.RunSettings) -> MacroRun
         discarded=outcome.considered.discarded,
         record_kind=RunRecordKind.SUCCEEDED.value,
         shape=plan.shape,
+        launch_failures=tuple(failed.failure for failed in failures) or None,
+        budget_stops=tuple(s.error.stop.as_record() for s in stopped if s.error.stop) or None,
     )
     pipeline.save_run(review, GroupResult(tuple(final)), run_state, GROUP)
     return MacroRun(tuple(final), run_state, join_notices(plan.warning, outcome.notice))
@@ -731,7 +856,9 @@ def estimate_macro(assembly: AssemblyInput) -> PolicyEstimate:
     plan = macro_plan(assembly)
     prompt = plan.build_prompt()
     prompt_bytes = len(prompt.encode("utf-8"))
-    discovery_input_tokens = claude.estimate_input_tokens(prompt_bytes)
+    discovery_input_tokens = resolve_run_defaults(GROUP, plan.shape, None).budget.prompt_tokens(
+        prompt_bytes
+    )
     past_run = pipeline.past_run(review, GROUP, plan.shape)
     largest_sections = tuple(input_budget.largest_sections(prompt))
     match plan.shape:

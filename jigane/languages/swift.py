@@ -2,7 +2,14 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages import calls_core, swift_concurrency, swift_regex, type_names
+from jigane.languages import (
+    calls_core,
+    swift_concurrency,
+    swift_regex,
+    swift_string_comparisons,
+    swift_value_sets,
+    type_names,
+)
 from jigane.languages.base import (
     Argument,
     BodyBounds,
@@ -24,12 +31,15 @@ from jigane.languages.base import (
     RegexScan,
     Sharing,
     Step,
+    StringComparison,
     TypeDecl,
     TypeKind,
     TypeScope,
+    ValueSet,
     Visibility,
     import_nodes,
     leading_components,
+    parse,
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
@@ -768,6 +778,14 @@ class SwiftAdapter:
 
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return swift_regex.regex_scan(root_node, path)
+
+    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+        return swift_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
+
+    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+        return swift_string_comparisons.string_comparisons_of(
+            parse(self, source.encode()).root_node, path
+        )
 
     def locals_of(self, body_node: Node) -> Locals:
         return calls_core.locals_of(body_node, _RULES)

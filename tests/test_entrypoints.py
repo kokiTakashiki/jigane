@@ -42,10 +42,14 @@ def test_justfile_matches_the_definition() -> None:
 
 
 def test_readme_usage_code_blocks_start_with_jigane() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    blocks = fences(readme, "## 使い方")
+    commands = (ROOT / "docs" / "commands.md").read_text(encoding="utf-8")
+    blocks = fences(commands, "# コマンドの使い方")
     assert blocks
     for block in blocks:
+        if block.info == "yaml":
+            # jigane flaky の CI の例。ステップの run が jigane を呼ぶ
+            assert "run: jigane " in block.content, block.content
+            continue
         assert block.info == "bash"
         assert block.content.startswith("jigane "), block.content
 

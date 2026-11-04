@@ -12,7 +12,7 @@ from jigane.languages.plugins import EnabledLanguage
 from jigane.skills.policy_figures import REGISTRY, LanguageAgnostic
 
 NOTICE_TRUST = (
-    "外の言語のコードと文法は、jigane と同じ権限で動きます。"
+    "追加の言語のコードと文法は、jigane と同じ権限で動きます。"
     "出どころを信頼できる配布だけを有効にしてください。"
 )
 NOTICE_GRAMMAR = "文法を取得してください: jigane languages fetch"
@@ -486,6 +486,7 @@ _EXTRA = {
     "java": set(),
     "swift": set(),
 }
+_FIGURE_ONLY_INTERFACES = {key: {"ValueSetReader"} for key in _EXTRA}
 _ALL_INTERFACES = {
     "SequenceAdapter",
     "ConcurrencyAdapter",
@@ -522,7 +523,11 @@ def test_builtin_figures_follow_the_figure_interfaces(
         figures = rows[name]["figures"]
         assert isinstance(figures, dict)
         assert set(figures) == {key for key, _ in language_figures}
-        expected = {key for key, interface in language_figures if interface in _COMMON | extra}
+        # ValueSetReader は言語一覧の口の列には出さず、図の有無にだけ現れる
+        extra_for_figures = extra | _FIGURE_ONLY_INTERFACES.get(name, set())
+        expected = {
+            key for key, interface in language_figures if interface in _COMMON | extra_for_figures
+        }
         assert {key for key, value in figures.items() if value} == expected
 
 

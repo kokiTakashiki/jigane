@@ -27,7 +27,6 @@ from jigane.languages.plugins import (
     RecordError,
     discover,
     load_enabled,
-    sanitize_text,
     save_enabled,
     validate_plugin,
 )
@@ -104,7 +103,7 @@ def test_suffix_overlap_between_externals_fails_both(install: Installer, tmp_pat
     for name, other in (("alpha", "beta"), ("beta", "alpha")):
         failure = failure_of(states, name)
         assert failure.reason_kind is ReasonKind.VALIDATION_ERROR
-        assert f"拡張子 .x が外の言語 {other} と重なります" in failure.detail
+        assert f"拡張子 .x が追加の言語 {other} と重なります" in failure.detail
 
 
 def test_suffix_overlap_with_a_builtin_is_not_an_error(install: Installer, tmp_path: Path) -> None:
@@ -286,11 +285,6 @@ def test_unreadable_enabled_file_raises(tmp_path: Path) -> None:
     path.mkdir()
     with pytest.raises(EnabledFileError):
         load_enabled(path)
-
-
-def test_sanitize_text_removes_terminal_controls_and_keeps_newline_and_tab() -> None:
-    raw = "a\x1b[31mb\x1b]0;t\x07c\x08d\x9be\x7ff\tg\nh\x1bZi"
-    assert sanitize_text(raw) == "abcdef\tg\nhi"
 
 
 def test_enabled_language_json_round_trip() -> None:

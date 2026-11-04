@@ -55,6 +55,8 @@ def refresh_review(
 ) -> RefreshResult:
     """作者の修正を取り込む。intent か intent_file があれば、宣言を利用者の文に差し替える。
 
+    inputs.sarif があれば、PR、範囲、機能のレビューは、静的検査の指摘をその SARIF に置き換える。
+    設計書のレビューには重ねないので、渡すと ReviewError になる。
     出所の型から更新の手への振り分けは、ここの一か所だけが持つ。
     """
     review = review_module.load_review(review_id)

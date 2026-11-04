@@ -1,0 +1,14 @@
+from dataclasses import dataclass
+
+
+@dataclass
+class ServerConfig:
+    host: str
+    port: int
+    timeout_s: float
+    use_tls: bool
+
+
+def address(config):
+    scheme = "https" if config.use_tls else "http"
+    return f"{scheme}://{config.host}:{config.port}"

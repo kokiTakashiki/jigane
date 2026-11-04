@@ -1,4 +1,4 @@
-{#- レポートの文面。機能レビュー式と差分レビュー式の両方で使える。 -#}
+{#- レポートの文面。ファイルのレビューと差分のレビューの両方で使える。 -#}
 {% macro item(finding) %}
 - **{{ finding.number }}** [{{ finding.severity }}] {{ finding.claim | md }}{% if finding.evidence %}（{% for e in finding.evidence %}`{{ e.location }}`{{ "、" if not loop.last }}{% endfor %}）{% endif %}
 {% if finding.body %}

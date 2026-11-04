@@ -12,15 +12,16 @@
 | `base.parse` | アダプタの文法でソースを構文木にします |
 | `base.comment_nodes`、`base.leaves_and_comments`、`base.import_rows` | 構文木からコメントの節点、葉とコメントの節点、import の文が占める行を取り出します。コメントと import の判定は、呼ぶ側が行頭の見かけで行わず、これを使います |
 | `base.ImportAdapter`、`base.Import` | import の文からモジュールの名前と行を取り出す口（`imports`）と、技術の単位への束ね方（`technology_of`）を定めます。`jigane.technology_list` が使います |
-| `base.FilePathAdapter`、`base.FilePathPattern`、`base.FileUsage` | 書く、または読むファイルの名前の組み立て（`open` の第一引数、`write_text` などの受け手、`Path(...)` と `/` の式）を原文のまま取り出す口（`file_path_patterns`）を定めます。Python のアダプタだけが持ち、他の言語は口を持ちません（未対応と該当なしを分けます）。`jigane.skills.policy_file_paths` が使います |
-| `base.StoreAccessReader`、`base.StoreAccess`、`base.StoreSide`、`base.StoreRole` | 関数ごとの保存物の書く側と読む側（役割は `StoreRole` の値で持ち、`StoreAccess` は空でない側の組を持ちます。鍵、作る型、鍵の語彙の名前、ファイル名）を、複数ファイルにまたがって取り出す口（`store_accesses`）を定めます。定数と列挙型の解決、import の追跡は口の側が行います。Python のアダプタだけが持ち（実装は `python_stores`）、他の言語は口を持ちません。`jigane.skills.policy_stores` が使い、突き合わせと束ねは言語に依らず向こうで行います |
+| `base.FilePathAdapter`、`base.FilePathPattern`、`base.FileUsage` | 書く、または読むファイルの名前の組み立て（`open` の第一引数、`write_text` などの受け手、`toml.load(path)` のような外の道具へパスを渡す呼び出し、`Path(...)` と `/` の式）を原文のまま取り出す口（`file_path_patterns`）を定めます。Python のアダプタだけが持ち、他の言語は口を持ちません（未対応と該当なしを分けます）。`jigane.skills.policy_file_paths` が使います |
+| `base.StoreAccessReader`、`base.StoreAccess`、`base.StoreSide`、`base.StoreRole` | 関数ごとの保存物の書く側と読む側（役割は `StoreRole` の値で、形式は `StoreFormat`（JSON、CSV、文字列を組んで書く独自の形式）で持ち、`StoreAccess` は空でない側の組を持ちます。鍵、作る型、鍵の語彙の名前、ファイル名）を、複数ファイルにまたがって取り出す口（`store_accesses`）を定めます。定数と列挙型の解決、import の追跡は口の側が行います。ファイル名が関数の引数で渡る保存物は「関数名 の引数 引数名」の名前で関数ごとに束ね、独自の形式は書く側と読む側の関数だけを持って鍵は持ちません。Python のアダプタだけが持ち（実装は `python_stores`）、他の言語は口を持ちません。`jigane.skills.policy_stores` が使い、突き合わせと束ねは言語に依らず向こうで行います |
+| `base.ValueSetReader`、`base.ValueSet`、`base.StringComparison` | 要素がすべて短い文字列のリテラルで、要素が三つ以上の並び（tuple、set、frozenset、list、列挙型の値）を、ファイルごとに取り出す口（`value_sets`）と、文字列のリテラルとの比較（等値、`in`、`startswith` と `endswith`、正規表現の一致。比べている相手の式の原文 `subject` は Python だけが埋め、他の言語は空）を取り出す口（`string_comparisons`）を定めます。値の組は Python（`python_value_sets`）、Java（`java_value_sets`）、C#（`csharp_value_sets`）、Swift（`swift_value_sets`）が読み、拾う形は各モジュールの docstring に書きます。比較は Python（`python_string_comparisons`）、Java（`java_string_comparisons`）、C#（`csharp_string_comparisons`）、Swift（`swift_string_comparisons`）が読みます。値の組には、名前に束ねた定義か名前の無いリテラルかの区別（`ValueSet.kind`、`DefinitionKind`）を持たせ、四言語は、宣言の名前を取り出せたときに名前に束ねた定義、名前が取れず宣言にも代入にも含まれないと構文木から確かめられたときに名前の無いリテラル、それ以外（宣言や代入の中にあるが名前が取れない並び）を未決とします（既定は未決で、プラグインは手直し無しで動きます）。短い文字列の上限と要素の最小の数は `value_set_core` が一か所で持ちます。`jigane.policy_materials.value_sets` が使い、珍しい値の絞り込みと重なる組のまとめは言語に依らず向こうで行います |
 | `registry.adapter_for` | パスの拡張子から、登録済みのアダプタを引きます。無ければ `None` を返します |
 | `registry.is_test_path`、`registry.is_build_path` | 全アダプタのパターンでテストとビルドの定義を判定します |
 | `python.PythonAdapter`、`java.JavaAdapter`、`swift.SwiftAdapter`、`csharp.CSharpAdapter` | 各言語のアダプタの実装を持ちます |
 | `calls_core`、`concurrency_core`、言語別の `*_concurrency.py` | 呼び出しの抽出、受け手の判別、局所変数の走査と、並行処理の図の抽出の、言語に依らない骨組みを `calls_core` と `concurrency_core` が持ちます。言語ごとの節点の表と判定は、`python_concurrency`、`java_concurrency`、`csharp_concurrency`、`swift_concurrency` が持ちます |
 | 言語別の `*_regex.py`、`regex_locals` | 正規表現の書き場所を構文木だけから読みます（`python_regex`、`java_regex`、`csharp_regex`、`swift_regex`）。引数が局所の識別子のときの代入の追跡は、四つの言語で共通の `regex_locals` が持ちます |
 | `grammars`、`fetch_main` | tree-sitter の文法を固定の置き場に取得し、読み込む前に sha256 を記録と照合します。`fetch_main` は、依存の導入のあとに文法を取得する入口（`python -m jigane.languages.fetch_main fetch`）です |
-| `plugin`、`plugins`、`data_places` | 外の言語の契約（`LanguagePlugin`、`ApiVersion`）と、その読み込みと、言語の資料（照会と flaky の型）の置き場を持ちます。外のパッケージが import する窓口は `api` です |
+| `plugin`、`plugins`、`data_places` | 追加の言語の契約（`LanguagePlugin`、`ApiVersion`）と、その読み込みと、言語の資料（照会と flaky の型）の置き場を持ちます。プラグインのパッケージが import する窓口は `api` です |
 | `type_names`、`csharp_xaml`、`python_arguments`、`python_file_paths`、`python_walk` | アダプタが組み合わせて使う部品です。型注記の原文から単純な型の名前を取り出し（`type_names`）、XAML のイベント結線から分離コードのメソッドの名前を読み（`csharp_xaml`）、argparse の副コマンドと引数（`python_arguments`）とファイル名の組み立て（`python_file_paths`）を構文木から読みます。`python_walk` は、Python の構文木を読むモジュールが共有する足場です |
 | `bridges/*.toml` | 言語ごとの橋渡しの表です。どの技術からどの技術へつなぐかを、見つけ方（`via`）とあわせて持ち、`technology_list.bridges` が読みます |
 
@@ -28,9 +29,9 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`preconditions`、`storage`
+読むサブパッケージ：`preconditions`、`storage`、`text`
 
-読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`regex`、`sequence`、`skills`、`static_analysis`、`technology_list`
+読まれるサブパッケージ：`commands`、`design`、`flaky`、`judgment_map`、`llm_runs`、`policy_materials`、`regex`、`sequence`、`skills`、`technology_list`
 
 <!-- END GENERATED: dependencies -->
 
@@ -95,9 +96,9 @@
 
 flaky の検出は、アダプタの `name` を `queries/<言語>.toml` のファイル名と対応させます。言語を足したら `jigane.flaky` の README の手順も行います。検出は query の言語がアダプタの `name` と等しいものだけを適用し、アダプタに無い言語の queries ファイルは `load_catalog` が `CatalogError` にするためです。
 
-## 外の言語を書く
+## 追加の言語を書く
 
-外のパッケージから言語を足すプラグインの書き方です。動く例は `examples/jigane-language-kotlin/` にあり、その README が手順の全体を持ちます。
+プラグインのパッケージから言語を追加するプラグインの書き方です。動く例は `examples/jigane-language-kotlin/` にあり、その README が手順の全体を持ちます。
 
 - `pyproject.toml` の `[project.entry-points."jigane.languages"]` に、言語名を名前、`パッケージ:plugin` を値とする項目を置きます。値は引数の無い関数です。
 - `plugin()` は `jigane.languages.api.LanguagePlugin` を返します。`origin` は `importlib.metadata.distribution(<配布名>)` から `Distribution(名前, 版)` を作ります。`api_version` は `PLUGIN_API_VERSION` を渡します。
@@ -105,6 +106,6 @@ flaky の検出は、アダプタの `name` を `queries/<言語>.toml` のフ�
 - 窓口の Protocol のメソッドの引数は、すべて位置専用（`/`）です。jigane は引数を位置で渡し、名前では渡しません。実装の引数の名前は自由で、使わない引数は頭に `_` を付けてかまいません。
 - 宣言を組み立てるときは、行の範囲を自前で計算せず `span_of` と `split_declaration` を使います。`split_declaration` は節点から `span`、`signature`、`body` を一度に返し、本体を一つの節点で持つ言語は、その節点を `BodyBounds` の開きと閉じの両方に渡します。本体の無い宣言には `None` を渡します。
 - `GrammarSpec` の `pack_version` は tree-sitter-language-pack の版、`hashes` は platform の名前（`macos-arm64`、`linux-x86_64` など）から共有ライブラリの sha256 への対応です。ハッシュは、パックのリリースの `parsers-<platform>.tar.zst` をマニフェストの sha256 と照合してから展開し、取り出した共有ライブラリ（`libtree_sitter_<文法名>`）から取ります。パックの版を上げたら取り直します。組み込みの文法の記録（`grammar-hashes.json`）も一つの版の値なので、`pyproject.toml` はパックを `==` で一つの版に固定し、版を上げるときは固定と記録を同じ変更で直します。文法はパックの中の名前だけを指せます。
-- 照会と flaky の型の資料は、`LanguagePlugin.data` の置き場に `languages/queries/<文法名>.toml` と `flaky/queries/<言語名>.toml` で置きます。本体と同じ名前のファイルを置くと、その外の言語ごと使えません。
+- 照会と flaky の型の資料は、`LanguagePlugin.data` の置き場に `languages/queries/<文法名>.toml` と `flaky/queries/<言語名>.toml` で置きます。本体と同じ名前のファイルを置くと、その追加の言語ごと使えません。
 - 宣言の一覧以外の図に使う口の Protocol は `jigane.languages.api.capabilities` にあります。試験的な段で、版の約束の外にあり、jigane の版で形が変わることがあります。口を持たない言語は、その図に対応しません。
 - 契約の版は `PLUGIN_API_VERSION`（`ApiVersion(major, minor)`）です。核の型の削除と変更は major を、追加は minor を上げます。jigane は、プラグインの宣言した版の major が等しく、minor が jigane の minor 以下のときに読み込みます。

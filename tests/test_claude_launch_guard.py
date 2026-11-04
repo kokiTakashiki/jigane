@@ -76,7 +76,9 @@ def test_replaced_binary_is_refused_by_its_bare_name(
     assert launched.commands == []
 
 
-def test_listed_commands_launch(launched: Launched) -> None:
+def test_listed_commands_launch(launched: Launched, monkeypatch: pytest.MonkeyPatch) -> None:
+    # この試験は一覧との照合を見る。Windows のパスの解決は tests/test_process_windows.py が見る
+    monkeypatch.setattr(process, "resolve_command", lambda args, _env: args)
     assert run_command(["git", "--version"]) == "ok"
     assert run_command(["gh", "--version"]) == "ok"
     assert launched.commands == [["git", "--version"], ["gh", "--version"]]
@@ -109,7 +111,11 @@ def test_launchers_refuse_executables_outside_the_list(
 
 
 @pytest.mark.parametrize("executable", ["GIT", "Git.exe", "/usr/bin/git", r"C:\bin\GH.EXE"])
-def test_listed_names_match_by_any_spelling(launched: Launched, executable: str) -> None:
+def test_listed_names_match_by_any_spelling(
+    launched: Launched, monkeypatch: pytest.MonkeyPatch, executable: str
+) -> None:
+    # この試験は一覧との照合を見る。Windows のパスの解決は tests/test_process_windows.py が見る
+    monkeypatch.setattr(process, "resolve_command", lambda args, _env: args)
     assert run_command([executable, "--version"]) == "ok"
     assert launched.commands == [[executable, "--version"]]
 
@@ -122,7 +128,7 @@ def test_llm_runs_entrance_launches_claude(
         (tmp_path / name).chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(process, "_checked_claude_binaries", set())
-    launched.version = "2.1.292 (Claude Code)"
+    launched.version = "2.1.308 (Claude Code)"
     result = run_claude_resolved([CLAUDE, "-p"])
     assert result.stdout == "ok"
     # 版を確かめた実体と同じ絶対パスで起動する

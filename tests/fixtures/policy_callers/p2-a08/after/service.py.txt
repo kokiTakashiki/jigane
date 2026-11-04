@@ -1,0 +1,6 @@
+from client import fetch_user
+
+
+def greet(directory, user_id):
+    user = fetch_user(directory, user_id, default="guest")
+    return "hello " + user

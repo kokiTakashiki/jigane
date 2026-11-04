@@ -1,4 +1,4 @@
-"""SARIF を重ねたレビューの refresh を、PR のレビューと機能のレビューで確かめる。"""
+"""SARIF を重ねたレビューの refresh を、PR のレビューとファイルのレビューで確かめる。"""
 
 import json
 import shutil

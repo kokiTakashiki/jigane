@@ -5,7 +5,7 @@ import pytest
 
 from jigane.commands.views import findings as findings_view
 from jigane.commands.views import review as review_view
-from jigane.pull_request_context.background import Background, PastPullRequest
+from jigane.pull_request_context.background import Background, PastPullRequest, PathOwners
 
 HOSTILE_PATH = "src/\x1b[31ma\nFORGED 区間 x\tb.py"
 
@@ -46,3 +46,13 @@ def test_background_title_and_owners_are_folded_to_one_line() -> None:
     lines = review_view.background_lines(review)  # type: ignore[arg-type]  # 背景だけを読む
     assert "  過去の PR #1 title FORGED（a.py）" in lines
     assert all("\n" not in line and "\x1b" not in line for line in lines)
+
+    owned = Background(
+        documents=(),
+        past_changes=(PastPullRequest(1, "t\x1b[2Jitle\nFORGED", ("a.py",)),),
+        owners=(PathOwners("a.py", ("team\n\x1b[31mred\tb",)),),
+    )
+    owned_review = SimpleNamespace(background=owned)
+    owned_lines = review_view.background_lines(owned_review)  # type: ignore[arg-type]  # 背景だけを読む
+    assert "  所有者 a.py: team red b" in owned_lines
+    assert all("\n" not in line and "\x1b" not in line for line in owned_lines)

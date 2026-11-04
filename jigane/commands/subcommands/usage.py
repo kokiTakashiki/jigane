@@ -205,7 +205,7 @@ _DEFINITIONS = (
     _GROUP,
     _ROLE,
     _field(UsageField.MODEL, "モデル", text=True, display=Display.WIDE_ONLY),
-    _role_field(UsageField.PROMPT_VERSION, "プロンプト版", text=True),
+    _role_field(UsageField.PROMPT_VERSION, "プロンプトの型の版", text=True),
     _role_field(UsageField.PROMPT_CHARS, "文字数", display=Display.WIDE_ONLY),
     _field(UsageField.CALLS, "起動"),
     _field(UsageField.TOTAL_TOKENS, "トークン合計", display=Display.COMPACT_ONLY),
@@ -389,23 +389,30 @@ def _usage_rows(review: Review, history: HistoryLoad) -> list[UsageRow]:
         model = runs[group].model
         # effort を記録する前の実行には無い
         effort = runs[group].effort
-        buckets: dict[tuple[str | None, str | None], list[StoredInvocation]] = defaultdict(list)
+        buckets: dict[tuple[str | None, str | None, str | None], list[StoredInvocation]] = (
+            defaultdict(list)
+        )
         for item in pipeline.all_invocations(runs[group]):
-            buckets[(item.role, None if item.stamp is None else item.stamp.version)].append(item)
+            # 起動のモデルの無い古い記録は、実行のモデルで表す
+            invoked = item.record.model or model
+            buckets[
+                (item.role, None if item.stamp is None else item.stamp.version, invoked)
+            ].append(item)
         group_rows = [
-            _usage_row(group, role, model, effort, version, items=items)
+            _usage_row(group, role, invoked, effort, version, items=items)
             for role in ROLE_LABELS
-            for (bucket_role, version), items in sorted(
-                buckets.items(), key=lambda entry: entry[0][1] or ""
+            for (bucket_role, version, invoked), items in sorted(
+                buckets.items(), key=lambda entry: (entry[0][1] or "", entry[0][2] or "")
             )
             if bucket_role == role
         ]
+        row_models = list(dict.fromkeys(row.model for row in group_rows if row.model))
         rows += group_rows
         rows.append(
             _total_row(
                 group,
                 GroupTally(
-                    model=model,
+                    model=", ".join(row_models) if row_models else model,
                     effort=effort,
                     rows=tuple(group_rows),
                     findings=tuple(state.groups.get(group, [])),

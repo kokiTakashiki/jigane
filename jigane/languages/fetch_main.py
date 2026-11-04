@@ -6,17 +6,17 @@ from typing import assert_never
 
 from jigane.languages import registry
 from jigane.languages.grammars import GrammarError, fetch
-from jigane.languages.plugins import sanitize_text
+from jigane.text.terminal import sanitize_text
 
 
 @dataclass(frozen=True)
 class FetchAborted:
-    """組み込みの文法の失敗や外の言語の不在で、取得が途中で止まった。"""
+    """組み込みの文法の失敗や追加の言語の不在で、取得が途中で止まった。"""
 
 
 @dataclass(frozen=True)
 class Fetched:
-    """取得し終えた。取得できた外の言語の名前と、失敗した言語の名前を持つ。"""
+    """取得し終えた。取得できた追加の言語の名前と、失敗した言語の名前を持つ。"""
 
     fetched_external: tuple[str, ...]
     failed_languages: tuple[str, ...]
@@ -34,7 +34,8 @@ def fetch_and_report() -> FetchOutcome:
         sys.stderr.write(f"jigane: {sanitize_text(str(error))}\n")
         return FetchAborted()
     for failure in failures:
-        # 言語名も失敗の文も外のコードと外の宣言が決めた文字列で、端末へ出る前に制御文字を除く
+        # 言語名も失敗の文もプラグインのコードと追加の言語の宣言が決めた文字列で、
+        # 端末へ出る前に制御文字を除く
         language = sanitize_text(failure.target.language)
         reason = sanitize_text(str(failure.reason))
         sys.stderr.write(f"jigane: 言語 {language}: {reason}\n")

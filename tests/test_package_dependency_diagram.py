@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import grimp
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "jigane"
@@ -58,6 +59,7 @@ def contract_layers() -> dict[str, set[str]]:
     }
 
 
+@pytest.mark.whole_tree
 def test_every_subpackage_is_in_exactly_one_readme_layer() -> None:
     layers = diagram_layers()
     packages = subpackages()
@@ -77,6 +79,7 @@ def test_every_subpackage_is_in_exactly_one_readme_layer() -> None:
     )
 
 
+@pytest.mark.whole_tree
 def test_readme_layers_match_import_linter_contract() -> None:
     diagram = diagram_layers()
     contract = contract_layers()
@@ -94,6 +97,7 @@ def test_readme_layers_match_import_linter_contract() -> None:
     )
 
 
+@pytest.mark.whole_tree
 def test_import_linter_contract_covers_every_subpackage() -> None:
     contract = contract_layers()
     listed = set().union(*contract.values())
@@ -138,6 +142,7 @@ def directly_imports(importer: str, imported: str) -> bool:
     return any(graph.find_modules_directly_imported_by(module) & targets for module in sources)
 
 
+@pytest.mark.whole_tree
 def test_every_subpackage_with_siblings_has_exactly_one_sibling_contract() -> None:
     with_siblings = {a for a, _ in sibling_pairs()}
     counts = {name: len(found) for name, found in sibling_contracts().items()}
@@ -151,6 +156,7 @@ def test_every_subpackage_with_siblings_has_exactly_one_sibling_contract() -> No
     )
 
 
+@pytest.mark.whole_tree
 def test_sibling_contracts_forbid_only_same_layer_siblings() -> None:
     siblings: dict[str, set[str]] = {}
     for a, b in sibling_pairs():
@@ -163,6 +169,7 @@ def test_sibling_contracts_forbid_only_same_layer_siblings() -> None:
     assert foreign == {}, f"同じ層の兄弟でないものが禁止に入っている: {foreign}"
 
 
+@pytest.mark.whole_tree
 def test_each_sibling_dependency_is_either_forbidden_or_imported() -> None:
     contracts = sibling_contracts()
     allowed_without_import: list[str] = []
@@ -200,6 +207,7 @@ def subpackage_table_names() -> list[str]:
     return names
 
 
+@pytest.mark.whole_tree
 def test_subpackage_table_lists_every_subpackage() -> None:
     names = subpackage_table_names()
     assert len(names) == len(set(names)), f"表に重複した名前がある: {names}"
@@ -209,6 +217,7 @@ def test_subpackage_table_lists_every_subpackage() -> None:
     )
 
 
+@pytest.mark.whole_tree
 def test_subpackage_table_is_in_alphabetical_order() -> None:
     names = subpackage_table_names()
     assert names == sorted(names), f"表の名前がアルファベット順でない: {names}"

@@ -299,3 +299,121 @@ def test_reserving_estimate_line_names_the_margin_limit() -> None:
     lines = input_cost_lines(micro_estimate([SIZE]), RunBudget(MODEL, limit, reserve_margin=True))
 
     assert any("次の一往復の分を引いた額" in line and "実行は止まります" in line for line in lines)
+
+
+def diagram_policy_of_runs(
+    diagram_tokens: int, principle_tokens: list[int]
+) -> DiagramPolicyEstimate:
+    return DiagramPolicyEstimate(
+        discovery_input_tokens=diagram_tokens + sum(principle_tokens),
+        past_run=None,
+        note="",
+        largest_sections=(),
+        materials_bytes=0,
+        planned_invocations=1 + len(principle_tokens),
+        principle_input_tokens=tuple(
+            (f"P{index}", count) for index, count in enumerate(principle_tokens, start=1)
+        ),
+    )
+
+
+def tokens_costing(usd: float) -> int:
+    return int(usd / INPUT_USD_PER_MILLION_TOKENS[MODEL] * 1_000_000)
+
+
+def test_policy_input_stop_compares_the_largest_run_not_the_sum() -> None:
+    basis = RunBudget(MODEL, 0.5, reserve_margin=False)
+    # 六本の和は上限を超えるが、一本ずつは超えない
+    estimate = diagram_policy_of_runs(tokens_costing(0.1), [tokens_costing(0.1)] * 5)
+
+    record = estimate.input_cost_record(basis)
+
+    assert record["input_cost_usd"] > 0.5
+    assert record["exceeds_budget"] is False
+    assert "budget_stop_warning" not in record
+    assert estimate.budget_stop_warning(basis) is None
+
+
+def test_policy_input_stop_fires_when_one_run_exceeds_the_limit() -> None:
+    basis = RunBudget(MODEL, 0.5, reserve_margin=False)
+    estimate = diagram_policy_of_runs(
+        tokens_costing(0.1), [tokens_costing(0.1)] * 4 + [tokens_costing(0.6)]
+    )
+
+    record = estimate.input_cost_record(basis)
+
+    assert record["exceeds_budget"] is True
+    assert record["budget_stop_warning"] == (
+        "入力だけで上限に達する起動は見送ります。すべての起動が達すると実行は止まります"
+        "（図の起動の上限 0.5 USD、原則の起動の上限 0.5 USD）。"
+    )
+
+
+def test_policy_input_cost_prices_principle_runs_with_the_principle_basis() -> None:
+    diagram_model, principle_model = "claude-sonnet-5-5", "claude-haiku-5-5"
+    assert (
+        INPUT_USD_PER_MILLION_TOKENS[diagram_model]
+        != INPUT_USD_PER_MILLION_TOKENS[principle_model]
+    )
+    basis = RunBudget(
+        diagram_model,
+        10.0,
+        reserve_margin=False,
+        principles={
+            **{
+                f"P{n}": RunBudget(principle_model, 10.0, reserve_margin=False)
+                for n in range(1, 5)
+            },
+            "P5": RunBudget(diagram_model, 10.0, reserve_margin=False),
+        },
+    )
+    estimate = diagram_policy_of_runs(1_000_000, [1_000_000] * 5)
+
+    cost = estimate.input_cost(basis)
+
+    assert cost is not None
+    expected = (
+        INPUT_USD_PER_MILLION_TOKENS[diagram_model]
+        + 4 * INPUT_USD_PER_MILLION_TOKENS[principle_model]
+        + INPUT_USD_PER_MILLION_TOKENS[diagram_model]
+    )
+    assert cost.cost.usd == pytest.approx(expected)
+    assert cost.cost.price_per_million == INPUT_USD_PER_MILLION_TOKENS[diagram_model]
+
+
+def test_policy_input_stop_names_a_principle_run_that_alone_reaches_its_limit() -> None:
+    basis = RunBudget(
+        MODEL,
+        0.5,
+        reserve_margin=False,
+        principles={f"P{n}": RunBudget(MODEL, 0.02, reserve_margin=False) for n in range(1, 6)},
+    )
+    estimate = diagram_policy_of_runs(
+        tokens_costing(0.1), [tokens_costing(0.01)] * 4 + [tokens_costing(0.03)]
+    )
+
+    assert estimate.input_cost(basis).exceeds_budget is True  # type: ignore[union-attr]
+    warning = estimate.budget_stop_warning(basis)
+    assert warning is not None
+    assert "（図の起動の上限 0.5 USD、原則の起動の上限 0.02 USD）。" in warning
+
+
+def test_policy_input_stop_lists_each_distinct_principle_limit_once() -> None:
+    basis = RunBudget(
+        MODEL,
+        0.5,
+        reserve_margin=False,
+        principles={
+            **{f"P{n}": RunBudget(MODEL, 0.02, reserve_margin=False) for n in range(1, 5)},
+            "P5": RunBudget(MODEL, 0.06, reserve_margin=False),
+        },
+    )
+    # 0.02 USD の上限の P1 だけが入力で上限に達する
+    estimate = diagram_policy_of_runs(
+        tokens_costing(0.1), [tokens_costing(0.03)] + [tokens_costing(0.01)] * 4
+    )
+
+    warning = estimate.budget_stop_warning(basis)
+
+    assert warning is not None
+    assert "（図の起動の上限 0.5 USD、原則の起動の上限 0.02 USD と 0.06 USD）。" in warning

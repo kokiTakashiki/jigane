@@ -9,7 +9,7 @@ from typing import Any
 
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude
-from jigane.skills.input_budget import SectionSize, stop_limit_text
+from jigane.skills.input_budget import SectionSize, cost_basis_text, stop_limit_text
 from jigane.skills.output_estimate import OutputEstimate, warning_message
 
 
@@ -115,13 +115,14 @@ class EstimateCommon(ABC):
         }
 
     def budget_stop_warning(self, basis: claude.RunBudget) -> str | None:
-        """入力だけで実行が止まるときの文。text と --json はここから読む。"""
+        """費用の見込みで実行が止まるときの文。text と --json はここから読む。"""
         cost = self.input_cost(basis)
         if cost is None or not cost.exceeds_budget:
             return None
         limit = stop_limit_text(reserved=basis.reserve_margin)
         upper = f"上限 {basis.max_budget_usd:g} USD"
-        return f"入力だけで {limit}（{upper}）に達する見込みのため、実行は止まります。"
+        basis_text = cost_basis_text(with_output=basis.counts_output)
+        return f"{basis_text} {limit}（{upper}）に達する見込みのため、実行は止まります。"
 
     def expected_budget_warning(self, basis: claude.RunBudget) -> str | None:
         """見込みが目安に達するときの警告の文。text と --json はここから読む。"""
@@ -188,6 +189,11 @@ class PolicyEstimateBase(EstimateCommon, ABC):
 class DiagramPolicyEstimate(PolicyEstimateBase):
     """図の形の方針の見積もり。出力と推論の分の見込みは持たない。"""
 
+    # 組み立てた原則の（番号, 入力のトークン）。
+    # 図の起動の分は discovery_input_tokens から引いて求める。
+    # 空は図の起動だけの見積もりで、入力の和がそのまま図の起動の大きさになる
+    principle_input_tokens: tuple[tuple[str, int], ...] = ()
+
     @property
     def shape(self) -> PolicyShape:
         return PolicyShape.DIAGRAM
@@ -197,8 +203,46 @@ class DiagramPolicyEstimate(PolicyEstimateBase):
         return None
 
     def input_cost(self, basis: claude.RunBudget) -> InputCostEstimate | None:
-        cost = claude.input_cost_usd(basis.model, self.discovery_input_tokens)
-        return InputCostEstimate(cost, basis.input_stops_run(self.discovery_input_tokens))
+        diagram_tokens = self.discovery_input_tokens - sum(
+            count for _, count in self.principle_input_tokens
+        )
+        diagram_cost = basis.launch_cost(diagram_tokens)
+        principle_costs = [
+            basis.for_principle(number).launch_cost(count)
+            for number, count in self.principle_input_tokens
+        ]
+        # 費用は全起動の和、止まるかどうかは起動ごとの上限と一本ずつ比べる。
+        # 単価と assumed_price は図の起動のモデルの値で代表させる
+        return InputCostEstimate(
+            claude.InputCost(
+                diagram_cost.usd + sum(cost.usd for cost in principle_costs),
+                diagram_cost.price_per_million,
+                diagram_cost.assumed_price,
+            ),
+            basis.input_stops_run(diagram_tokens)
+            or any(
+                basis.for_principle(number).input_stops_run(count)
+                for number, count in self.principle_input_tokens
+            ),
+        )
+
+    def budget_stop_warning(self, basis: claude.RunBudget) -> str | None:
+        if not self.principle_input_tokens:
+            # 原則の起動が無ければ、図の起動が止まれば実行が止まる
+            return super().budget_stop_warning(basis)
+        cost = self.input_cost(basis)
+        if cost is None or not cost.exceeds_budget:
+            return None
+        limits = dict.fromkeys(
+            f"{basis.for_principle(number).max_budget_usd:g} USD"
+            for number, _ in self.principle_input_tokens
+        )
+        basis_text = cost_basis_text(with_output=basis.counts_output)
+        return (
+            f"{basis_text}上限に達する起動は見送ります。すべての起動が達すると実行は止まります"
+            f"（図の起動の上限 {basis.max_budget_usd:g} USD、"
+            f"原則の起動の上限 {' と '.join(limits)}）。"
+        )
 
 
 @dataclass(frozen=True)

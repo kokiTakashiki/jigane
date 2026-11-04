@@ -1,6 +1,6 @@
 """開発用。パックが配る全 platform の配布物から、組み込みの文法の sha256 を作る。
 
-jigane/languages/grammar-hashes.json と、例の外の言語の宣言（GRAMMAR_HASHES）を書き出す。
+jigane/languages/grammar-hashes.json と、例の追加の言語の宣言（GRAMMAR_HASHES）を書き出す。
 パックの版を上げたときに作り直す。
 
     env -u PYTHONPATH uv run --locked python scripts/generate_grammar_hashes.py
@@ -30,7 +30,7 @@ from jigane.languages.grammars import _LIBRARY_STEMS, GRAMMARS, HASHES_PATH, pac
 RELEASE_BASE = "https://github.com/xberg-io/tree-sitter-language-pack/releases/download"
 MANIFEST_NAME = "parsers.json"
 _CHUNK = 1 << 20
-# 例の外の言語（examples/jigane-language-kotlin）の宣言も、同じ配布物から作り直す
+# 例の追加の言語（examples/jigane-language-kotlin）の宣言も、同じ配布物から作り直す
 EXAMPLE_GRAMMAR = "kotlin"
 EXAMPLE_PATH = (
     Path(__file__).parent.parent

@@ -20,9 +20,10 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import MICRO
 from jigane.llm_runs import claude
+from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.launch_failure import StoredInvocation
 from jigane.skills import adversarial, pipeline
-from jigane.skills.output_models import ThemesOutput, json_schema_of
+from jigane.skills.output_models import ThemesOutput
 
 NIT_THEME_TITLE = "nit"
 THEME_TOOLS = ("Read",)

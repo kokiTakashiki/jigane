@@ -14,8 +14,10 @@ from typing import Any, cast
 from pydantic import BaseModel, ValidationError
 
 from jigane.findings.records import Adjudication, Verdict
+from jigane.groups import viewpoints
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
+from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.finding_model import KEY_DISCLOSED_AT
 from jigane.llm_runs.launch_failure import (
     CandidatesUnverified,
@@ -34,7 +36,6 @@ from jigane.skills.output_models import (
     JudgeRebuttalItem,
     RebuttalItem,
     RoleItem,
-    json_schema_of,
     role_output_model,
 )
 
@@ -43,7 +44,15 @@ LOGGER = logging.getLogger(__name__)
 MAX_CANDIDATES_PER_INVOCATION = 10
 # 検証の分割 1 件を走らせる回数の上限。最初の 1 回と、一時の失敗のあとの 1 回
 MAX_SPLIT_ATTEMPTS = 2
-ALTERNATIVE_VIEWPOINTS = frozenset({"M0", "M2", "M3", "M5"})
+ALTERNATIVE_VIEWPOINTS = frozenset(
+    viewpoint.number
+    for viewpoint in (
+        viewpoints.PREMISE,
+        viewpoints.PATH,
+        viewpoints.STRUCTURE,
+        viewpoints.BOT_RESPONSE,
+    )
+)
 
 # 実装とセキュリティの群の発見役が書く欄。保存の形に欄が増えても、足さない限り見せない。
 # deepens は方針の群だけの概念で、この二群の雛形も取り込みも使わない。
@@ -180,6 +189,7 @@ def prompt_version(name: str) -> str:
     parts = ("common", *(rule.file for rule in shared_rules.rules_for(name)), name)
     for part in parts:
         digest.update(template_text(part).encode("utf-8"))
+    digest.update(shared_rules.values_for(name).get("viewpoints", "").encode("utf-8"))
     return digest.hexdigest()[:12]
 
 

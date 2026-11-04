@@ -32,7 +32,7 @@ def is_related(current: Review, other: Review) -> bool:
     """other が current の関連するレビューか。関連の規則はここだけに置く。
 
     同じ owner と repo と種類で、current より前に作られたもの。PR は番号が同じなら同じ
-    レビューなので、系列では結ばない。機能と範囲は系列の名前が同じなら結び、範囲は
+    レビューなので、系列では結ばない。ファイルのレビューと範囲は系列の名前が同じなら結び、範囲は
     範囲の右側（先端のブランチ）が同じでも結ぶ。
     """
     a, b = current.id, other.id

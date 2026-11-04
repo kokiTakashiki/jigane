@@ -48,8 +48,8 @@ help:
 	@echo "  check-commit-emails  指定した範囲のコミットの作者と委託者のメールアドレスが GitHub の noreply だけであることを確かめる（引数は git log の版の範囲で必須。例 ARGS="origin/main..HEAD"。呼び出した場所の git リポジトリを見る。ゲートには入れない）"
 	@echo "  check                機械のゲート。lint と test を通し、緑で終わったときだけ HEAD に印を書く（push 前の hook が印と照らす）"
 	@echo "  docs-check           文書のゲート。Markdown を rumdl で検査し、緑で終わったときだけ HEAD に docs の印を書く（文書だけを変えた push は、この印で通る）"
-	@echo "  changed-tests        変更に関わる試験だけを走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。全体は CI で確かめる）"
-	@echo "  quick-check          軽い機械のゲート。lint と、変更に関わる試験だけを通す（全体の試験は push して CI で確かめる）"
+	@echo "  changed-tests        変更に関わる試験と、全体を縛る試験（whole_tree の印）を走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。残りの全体は CI で確かめる）"
+	@echo "  quick-check          軽い機械のゲート。lint と、変更に関わる試験と全体を縛る試験（whole_tree の印）を通す（残りの全体は push して CI で確かめる）"
 	@echo "  audit-dependencies   uv.lock が固定した依存の既知の脆弱性を pip-audit で確かめる（見つかれば失敗する。ネットワークを使い、同じ uv.lock でも日によって結果が変わるため、ゲートには入れない。週ごとの CI と配布の前の確かめが走らせる）"
 	@echo "  check-repo-settings  GitHub のリポジトリの設定を .github/repository-settings.json の期待と照らして差を出す（引数は --repo owner/name と --profile working|public で必須。例 ARGS="--repo owner/name --profile public"。gh の認証が要る。ゲートには入れない）"
 
@@ -84,7 +84,7 @@ lint:
 	uv run --locked python scripts/generate_import_contracts.py --check
 	uv run --locked python scripts/generate_package_readme.py --check
 	uv run --locked python scripts/generate_readme_dependencies.py --check
-	uv run --locked lint-imports
+	uv run --locked python scripts/run_lint_imports.py
 	uv run --locked python scripts/check_workflows.py
 	uv run --locked python scripts/check_egress.py
 	uv run --locked python scripts/check_dependency_licenses.py
@@ -136,12 +136,12 @@ docs-check:
 	@uv run --locked rumdl check .
 	@uv run --locked --directory "$(PROJECT_DIR)" python scripts/gate_stamp.py write --gate docs
 
-# 変更に関わる試験だけを走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。全体は CI で確かめる）。
+# 変更に関わる試験と、全体を縛る試験（whole_tree の印）を走らせる（main との merge-base からの差分と未コミットの変更が対象。--list は選ぶだけ。残りの全体は CI で確かめる）。
 changed-tests:
 	$(call require_uv)
 	uv run --locked --project "$(PROJECT_DIR)" python "$(PROJECT_DIR)"/scripts/with_temp_jigane_home.py uv run --locked --directory "$(PROJECT_DIR)" python scripts/changed_tests.py $(ARGS)
 
-# 軽い機械のゲート。lint と、変更に関わる試験だけを通す（全体の試験は push して CI で確かめる）。
+# 軽い機械のゲート。lint と、変更に関わる試験と全体を縛る試験（whole_tree の印）を通す（残りの全体は push して CI で確かめる）。
 quick-check: preflight lint changed-tests
 
 # uv.lock が固定した依存の既知の脆弱性を pip-audit で確かめる（見つかれば失敗する。ネットワークを使い、同じ uv.lock でも日によって結果が変わるため、ゲートには入れない。週ごとの CI と配布の前の確かめが走らせる）。

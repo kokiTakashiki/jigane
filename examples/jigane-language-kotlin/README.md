@@ -1,6 +1,6 @@
 # jigane-language-kotlin
 
-jigane に外のパッケージから言語を足す例です。Kotlin の宣言（クラス、object、interface、関数、プロパティ）の一覧だけを提供します。シーケンス図などの宣言の一覧以外の図には対応しません。
+jigane にプラグインのパッケージから言語を追加する例です。Kotlin の宣言（クラス、object、interface、関数、プロパティ）の一覧だけを提供します。シーケンス図などの宣言の一覧以外の図には対応しません。
 
 ## 構成
 
@@ -18,7 +18,7 @@ jigane に外のパッケージから言語を足す例です。Kotlin の宣言
 - flaky の検査（`jigane flaky`）：`LanguagePlugin.data` が `None` で、型の置き場（`flaky/queries/kotlin.toml`）を持たないので、Kotlin のテストに当てる型がありません。テストのパスの判定（`test` と `androidTest`）は通りますが、検出はしません。
 - シーケンス図などの宣言の一覧以外の図：それぞれの口を実装していません。
 
-足すときは、`jigane/languages/README.md` の外の言語の節にある口と資料の置き場に従います。
+足すときは、`jigane/languages/README.md` の「追加の言語を書く」の節にある口と資料の置き場に従います。
 
 ## 使い方
 
@@ -41,7 +41,7 @@ uv pip install ./examples/jigane-language-kotlin
 パック 1.22.1 の Kotlin の文法は、書き方によって次のように解析を誤ります。
 
 - 本体を持つトップレベルの `object Name { ... }` を、ファイルの先頭や別の宣言の直後に一行で書くと、`object_declaration` ではなく式（`infix_expression`）として解析され、宣言として拾えません。import の後に本体を複数行で書くと、`object_declaration` として解析され、拾えます。
-- 本体の無いメソッドを持つ interface を `interface Api { fun call() }` のように一行で書くと、木に `ERROR` の節点が入ります。複数行で書くと誤りになりません。アダプタは `ERROR` の中も辿って拾います。
+- 本体の無いメソッドを持つ interface を `interface Api { fun call() }` のように一行で書くと、木に `ERROR` の節点が入ります。複数行で書くとエラーになりません。アダプタは `ERROR` の中も辿って拾います。
 
 ## 試験
 

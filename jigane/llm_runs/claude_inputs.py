@@ -26,6 +26,7 @@ class Role(StrEnum):
 
     MACRO_DIAGRAM = "macro_diagram"
     MACRO_DESIGN = "macro_design"
+    MACRO_PRINCIPLES = "macro_principles"
     MICRO = "micro"
     SECURITY = "security"
     REBUTTAL = "rebuttal"
@@ -55,6 +56,9 @@ class InputSpec:
 
 _MACRO_DIAGRAM = (GroupRole(GroupId.MACRO, Role.MACRO_DIAGRAM),)
 _MACRO_DESIGN = (GroupRole(GroupId.MACRO, Role.MACRO_DESIGN),)
+_MACRO_PRINCIPLES = (GroupRole(GroupId.MACRO, Role.MACRO_PRINCIPLES),)
+# 図の起動と原則の起動は、同じ変更から同じ資料を組む
+_MACRO_POLICY = (*_MACRO_DIAGRAM, *_MACRO_PRINCIPLES)
 _MICRO = (GroupRole(GroupId.MICRO, Role.MICRO),)
 _SECURITY = (GroupRole(GroupId.SECURITY, Role.SECURITY),)
 _FOLLOWERS = (
@@ -81,6 +85,7 @@ _VERIFIERS = tuple(
 _ALL = (
     *_MACRO_DIAGRAM,
     *_MACRO_DESIGN,
+    *_MACRO_PRINCIPLES,
     *_MICRO,
     *_SECURITY,
     *_MICRO_FOLLOWERS,
@@ -94,7 +99,7 @@ class ClaudeInput(Enum):
     # --- 標準入力（PROMPT） ---
     CHANGE_DIFF = InputSpec(
         Channel.PROMPT,
-        "変更の差分（変更前と変更後の行）。機能レビューでは変更前は空の旨の固定文。"
+        "変更の差分（変更前と変更後の行）。ファイルのレビューでは変更前は空の旨の固定文。"
         "差分に添える設定ファイルの冒頭（Makefile、justfile、pyproject の最大 40 行）を含む",
         (
             "jigane/skills/macro.py:changes_prompt_text",
@@ -119,7 +124,7 @@ class ClaudeInput(Enum):
             "jigane/skills/config_head.py:config_heads_section",
             "jigane/skills/policy_regex.py:shard_checks",
         ),
-        (*_MACRO_DIAGRAM, *_MICRO, *_SECURITY),
+        (*_MACRO_POLICY, *_MICRO, *_SECURITY),
         user_can_provide=True,
         user_can_provide_reason="作業ディレクトリのファイル",
     )
@@ -131,7 +136,7 @@ class ClaudeInput(Enum):
             "jigane/pull_request_context/fetching.py:extract_tree",
             "jigane/reviews/lifecycle.py:_build_diff_tree",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason=(
             "変更前のコミットの中身で git show で取れる。置き場は作業ディレクトリの外"
@@ -146,7 +151,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro_design.py:build_design_prompt",
             "jigane/pull_request_context/background.py:find_documents",
         ),
-        (*_MACRO_DIAGRAM, *_MACRO_DESIGN),
+        (*_MACRO_POLICY, *_MACRO_DESIGN),
         user_can_provide=True,
         user_can_provide_reason="gh と git log で利用者も渡せる",
     )
@@ -157,7 +162,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:background_prompt_text",
             "jigane/pull_request_context/background.py:find_past_changes",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="git log で取れるが、どれを足すかは jigane が選ぶ",
     )
@@ -168,7 +173,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:background_prompt_text",
             "jigane/pull_request_context/background.py:find_past_pull_requests",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="gh で取れるが、どれを足すかは jigane が選ぶ",
     )
@@ -179,7 +184,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:background_prompt_text",
             "jigane/pull_request_context/background.py:find_owners",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="リポジトリの CODEOWNERS ファイル",
     )
@@ -190,7 +195,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:bot_findings",
             "jigane/pull_request_context/bots.py:fetch_bot_comments",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="gh で取れるが、整形は jigane",
     )
@@ -201,7 +206,7 @@ class ClaudeInput(Enum):
             "jigane/policy_materials/changed_files.py:materials_sections",
             "jigane/skills/policy_figures.py:prompt_figure_texts",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="利用者自身のコードと変更から jigane が整形したもの",
     )
@@ -212,7 +217,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:policy_sections",
             "jigane/technology_list/materials.py:short_section_text",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="利用者自身の依存の宣言から jigane が整形したもの",
     )
@@ -223,7 +228,7 @@ class ClaudeInput(Enum):
             "jigane/skills/macro.py:policy_sections",
             "jigane/skills/policy_repeats.py:repeats_text",
         ),
-        _MACRO_DIAGRAM,
+        _MACRO_POLICY,
         user_can_provide=True,
         user_can_provide_reason="利用者自身のコードから jigane が整形したもの",
     )
@@ -246,7 +251,7 @@ class ClaudeInput(Enum):
             "jigane/skills/history.py:shard_history_text",
             "jigane/skills/macro.py:history_text",
         ),
-        (*_MACRO_DIAGRAM, *_MACRO_DESIGN, *_MICRO),
+        (*_MACRO_POLICY, *_MACRO_DESIGN, *_MICRO),
         user_can_provide=True,
         user_can_provide_reason="利用者自身の前のレビューと異議から jigane が整形したもの",
     )
@@ -339,7 +344,7 @@ class ClaudeInput(Enum):
         "--output-format json と --json-schema（段ごとの出力の形）",
         (
             "jigane/llm_runs/claude.py:_schema_for_cli",
-            "jigane/skills/output_models.py:json_schema_of",
+            "jigane/llm_runs/claude_schema.py:json_schema_of",
         ),
         _ALL,
         user_can_provide=True,
@@ -403,7 +408,8 @@ class ClaudeInput(Enum):
     )
     WORKING_DIRECTORY = InputSpec(
         Channel.CWD,
-        "cwd。機能と設計書は利用者のリポジトリの根、範囲と PR はデータの置き場の中の変更後の木。"
+        "cwd。ファイルのレビューと設計書のレビューは利用者のリポジトリの根、"
+        "範囲と PR はデータの置き場の中の変更後の木。"
         "Claude Code は cwd のパスを自分の環境の情報としてモデルへ送る"
         "（Claude Code 2.1.292 で、道具を使わずにパスを答えることを確かめた）。"
         "範囲と PR ではそのパスに利用者名、JIGANE_HOME、owner/repo、"
@@ -418,7 +424,7 @@ class ClaudeInput(Enum):
         user_can_provide_reason=(
             "範囲と PR では cwd が jigane のデータの置き場の中になり、"
             "利用者が手で claude を起動するときの cwd と違う。"
-            "機能と設計書では利用者のリポジトリの根で、手でも同じ"
+            "ファイルのレビューと設計書のレビューでは利用者のリポジトリの根で、手でも同じ"
         ),
     )
 
@@ -456,6 +462,7 @@ PLACEHOLDER_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     "history_rule": _INSTRUCTIONS,
     "division": _INSTRUCTIONS,
     "viewpoints": _INSTRUCTIONS,
+    "principles": _INSTRUCTIONS,
     "discard_reason_table": _INSTRUCTIONS,
     # sharded.py:323 build_shard_prompt
     "common": _INSTRUCTIONS,
@@ -495,6 +502,7 @@ HEADING_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     "## 出す指摘の基準": _INSTRUCTIONS,
     "## 参照の体系": _INSTRUCTIONS,
     "## 観点": _INSTRUCTIONS,
+    "## 原則": _INSTRUCTIONS,
     "## 進め方": _INSTRUCTIONS,
     "## 書き方": _INSTRUCTIONS,
     "## 束ね方": _INSTRUCTIONS,
@@ -527,6 +535,8 @@ HEADING_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     "### 変更のツリー図": (_C.TARGET_FILES, _C.BASE_TREE),
     "### クラス図": (_C.TARGET_FILES, _C.BASE_TREE),
     "### シーケンス図": (_C.TARGET_FILES, _C.BASE_TREE),
+    # policy_callers.py の表。変更前後の木を読み、名前と数だけを載せる
+    "### 足した公開の口と呼ぶ側": (_C.TARGET_FILES, _C.BASE_TREE),
     # macro.py の bot_findings
     "### レビューボットの指摘の一覧": (_C.BOT_COMMENTS,),
     # changed_files.py の materials_sections
@@ -553,10 +563,10 @@ HEADING_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     "### 設計書の資料": (_C.DESIGN_DOC,),
     "#### 受け持ちの表": _INSTRUCTIONS,
     "#### 設計書の構造": (_C.DESIGN_DOC,),
-    "#### 選んだファイルと推しの理由": (_C.DESIGN_DOC,),
+    "#### 選んだファイルと候補にした理由": (_C.DESIGN_DOC,),
     "### 設計書の構造": (_C.DESIGN_DOC,),
     "### 名指しの照合の表": (_C.DESIGN_DOC,),
-    "### 選んだファイルと推しの理由": (_C.DESIGN_DOC,),
+    "### 選んだファイルと候補にした理由": (_C.DESIGN_DOC,),
     "### いまの形の図": (_C.DESIGN_DOC,),
     "#### ツリー図": (_C.DESIGN_DOC,),
     "#### クラス図": (_C.DESIGN_DOC,),

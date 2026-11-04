@@ -33,6 +33,7 @@ from jigane.findings.records import (
     read_stored_state,
 )
 from jigane.groups.definitions import MACRO, SECURITY
+from jigane.groups.viewpoints import by_number, viewpoint_fields
 from jigane.publishing.rendering import build_context
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.reviews.selection import (
@@ -162,6 +163,24 @@ def test_a_number_missing_from_the_history_stays_a_bare_number(review: Review) -
     ] == [{"id": "F7", "group": None}]
 
 
+def test_a_missing_picked_number_from_the_history_carries_the_viewpoint_id(
+    review: Review,
+) -> None:
+    directory = _pick_then_lose(review)
+    [detail] = stale_details(directory, load_selection(directory), load_history_checked(directory))
+    assert detail.to_dict()["viewpoint"] == "M2"
+    assert detail.to_dict()["viewpoint_id"] == str(by_number("M2").uuid)
+    assert detail.to_dict()["viewpoint_name"] == "道筋"
+    assert detail.to_dict()["viewpoint_kind"] == "policy"
+
+
+def test_a_viewpoint_without_a_name_carries_a_null_name_and_its_kind() -> None:
+    fields = viewpoint_fields("D1")
+    assert fields["viewpoint_id"] == str(by_number("D1").uuid)
+    assert fields["viewpoint_name"] is None
+    assert fields["viewpoint_kind"] == "defect"
+
+
 def test_delete_removes_the_history_with_the_review(
     review: Review, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -244,7 +263,7 @@ def test_history_file_round_trips_through_json() -> None:
                         {
                             "id": "F1",
                             "severity": "warning",
-                            "viewpoint": "V",
+                            "viewpoint": str(by_number("M2").uuid),
                             "claim": "A",
                             "triage": None,
                             "theme": None,
@@ -279,6 +298,7 @@ def test_history_file_writes_only_the_current_nit_form() -> None:
     assert finding["nit_reason"]["kind"] == "other"
 
 
+@pytest.mark.whole_tree
 def test_only_findings_module_reads_the_history_file() -> None:
     root = Path(__file__).parent.parent / "jigane"
     readers = json_users_of_stored_file(root, "HISTORY_FILE", "findings_history.json")
@@ -320,10 +340,10 @@ def test_append_history_writes_legacy_findings_in_the_current_form(tmp_path: Pat
 def test_v1_history_moves_to_the_current_form() -> None:
     raw = v1_history([{"id": "F1", "adjudication": None}])
     moved = _upgrade_history_v2(_upgrade_history_v1(raw))
-    assert moved["format"] == FINDINGS_FORMAT
+    assert moved["format"] == 3
     [finding] = moved["groups"]["macro"][0]["findings"]
     assert finding == _upgrade_finding_v2(_upgrade_finding_v1({"id": "F1", "adjudication": None}))
-    assert HistoryFile.from_json(moved).to_json() == moved
+    assert HistoryFile.from_json(moved).to_json() == {**moved, "format": FINDINGS_FORMAT}
 
 
 def test_findings_json_and_history_share_the_finding_upgrade() -> None:
@@ -333,7 +353,7 @@ def test_findings_json_and_history_share_the_finding_upgrade() -> None:
     assert in_history == in_findings
 
 
-@pytest.mark.parametrize("version", [0, 4, 99, "3", 3.0, True, None])
+@pytest.mark.parametrize("version", [0, 5, 99, "3", 3.0, True, None])
 def test_an_unsupported_history_version_fails_with_a_clear_error(version: object) -> None:
     raw = {**v1_history([]), "format": version}
     with pytest.raises(ReviewError, match=re.escape(HISTORY_FILE)):

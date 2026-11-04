@@ -83,6 +83,7 @@ from jigane.storage.store import (
     ReviewKind,
     check_new_key,
     data_home,
+    ensure_data_home,
     review_lock,
     write_text_atomic,
 )
@@ -118,7 +119,7 @@ class ReviewKindMismatchError(ReviewError):
 
 @dataclass
 class DiffSource:
-    """差分レビュー式の、変更前の木と二つのコミット。出所が PR でも、他のものでも持つ。"""
+    """差分のレビューの、変更前の木と二つのコミット。出所が PR でも、他のものでも持つ。"""
 
     base_sha: str
     head_sha: str
@@ -203,7 +204,7 @@ class RangeOrigin:
 @dataclass(frozen=True)
 class FeatureOrigin:
     # 作ったときに渡された対象。リポジトリのルートからの posix の相対パス。
-    # 保存していなかった古い機能レビュー式は None
+    # 保存していなかった古いファイルのレビューは None
     targets: tuple[str, ...] | None = None
 
 
@@ -219,7 +220,7 @@ class AttachedDocument:
 
 @dataclass(frozen=True)
 class DesignDocOrigin:
-    """設計書のレビューの出所。保存するのは設計書の版、コードの版、利用者の選択、付属の文書で、構造、名指し、推し、いまの形の図は二つの版から導く。"""
+    """設計書のレビューの出所。保存するのは設計書の版、コードの版、利用者の選択、付属の文書で、構造、名指し、候補、いまの形の図は二つの版から導く。"""
 
     # 設計書のパス。リポジトリのルートからの posix の相対パス
     document_path: str
@@ -227,7 +228,7 @@ class DesignDocOrigin:
     document_version: str
     # 作ったとき、または refresh したときの作業ディレクトリの HEAD のコミット
     code_version: str
-    # 利用者が推しから選んだファイル。リポジトリのルートからの posix の相対パス
+    # 利用者が候補から選んだファイル。リポジトリのルートからの posix の相対パス
     selection: tuple[str, ...]
     # 利用者が選んだ付属の文書。付属を持たない記録（古い記録を含む）は空
     attachments: tuple[AttachedDocument, ...] = ()
@@ -309,7 +310,7 @@ class Review:
     origin: ReviewOrigin
     # 作ったときは None。refresh が更新するたびに書き換える
     refreshed_at: str | None = None
-    # 差分レビュー式でのみ値を持つ。background.json に保存する
+    # 差分のレビューでのみ値を持つ。background.json に保存する
     background: Background | None = None
     # gates.json の内容。flaky のゲートを入れる前に作ったレビューは None
     gates: Gates | None = None
@@ -328,13 +329,13 @@ class Review:
     def is_pull_request(self) -> bool:
         """出所が PR か。ボットの材料など PR 固有の動作は、ここから引く。
 
-        refresh と reply は差分レビュー式で共通なので、ここでは分けない。
+        refresh と reply は差分のレビューで共通なので、ここでは分けない。
         """
         return self.kind.is_pull_request
 
     @property
     def is_diff(self) -> bool:
-        """差分レビュー式か。mode の比較や diff_source の None 判定でなく、ここから引く。"""
+        """差分のレビューか。mode の比較や diff_source の None 判定でなく、ここから引く。"""
         return self.kind.is_diff
 
     @property
@@ -347,12 +348,12 @@ class Review:
 
     @property
     def diff_origin(self) -> DiffSource | None:
-        """差分の出所。差分レビュー式でなければ None。変更前の木の引き元。"""
+        """差分の出所。差分のレビューでなければ None。変更前の木の引き元。"""
         return _diff_of(self.origin)
 
     @property
     def base_tree_path(self) -> Path | None:
-        """変更前の木の場所。差分レビュー式でなければ None。"""
+        """変更前の木の場所。差分のレビューでなければ None。"""
         diff = self.diff_origin
         return diff.base_tree_path if diff is not None else None
 
@@ -687,7 +688,7 @@ def _design_doc_origin(
     targets: list[str] | None, design_doc: dict[str, Any] | None
 ) -> DesignDocOrigin:
     if targets is not None:
-        raise ReviewError("設計書の記録に、機能の対象が入っています")
+        raise ReviewError("設計書の記録に、ファイルの対象が入っています")
     if design_doc is None:
         raise ReviewError("設計書の記録に、設計書の情報がありません")
     return DesignDocOrigin.from_dict(design_doc)
@@ -749,7 +750,7 @@ class ContentBase[OriginT: ReviewOrigin]:
     # 宣言の警告を含まない、内容から作った警告
     content_warnings: tuple[str, ...]
     judgment_map: JudgmentMap
-    # 差分レビュー式の背景。出所が PR でも範囲でも、ここに置く
+    # 差分のレビューの背景。出所が PR でも範囲でも、ここに置く
     background: Background | None = None
     # 作る側が種類ごとの出所の型で直接渡す
     origin: OriginT = field(kw_only=True)
@@ -764,7 +765,7 @@ class ContentBase[OriginT: ReviewOrigin]:
 
 @dataclass(frozen=True)
 class ReviewContent(ContentBase[RangeOrigin | FeatureOrigin]):
-    """PR 以外の出所（範囲、機能）の保存する内容。
+    """PR 以外の出所（範囲、ファイル）の保存する内容。
 
     PR の出所の内容は PullRequestContent でしか作れない。
     """
@@ -786,7 +787,7 @@ class DesignDocContent(ContentBase[DesignDocOrigin]):
     """設計書のレビューの保存する内容。
 
     section_map は設計書の節から組んだ判断の地図の部品（build_section_map の値）。
-    judgment_map は推しのコードの地図で、ゲートの入力であり、地図には参考として載る。
+    judgment_map は候補のコードの地図で、ゲートの入力であり、地図には参考として載る。
 
     paths は利用者の選択のうち作業ディレクトリに在るファイルで、空でもよい。
     選択した後に消えたファイルは、警告を付けて paths から外す。
@@ -856,6 +857,7 @@ def save_review(
             return staging / path.relative_to(final_directory)
         return path
 
+    ensure_data_home()
     directory.mkdir(parents=True, exist_ok=True)
     unnumbered = map_kind_of(content)
     numbered, region_changes = _assign_numbers(unnumbered.table.regions, directory)
@@ -907,13 +909,13 @@ def save_review(
 
 
 def judge_files(root: Path, files: list[str], touches: Sequence[FindingTouch] = ()) -> JudgmentMap:
-    """ファイル全体を判断の地図にする。機能と設計書のレビューが共有する。"""
+    """ファイル全体を判断の地図にする。ファイルと設計書のレビューが共有する。"""
     pairs = [FilePair(None, file) for file in files]
     return build_judgment_map(None, root, pairs, load_config(root), finding_touches=touches)
 
 
 def _head_commit(root: Path) -> str:
-    """機能のレビューには変更後のコミットが無いので、HEAD を解析したコミットとみなす。"""
+    """ファイルのレビューには変更後のコミットが無いので、HEAD を解析したコミットとみなす。"""
     try:
         return _git(root, "rev-parse", "HEAD").strip()
     except process.CommandError as error:
@@ -1049,6 +1051,7 @@ def _staging_directory(review_id: ReviewId) -> Iterator[Path]:
     ディレクトリが現れることはない。
     """
     final = review_id.directory()
+    ensure_data_home()
     final.parent.mkdir(parents=True, exist_ok=True)
     staging = final.parent / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
     staging.mkdir()
@@ -1088,7 +1091,7 @@ class ReviewInputs:
 
 @dataclass(frozen=True)
 class DeclaredInputs(ReviewInputs):
-    """意図の宣言を利用者の文で渡せる入口（範囲、機能、refresh）の入力。"""
+    """意図の宣言を利用者の文で渡せる入口（範囲、ファイル、refresh）の入力。"""
 
     intent: str | None = None
     intent_file: Path | None = None
@@ -1746,7 +1749,10 @@ def refresh_feature(
     sarif = inputs.sarif
     origin = review.origin
     if not isinstance(origin, FeatureOrigin):
-        raise ReviewError(f"機能の出所でない記録を機能として refresh できません: {review.id}")
+        raise ReviewError(
+            "ファイルのレビューの出所でない記録をファイルのレビューとして "
+            f"refresh できません: {review.id}"
+        )
     targets = origin.targets
     if targets is None:
         raise ReviewError(
@@ -1762,7 +1768,7 @@ def refresh_feature(
             _kept_declaration(review, declaration_override),
             _refresh_static(
                 review,
-                # 保存した指摘も SARIF も無い機能のレビューは、git の外でも作り直せる
+                # 保存した指摘も SARIF も無いファイルのレビューは、git の外でも作り直せる
                 _head_commit(root)
                 if sarif is not None or (review.id.directory() / STATIC_FINDINGS_FILE).is_file()
                 else "",
@@ -1852,7 +1858,7 @@ def load_review_at(directory: Path) -> Review:
     review_id = review.id
     if review_id.directory() != directory:
         # 種類は保存した記録の id が決め、保存先の名前だけでは決めない
-        # （数字だけの機能の名前は PR の番号と同じ名前になる）。
+        # （数字だけのファイルのレビューの名前は PR の番号と同じ名前になる）。
         # id が指す場所と保存先が違う記録は、どちらが正しいか決められない
         raise ReviewError(f"保存先が識別子（{review_id}）の指す場所と違います: {directory}")
     stored_kind = review.kind
@@ -1873,7 +1879,8 @@ def check_stored_id(review_id: ReviewId) -> None:
     """識別子が指す保存先の記録の id が、その識別子と食い違わないことを確かめる。
 
     識別子から記録へ進む入口（load_review と resolve_review）が必ず通る。
-    同じ保存先を別の種類の識別子で指している場合（数字だけの機能と PR の番号）を、ここで止める。
+    同じ保存先を別の種類の識別子で指している場合
+    （数字だけのファイルのレビューと PR の番号）を、ここで止める。
     """
     try:
         meta = load_review_meta(
@@ -1931,7 +1938,7 @@ def dump_pairs(pairs: Sequence[FilePair]) -> dict[str, Any]:
 
 
 def load_pairs(review_id: ReviewId) -> list[FilePair]:
-    """差分レビュー式の、変更したファイルの対。"""
+    """差分のレビューの、変更したファイルの対。"""
     path = review_id.directory() / PAIRS_FILE
     if not path.is_file():
         raise ReviewError(
@@ -1942,7 +1949,7 @@ def load_pairs(review_id: ReviewId) -> list[FilePair]:
 
 
 def scope_files(review: Review) -> set[str]:
-    """レビューの範囲のファイル。差分レビュー式は変更したファイル（削除も含む）、機能レビュー式は渡したファイル群。"""
+    """レビューの範囲のファイル。差分のレビューは変更したファイル（削除も含む）、ファイルのレビューは渡したファイル群。"""
     if not review.is_diff:
         return set(review.paths)
     try:

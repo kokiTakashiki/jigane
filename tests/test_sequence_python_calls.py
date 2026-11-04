@@ -19,6 +19,7 @@ from jigane.languages.base import (
 from jigane.languages.python import PythonAdapter
 from jigane.sequence.index import TypeKey, build_index
 from jigane.sequence.resolve import External, Resolution, Resolved, Unresolved, extract_calls
+from jigane.sequence.roots import interface_members, is_interface_member
 
 adapter = PythonAdapter()
 
@@ -299,3 +300,32 @@ def test_receiver_expressions_resolve_to_the_type_they_name(tmp_path: Path) -> N
             ("append", "unresolved [1]"),
         ],
     }
+
+
+def test_protocol_parameter_does_not_trigger_interface_rules(tmp_path: Path) -> None:
+    (tmp_path / "m.py").write_text(
+        "from typing import Protocol\n"
+        "\n"
+        "class Reader(Protocol):\n"
+        "    def read(self) -> str: ...\n"
+        "\n"
+        "class Impl(Reader):\n"
+        "    def read(self) -> str:\n"
+        "        return ''\n"
+        "\n"
+        "def use(r: Reader) -> None:\n"
+        "    r.read()\n"
+        "\n"
+        "def run() -> None:\n"
+        "    use(Impl())\n",
+        encoding="utf-8",
+    )
+    index = build_index(tmp_path, ["m.py"], adapter)
+    reader = index.types[TypeKey("m.Reader")]
+    assert reader.kind == "class"
+    declared = reader.members["read"][0]
+    assert not is_interface_member(index, declared)
+    impl_read = index.types[TypeKey("m.Impl")].members["read"][0]
+    assert interface_members(index, impl_read) == []
+    run = next(m for m in index.callables.values() if m.name == "run")
+    assert all(c.bindings == () for c in extract_calls(index, run).calls)

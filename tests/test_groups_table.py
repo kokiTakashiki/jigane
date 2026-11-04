@@ -1,11 +1,14 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 from jigane.groups.definitions import GROUPS
 
 SRC = Path(__file__).resolve().parent.parent / "jigane"
 
 
+@pytest.mark.whole_tree
 def test_group_labels_are_defined_only_in_the_table() -> None:
     labels = {group.label for group in GROUPS}
     table = SRC / "groups" / "definitions.py"

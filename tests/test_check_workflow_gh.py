@@ -58,6 +58,24 @@ def test_gh_check_fails_on_a_flag_error(
     assert message in capsys.readouterr().err
 
 
+def test_gh_call_error_does_not_create_files_outside_the_work_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checker = load_checker()
+    home = tmp_path / "home"
+    (home / "work").mkdir(parents=True)
+    monkeypatch.setattr(checker, "run_tool", lambda *_arguments, **_options: "")
+    checker.gh_call_error(
+        Path("gh"), ["../escape.txt", "a/../../escape2.txt", "inside/ok.txt"], home
+    )
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == [
+        "home",
+        "home/work",
+        "home/work/inside",
+        "home/work/inside/ok.txt",
+    ]
+
+
 def test_gh_check_fails_when_no_gh_line_is_found(tmp_path: Path) -> None:
     checker = load_checker()
     directory = write_workflow(tmp_path, CLEAN_CHECKOUT + NO_GH)

@@ -1,4 +1,4 @@
-"""外の言語の試験の支え。偽の言語を site に置く fixture と、発見の結果を引く関数を持つ。"""
+"""追加の言語の試験の支え。偽の言語を site に置く fixture と、発見の結果を引く関数を持つ。"""
 
 import sys
 from collections.abc import Callable, Iterator, Mapping
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from jigane.languages import registry
+from jigane.languages import grammars, registry
 from jigane.languages.plugins import (
     EnabledLanguage,
     LanguageReady,
@@ -120,6 +120,14 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Install
     yield _install
     for module in installed:
         sys.modules.pop(module, None)
+
+
+def fake_library(root: Path, grammar: str, content: bytes) -> Path:
+    directory = grammars.library_dir(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"libtree_sitter_{grammar}.so"
+    path.write_bytes(content)
+    return path
 
 
 def entry_points_in(tmp_path: Path) -> list[EntryPoint]:

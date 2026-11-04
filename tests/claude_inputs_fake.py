@@ -22,6 +22,7 @@ ROLES = [
     ("現案を擁護する擁護役", "defense"),
     ("設計書の方針のレビューを", "macro_design"),
     ("方針のレビューを図だけで", "macro_diagram"),
+    ("設計の基礎の原則だけを問う", "macro_principles"),
     ("セキュリティをレビューする", "security"),
     ("変更の実装をレビューする", "micro"),
 ]
@@ -139,12 +140,15 @@ def output_for(role: str, schema: dict[str, Any], prompt: str) -> dict[str, Any]
 
 
 def main() -> int:
+    # Windows の標準入出力は既定でロケールの符号化になる。jigane は UTF-8 で書き読みする
+    sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     records = Path(sys.argv[1])
     parent: dict[str, str] = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
     argv = sys.argv[3:]
     if argv == ["--version"]:
         # 起動の前の版の確かめ。入力を持たないので記録しない
-        sys.stdout.write("2.1.292 (Claude Code)\n")
+        sys.stdout.write("2.1.308 (Claude Code)\n")
         return 0
     prompt = sys.stdin.read()
     now = dict(os.environ)

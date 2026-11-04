@@ -107,7 +107,7 @@ def test_candidate_round_trips_explicit_fields_and_omits_absent_ones() -> None:
 
 
 def test_schema_accepts_new_fields_and_rejects_unknown_kind() -> None:
-    validator = jsonschema.Draft202012Validator(macro.conclude_schema())
+    validator = jsonschema.Draft202012Validator(macro.CONCLUDE.schema())
     base: dict[str, Any] = {"findings": [], "merged": []}
     assert not list(validator.iter_errors({**base, "discarded": [EXPLICIT]}))
     assert not list(
@@ -168,7 +168,7 @@ def test_kind_facts_table_has_every_kind_and_feeds_each_consumer() -> None:
 
 
 def test_schema_kind_enum_equals_discard_kind() -> None:
-    schema = macro.conclude_schema()
+    schema = macro.CONCLUDE.schema()
     kind = schema["properties"]["discarded"]["items"]["properties"]["kind"]
     assert kind["enum"] == [member.value for member in DiscardKind]
 

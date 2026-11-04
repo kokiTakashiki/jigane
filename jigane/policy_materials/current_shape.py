@@ -15,12 +15,8 @@ from jigane.figures.models import (
     TreeFigure,
 )
 from jigane.policy_materials import changed_files
-from jigane.policy_materials.classes import (
-    class_block,
-    class_panel,
-    members_of,
-    referenced_types,
-)
+from jigane.policy_materials.classes import class_block, class_panel
+from jigane.policy_materials.type_deltas import members_of, referenced_types
 from jigane.sequence.diagram import DEFAULT_DEPTH, build_diagrams
 from jigane.sequence.index import TypeInfo
 from jigane.sequence.indexes import Indexes

@@ -75,7 +75,7 @@ def main(
     install_warning_handler()
     try:
         if args.command == "languages":
-            # 使えない外の言語があっても、languages の一覧と disable で直せるようにする。
+            # 使えない追加の言語があっても、languages の一覧と disable で直せるようにする。
             # ここで止めると、直す手段そのものが塞がれる
             pass
         else:

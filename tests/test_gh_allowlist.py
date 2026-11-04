@@ -161,6 +161,7 @@ def _gh_sequences(tree: ast.AST) -> list[ast.List | ast.Tuple]:
     ]
 
 
+@pytest.mark.whole_tree
 def test_gh_argv_is_built_only_in_the_gh_module() -> None:
     allowed_module = ROOT / "jigane" / "pull_request_context" / "gh.py"
     offenders = []
@@ -173,8 +174,8 @@ def test_gh_argv_is_built_only_in_the_gh_module() -> None:
 
 
 def test_allowlist_matches_readme() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    blocks = fences(readme, "## jigane が呼ぶ gh のコマンド")
+    destinations = (ROOT / "docs" / "data-destinations.md").read_text(encoding="utf-8")
+    blocks = fences(destinations, "## jigane が呼ぶ gh のコマンド")
     listed = [
         block.content.removeprefix("gh ").rstrip("\n")
         for block in blocks

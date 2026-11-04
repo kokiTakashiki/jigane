@@ -33,7 +33,7 @@ GRAMMARS = ("python", "java", "swift", "csharp")
 _LIBRARY_STEMS = {"csharp": "c_sharp"}
 _SETUP_ACTION = "`jigane languages fetch` を走らせ直してください（開発の木では `make setup`）"
 _FETCH_ACTION = "`jigane languages fetch` を走らせてください"
-# 文法名は共有ライブラリを探す glob に入る。外のコードが決める文字列なので、字種を絞る
+# 文法名は共有ライブラリを探す glob に入る。プラグインのコードが決める文字列なので、字種を絞る
 _GRAMMAR_NAME = re.compile(r"[a-z0-9_]+")
 
 
@@ -146,7 +146,7 @@ def _declaration_error(grammar: str, spec: "GrammarSpec") -> GrammarError | None
 
 
 def verify_declared(root: Path, grammar: str, spec: "GrammarSpec") -> None:
-    """外の言語の文法の実物を、その言語の宣言と照合する。組み込みと違い、漏れは全て誤りにする。"""
+    """追加の言語の文法の実物を、その言語の宣言と照合する。組み込みと違い、漏れは全て誤りにする。"""
     error = _declaration_error(grammar, spec)
     if error is not None:
         raise error
@@ -159,7 +159,7 @@ def verify_declared(root: Path, grammar: str, spec: "GrammarSpec") -> None:
 
 @dataclass(frozen=True)
 class BuiltinGrammar:
-    """組み込みの記録で照合する文法。外の言語の宣言が組み込みと同じ文法名を指す場合もここに入る。"""
+    """組み込みの記録で照合する文法。追加の言語の宣言が組み込みと同じ文法名を指す場合もここに入る。"""
 
     name: str
 
@@ -169,7 +169,7 @@ class BuiltinGrammar:
 
 @dataclass(frozen=True)
 class DeclaredGrammar:
-    """外の言語の宣言で照合する文法。"""
+    """追加の言語の宣言で照合する文法。"""
 
     name: str
     language: str
@@ -184,7 +184,7 @@ GrammarTarget = BuiltinGrammar | DeclaredGrammar
 
 @dataclass(frozen=True)
 class FetchFailure:
-    """外の言語の文法一件の、取得または照合の失敗。組み込みの失敗は例外にするので、対象は宣言の側だけ。"""
+    """追加の言語の文法一件の、取得または照合の失敗。組み込みの失敗は例外にするので、対象は宣言の側だけ。"""
 
     target: DeclaredGrammar
     reason: GrammarError
@@ -200,7 +200,7 @@ def external_target(plugin: "LanguagePlugin") -> GrammarTarget:
 
 
 def targets(external: "Iterable[LanguagePlugin]" = ()) -> tuple[GrammarTarget, ...]:
-    """取得と照合の対象の一覧。組み込みの文法に、外の言語（Ready のもの）の文法を続ける。"""
+    """取得と照合の対象の一覧。組み込みの文法に、追加の言語（Ready のもの）の文法を続ける。"""
     declared = (
         target for target in map(external_target, external) if isinstance(target, DeclaredGrammar)
     )
@@ -250,9 +250,9 @@ def get_language(target: GrammarTarget) -> Language:
 
 
 def fetch(external: "Iterable[LanguagePlugin]" = ()) -> list[FetchFailure]:
-    """組み込みと外の言語の文法を固定の置き場へ取得し、取得の直後に照合する。
+    """組み込みと追加の言語の文法を固定の置き場へ取得し、取得の直後に照合する。
 
-    外の言語の取得と照合の誤りは、その言語の分だけを返して他へ進む。
+    追加の言語の取得と照合の誤りは、その言語の分だけを返して他へ進む。
     組み込みの文法の誤りは、これまで通り例外にする。
     """
     root = cache_root()

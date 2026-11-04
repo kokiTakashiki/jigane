@@ -35,7 +35,7 @@ def test_every_group_maps_to_one_estimate_type(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     assembly = AssemblyInput.load(review)
     expected = {
-        GroupId.MACRO: DiagramPolicyEstimate,  # 機能のレビューは図の形
+        GroupId.MACRO: DiagramPolicyEstimate,  # ファイルのレビューは図の形
         GroupId.MICRO: ImplementationEstimate,
         GroupId.SECURITY: SecurityEstimate,
     }

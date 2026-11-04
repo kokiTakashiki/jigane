@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from fakes import MacroFake, discovered, run_command_stub, settings_for
-from pr_support import BODY, URL, advance_head, commit_all, git
+from pr_support import BODY, URL, advance_head, clone_bare, commit_all, git
 from review_fakes import EXTRA_WARNING
 
 from jigane.commands import main
@@ -168,7 +168,8 @@ def test_cli_new_pr_failures_exit_two(capsys: pytest.CaptureFixture[str]) -> Non
 
 
 def test_old_feature_review_json_still_loads(tmp_path: Path) -> None:
-    # 差分の出所を持たなかった頃の機能レビューは、review.json に diff_source も pull_request も無い
+    # 差分の出所を持たなかった頃のファイルのレビューは、
+    # review.json に diff_source も pull_request も無い
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-b", "main")
@@ -586,9 +587,8 @@ def history_repo(tmp_path: Path) -> tuple[Path, str]:
 
 
 def bare_clone(tmp_path: Path, origin: Path) -> Path:
-    # objects を hardlink で写すローカルの最適化は、並列の負荷で失敗しうる。pack の転送にする
     cache = tmp_path / "cache.git"
-    git(tmp_path, "clone", "--bare", "--no-local", str(origin), str(cache))
+    clone_bare(origin, cache)
     return cache
 
 

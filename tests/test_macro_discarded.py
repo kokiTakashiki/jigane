@@ -29,6 +29,7 @@ from jigane.findings.records import (
     triaged_dicts,
 )
 from jigane.groups.definitions import MACRO
+from jigane.groups.viewpoints import by_number
 from jigane.publishing.rendering import build_context
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.reviews.selection import Picked, current_findings, load_selection, save_selection
@@ -494,3 +495,27 @@ def test_object_an_old_record_nit_fails_with_the_not_selectable_message(
     err = capsys.readouterr().err
     assert LEGACY_NOT_SELECTABLE in err
     assert "知らない指摘の番号です" not in err
+
+
+def test_show_json_carries_the_viewpoint_id_next_to_the_number(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_feature_review(project, ["src"], "p")
+    assert (
+        main(["run", "shop:p", "macro"], invoke=_fake_with_discarded([discovered("M2")]))
+        == EXIT_OK
+    )
+    capsys.readouterr()
+    assert main(["show", "shop:p", "macro", "--json"]) == EXIT_OK
+    findings = json.loads(capsys.readouterr().out)["findings"]
+    shown = [f for f in findings if f["viewpoint"] == "M2"]
+    assert shown
+    assert all(f["viewpoint_id"] == str(by_number("M2").uuid) for f in shown)
+    assert all(f["viewpoint_name"] == "道筋" for f in shown)
+    assert all(f["viewpoint_kind"] == "policy" for f in shown)
+    discarded = [f for f in findings if f["viewpoint"] == "discarded"]
+    assert discarded
+    assert all(
+        f["viewpoint_id"] is None and f["viewpoint_name"] is None and f["viewpoint_kind"] is None
+        for f in discarded
+    )

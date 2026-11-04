@@ -19,6 +19,7 @@ import io
 import os
 import re
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -274,6 +275,21 @@ def wheel_environment_stage(run: Runner, wheel: Path, work: Path, env: dict[str,
     )
 
 
+def remove_tree(path: Path) -> None:
+    """木を消す。読み取り専用の印を外して消し直し、それでも消せなければ例外を上げる。
+
+    Windows の git は読み取り専用のオブジェクトを作るため、印を外さないと消せない。
+    """
+    if not path.exists():
+        return
+
+    def clear_read_only(func: Callable[..., object], failed: str, _exc: BaseException) -> None:
+        Path(failed).chmod(stat.S_IWRITE)
+        func(failed)
+
+    shutil.rmtree(path, onexc=clear_read_only)
+
+
 def check_in_temporary_repository(run: Runner, tree: Path, env: dict[str, str]) -> None:
     """写しを一時の git リポジトリにして make check を走らせ、終われば .git を消す。
 
@@ -299,7 +315,7 @@ def check_in_temporary_repository(run: Runner, tree: Path, env: dict[str, str]) 
             command_stage(run, "make check", args, tree, env)
         command_stage(run, "make check", ["make", "check"], tree, env)
     finally:
-        shutil.rmtree(tree / ".git", ignore_errors=True)
+        remove_tree(tree / ".git")
 
 
 def export(

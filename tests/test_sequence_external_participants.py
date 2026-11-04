@@ -5,6 +5,7 @@ from review_fakes import changed_segment
 
 from jigane.languages.python import PythonAdapter
 from jigane.sequence.diagram import (
+    COLLAPSED_NAME_LIMIT,
     EXTERNAL_PARTICIPANT_LIMIT,
     PARTICIPANT_LIMIT,
     build_diagrams,
@@ -103,3 +104,76 @@ def test_entry_calling_index_and_external_types_draws_no_external_arrow(tmp_path
     assert [a["status"] for a in diagram["arrows"]] == ["resolved"]
     assert _externals(diagram) == []
     assert diagram["notes"] == ["変更に関わらない呼び出し 1 件"]
+
+
+def _collapsed_note(tmp_path: Path, unrelated: int) -> list[str]:
+    """run と work を変更し、run が関わらない関数と外の呼び出しを呼ぶ図の注記。"""
+    functions = "".join(f"def f{n}():\n    return {n}\n\n\n" for n in range(unrelated))
+    calls = "".join(f"    f{n}()\n" for n in range(unrelated)) + "    f0()\n"
+    (tmp_path / "app.py").write_text(
+        "from lib import Ext\n\n\n"
+        "def work():\n    return 1\n\n\n"
+        f"{functions}"
+        f"def run():\n    work()\n{calls}    Ext.go()\n",
+        encoding="utf-8",
+    )
+    adapter = PythonAdapter()
+    index = build_index(tmp_path, ["app.py"], adapter)
+    segments = [
+        changed_segment(
+            "app.py",
+            m.declaration.span.start_line,
+            m.declaration.span.end_line,
+            m.name,
+            "function",
+        )
+        for m in index.callables.values()
+        if m.name in ("run", "work") and m.declaration is not None
+    ]
+    changed = changed_members(index, segments, adapter, include_tests=False)
+    selection = select_roots(index, changed, adapter)
+    model = build_diagrams(index, selection, [])
+    diagram = next(d for d in model["diagrams"] if d["root"].endswith("run"))
+    notes: list[str] = diagram["notes"]
+    return notes
+
+
+def test_unrelated_calls_are_named_once_each_in_the_note(tmp_path: Path) -> None:
+    assert _collapsed_note(tmp_path, 2) == [
+        "変更に関わらない呼び出し 4 件: f0、f1（ほか外の呼び出し 1 件）"
+    ]
+
+
+def test_unrelated_call_names_beyond_the_limit_become_a_count(tmp_path: Path) -> None:
+    total = COLLAPSED_NAME_LIMIT + 2
+    names = "、".join(f"f{n}" for n in range(COLLAPSED_NAME_LIMIT))
+    assert _collapsed_note(tmp_path, total) == [
+        f"変更に関わらない呼び出し {total + 2} 件: {names}、ほか 2 件（ほか外の呼び出し 1 件）"
+    ]
+
+
+def test_builtin_calls_are_counted_without_their_names(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "def work():\n    return 1\n\n\n"
+        "def run(items: list):\n    work()\n    len(items)\n    isinstance(items, list)\n"
+        "    items.append(1)\n",
+        encoding="utf-8",
+    )
+    adapter = PythonAdapter()
+    index = build_index(tmp_path, ["app.py"], adapter)
+    segments = [
+        changed_segment(
+            "app.py",
+            m.declaration.span.start_line,
+            m.declaration.span.end_line,
+            m.name,
+            "function",
+        )
+        for m in index.callables.values()
+        if m.name in ("run", "work") and m.declaration is not None
+    ]
+    changed = changed_members(index, segments, adapter, include_tests=False)
+    selection = select_roots(index, changed, adapter)
+    model = build_diagrams(index, selection, [])
+    diagram = next(d for d in model["diagrams"] if d["root"].endswith("run"))
+    assert diagram["notes"] == ["変更に関わらない呼び出し 3 件"]

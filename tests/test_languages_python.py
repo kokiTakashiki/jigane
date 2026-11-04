@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from jigane.languages.base import (
     Branch,
     BranchArm,
@@ -122,6 +124,7 @@ def test_async_def() -> None:
     assert found.body == Span(2, 2)
 
 
+@pytest.mark.whole_tree
 def test_parses_every_jigane_source_file() -> None:
     # tree-sitter 0.26.0 では、jigane 自身の行数の多いファイルで節点の位置が壊れて落ちた
     adapter = PythonAdapter()

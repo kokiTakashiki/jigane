@@ -62,9 +62,14 @@ def stop_limit_text(*, reserved: bool) -> str:
     return "1 回の起動の上限から次の一往復の分を引いた額" if reserved else "1 回の起動の上限"
 
 
+def cost_basis_text(*, with_output: bool) -> str:
+    """止めの文が費用の根拠として言う語。出力の見込みを含めた組はその旨を言う。"""
+    return "入力と出力の見込みで" if with_output else "入力だけで"
+
+
 @dataclass(frozen=True)
 class BudgetStop:
-    """入力だけで上限に達する見込みのため、起動しなかった記録。"""
+    """費用の見込みで上限に達するため、起動しなかった記録。"""
 
     # 止めた起動の記録の role（discovery、rebuttal など）。None は役の区別が無い群（方針）
     role: str | None
@@ -77,14 +82,22 @@ class BudgetStop:
     notice: str | None
     # 余裕を引いた上限で検査したか。False は上限そのもので検査した
     reserved: bool
+    # 費用に出力の見込みを含めたか（方針の図の形）。False は入力だけ
+    with_output: bool = False
 
     def message(self) -> str:
         sections = "、".join(item.text() for item in self.sections)
         limit_text = stop_limit_text(reserved=self.reserved)
         prefix = "" if self.role is None else f"{describe_invocation(self.role, self.index)}: "
+        basis = cost_basis_text(with_output=self.with_output)
+        estimate = (
+            f"入力 {self.tokens} トークン、入力と出力の見込みの費用 {self.estimated_usd:.4f} USD、"
+            if self.with_output
+            else f"入力の見積もり {self.tokens} トークン（{self.estimated_usd:.4f} USD）、"
+        )
         return (
-            f"{prefix}入力だけで {limit_text}に達する見込みのため、起動しませんでした。"
-            f"入力の見積もり {self.tokens} トークン（{self.estimated_usd:.4f} USD）、"
+            f"{prefix}{basis} {limit_text}に達する見込みのため、起動しませんでした。"
+            f"{estimate}"
             f"上限 {self.limit_usd:g} USD。大きい節: {sections}"
             + (f"。{self.notice}" if self.notice else "")
         )
@@ -118,12 +131,13 @@ def check_input_budget(
     """プロンプトの大きさだけの下限の見積もりで、その起動を呼んでよいかを返す。切り詰めはしない。
 
     settings.budget.reserve_margin が真なら、CLI に渡す上限から次の一往復の余裕を引くので
-    （claude.cli_budget_usd）、引いた値が下限を割る入力も止める。偽なら、入力の費用が上限以上のときだけ止める。
+    （claude.cli_budget_usd）、引いた値が下限を割る入力も止める。偽なら、起動の費用の見込み
+    （出力の見込みのある組は、それを足した額）が上限以上のときだけ止める。
     単価の表に無いモデルは、表の最高の単価で見積もって検査し、その旨の文を返す。
     """
     budget = settings.budget
-    tokens = claude.estimate_input_tokens(len(prompt.encode("utf-8")))
-    estimated = claude.input_cost_usd(budget.model, tokens)
+    tokens = budget.prompt_tokens(len(prompt.encode("utf-8")))
+    estimated = budget.launch_cost(tokens)
     notice = (
         claude.assumed_price_notice(budget.model, estimated) if estimated.assumed_price else None
     )
@@ -138,5 +152,6 @@ def check_input_budget(
         tuple(largest_sections(prompt)),
         notice,
         budget.reserve_margin,
+        budget.counts_output,
     )
     return BudgetCheck(stop, notice)

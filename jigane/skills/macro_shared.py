@@ -41,6 +41,7 @@ def stamp_template(name: str, text: str, inserts: DesignInserts | None = None) -
     digest = hashlib.sha256(adversarial.template_text(name).encode("utf-8"))
     for part in prompt_parts().values():
         digest.update(part.encode("utf-8"))
+    digest.update(shared_rules.values_for(name).get("viewpoints", "").encode("utf-8"))
     if inserts is not None:
         digest.update(inserts.division.encode("utf-8"))
         digest.update(inserts.viewpoints.encode("utf-8"))

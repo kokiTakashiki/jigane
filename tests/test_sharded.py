@@ -31,6 +31,7 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import MICRO, GroupId
 from jigane.llm_runs import claude
+from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import Disposition, Stage
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import (
@@ -115,8 +116,7 @@ def spec_with(calls: list[list[StoredFinding]], group: GroupId = MICRO) -> shard
 
     return sharded.ShardedGroup(
         group=group,
-        schema=micro.discovery_schema(),
-        lenient_model=micro.lenient_discovery_model(),
+        spec=micro.DISCOVERY,
         tools=micro.DISCOVERY_TOOLS,
         select=select,
     )
@@ -632,7 +632,7 @@ def test_prompt_and_record_are_built_from_the_same_shard_concerns(project: Path)
 STORED_ONLY_KEYS = {"nit_reason", "triage_reason", "out_of_scope", "adjudication", "theme"}
 
 
-@pytest.mark.parametrize("schema", [micro.discovery_schema(), security.discovery_schema()])
+@pytest.mark.parametrize("schema", [micro.DISCOVERY.schema(), security.DISCOVERY.schema()])
 def test_finder_schema_shows_only_model_written_fields(schema: dict[str, Any]) -> None:
     shown = set(schema["properties"]["findings"]["items"]["properties"])
     assert not STORED_ONLY_KEYS & shown
@@ -647,7 +647,7 @@ def test_stored_only_fields_from_a_finder_are_dropped_and_the_store_reloads(
     class Permissive(BaseModel):
         model_config = ConfigDict(extra="allow")
 
-    monkeypatch.setattr(micro, "lenient_discovery_model", lambda: Permissive)
+    monkeypatch.setattr(RoleSpec, "lenient_model", lambda _self: Permissive)
     review = create_feature_review(project, ["src"], "p")
     extra = {
         "nit_reason": {"kind": "bogus", "text": "t", "concern": None},

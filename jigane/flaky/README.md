@@ -7,7 +7,7 @@
 | 名前 | 役割 |
 | --- | --- |
 | `catalog.load_catalog` | `catalog.toml` と `queries/*.toml` を読み込んで検証し、`Item` の一覧に変換します |
-| `detector.detect` | パスの一覧からテストのファイルを選別して検出します（機能レビュー式はファイル全体、差分レビュー式は変えた行だけ） |
+| `detector.detect` | パスの一覧からテストのファイルを選別して検出します（ファイルのレビューはファイル全体、差分のレビューは変えた行だけ） |
 | `detector.detect_source` | 一つのファイルを検出します（`jigane: allow-flaky` の注記による除外も扱います） |
 | `checks.CHECKS` | query の結果に掛ける検査を、名前から関数への対応で持ちます |
 | `target.resolve` | 通信の宛先がローカルか、ローカルの外か、確かめられないかを、同じファイルの中で判定します |
@@ -69,4 +69,4 @@ Python の FLK-TIME と FLK-RANDOM は、テストファイルと同じディレ
 - FLK-TIME は、当たりの呼び出しが `with freeze_time(...)`、`with time_machine.travel(...)`、`with travel(...)` の本体の内側にあるとき、または `@freeze_time(...)`、`@time_machine.travel(...)` で修飾した関数かクラスの内側にあるときに、検出しません。
 - autouse でない fixture による固定は認めません。
 - conftest を実行しないので、固定が実際に効くかは確かめません。だから警告であり、検出の取り下げではありません。
-- 差分レビュー式は変えた行だけを見ます。PR が conftest の固定を消しても、変えていないテストの当たりは再評価されません。
+- 差分のレビューは変えた行だけを見ます。PR が conftest の固定を消しても、変えていないテストの当たりは再評価されません。

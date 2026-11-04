@@ -133,6 +133,7 @@ ALLOWED_LITERAL_FILES: dict[str, str] = {
 }
 
 
+@pytest.mark.whole_tree
 def test_triage_names_do_not_appear_as_literals_outside_findings() -> None:
     names = {t.value for t in Triage}
     root = Path(jigane.__file__).parent
@@ -174,6 +175,7 @@ def _comparisons(tree: ast.AST) -> list[ast.Compare]:
     ]
 
 
+@pytest.mark.whole_tree
 def test_triage_members_are_not_compared_outside_findings() -> None:
     root = Path(jigane.__file__).parent
     found = [
@@ -208,6 +210,7 @@ def _match_patterns(tree: ast.AST) -> list[ast.MatchValue]:
     ]
 
 
+@pytest.mark.whole_tree
 def test_triage_members_are_not_matched_outside_findings() -> None:
     root = Path(jigane.__file__).parent
     found = [

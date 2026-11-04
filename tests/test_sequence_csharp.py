@@ -246,6 +246,8 @@ def test_partial_declarations_are_merged_into_one_type() -> None:
 
 def _syntax_node_names(source: str, kinds: str, extra: frozenset[str] = frozenset()) -> list[str]:
     """文字列定数のうち、構文の節の名（`<語>_<kinds のどれか>`、extra、`preproc_` を含むもの）。"""
+    # 節の名前の文字列の比べと .type == は、
+    # ruff の banned-api と import-linter が見ないため、ここで走査する
     pattern = re.compile(rf"[a-z_]+_({kinds})")
     return [
         node.value

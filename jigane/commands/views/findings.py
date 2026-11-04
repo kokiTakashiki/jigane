@@ -27,11 +27,11 @@ from jigane.findings.records import (
     group_by_triage,
 )
 from jigane.judgment_map.region_table import CodeRegion, SectionRegion
-from jigane.languages.plugins import one_line_text
 from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review
 from jigane.skills.received_concerns import NoneReceived, NotRecorded, Received, ReceivedConcerns
 from jigane.skills.run_record import StoppedView
+from jigane.text.terminal import one_line_text
 
 WHOLE_CHANGE = "変更全体"
 

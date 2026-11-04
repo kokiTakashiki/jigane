@@ -8,6 +8,7 @@ import jsonschema
 import pytest
 from legacy_schemas import frozen_schema
 
+from jigane.groups import viewpoints as viewpoint_table
 from jigane.llm_runs.claude import _schema_for_cli
 from jigane.skills import macro, micro, security
 
@@ -63,11 +64,11 @@ def _cases() -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_the_model_schema_is_a_valid_2020_12_schema() -> None:
-    jsonschema.Draft202012Validator.check_schema(macro.conclude_schema())
+    jsonschema.Draft202012Validator.check_schema(macro.CONCLUDE.schema())
 
 
 def test_the_model_schema_keeps_the_path_pattern_and_the_disclosed_at_description() -> None:
-    schema = macro.conclude_schema()
+    schema = macro.CONCLUDE.schema()
     item = schema["properties"]["findings"]["items"]["properties"]
     path = item["evidence"]["items"]["properties"]["path"]
     assert path["pattern"] == r"^(?![/\\])(?![A-Za-z]:)"
@@ -78,8 +79,8 @@ def test_the_model_schema_keeps_the_path_pattern_and_the_disclosed_at_descriptio
 
 def test_the_model_schema_and_the_legacy_schema_agree_on_representative_inputs() -> None:
     legacy = jsonschema.Draft202012Validator(frozen_schema("macro_conclude"))
-    model = jsonschema.Draft202012Validator(macro.conclude_schema())
-    through_cli = jsonschema.Draft202012Validator(_schema_for_cli(macro.conclude_schema()))
+    model = jsonschema.Draft202012Validator(macro.CONCLUDE.schema())
+    through_cli = jsonschema.Draft202012Validator(_schema_for_cli(macro.CONCLUDE.schema()))
     cases = _cases()
     assert len(cases) >= 15
     for name, output in cases:
@@ -89,11 +90,11 @@ def test_the_model_schema_and_the_legacy_schema_agree_on_representative_inputs()
 
 
 def test_the_cli_schema_drops_the_dollar_keys_of_the_model_schema() -> None:
-    assert not {"$schema", "$id"} & set(_schema_for_cli(macro.conclude_schema()))
+    assert not {"$schema", "$id"} & set(_schema_for_cli(macro.CONCLUDE.schema()))
 
 
 def test_the_model_schema_carries_no_description_from_a_docstring() -> None:
-    items = macro.conclude_schema()["properties"]["discarded"]["items"]["properties"]
+    items = macro.CONCLUDE.schema()["properties"]["discarded"]["items"]["properties"]
     assert "description" not in items["kind"]
     assert items["disclosed_at"]["description"]
 
@@ -128,10 +129,10 @@ def _discovery_cases(viewpoints: list[str]) -> list[dict[str, Any]]:
 
 
 _DISCOVERY_GROUPS = {
-    "micro": (micro, ["D1", "T4", "D5", "S-ASVS-V1", ""]),
+    "micro": (micro, ["D1", "T4", "D12", "S-ASVS-V1", ""]),
     "security": (
         security,
-        ["S-AUTH", "S-ASVS-V1", "S-ASVS-V17", "S-ASVS-V18", "S-ASVS-V0", "S-ASVS-V1\n", "D1", ""],
+        ["S-AUTH", "S-ASVS-V1", "S-ASVS-V17", "S-ASVS-V18", "S-ASVS-V0", "D1", ""],
     ),
 }
 
@@ -139,7 +140,7 @@ _DISCOVERY_GROUPS = {
 @pytest.mark.parametrize("name", list(_DISCOVERY_GROUPS))
 def test_the_discovery_model_schema_is_valid_and_agrees_with_the_legacy_one(name: str) -> None:
     module, viewpoints = _DISCOVERY_GROUPS[name]
-    model_schema = module.discovery_schema()
+    model_schema = module.DISCOVERY.schema()
     jsonschema.Draft202012Validator.check_schema(model_schema)
     legacy = jsonschema.Draft202012Validator(frozen_schema(f"{name}_discovery"))
     model = jsonschema.Draft202012Validator(model_schema)
@@ -153,18 +154,29 @@ def test_the_discovery_model_schema_is_valid_and_agrees_with_the_legacy_one(name
         assert through_cli.is_valid(case) == expected, case
 
 
-def test_the_security_viewpoint_accepts_the_list_or_the_pattern() -> None:
-    viewpoint = security.discovery_schema()["properties"]["findings"]["items"]["properties"][
+def test_the_security_viewpoint_is_an_enum_of_the_whole_group_table() -> None:
+    viewpoint = security.DISCOVERY.schema()["properties"]["findings"]["items"]["properties"][
         "viewpoint"
     ]
-    assert len(viewpoint["anyOf"]) == 2
-    assert viewpoint["anyOf"][1]["pattern"] == security.VIEWPOINT_PATTERN
+    assert "anyOf" not in viewpoint
+    assert viewpoint["enum"] == [v.number for v in viewpoint_table.of_group(security.GROUP)]
+    assert "S-ASVS-V17" in viewpoint["enum"]
+    assert "S-ASVS-V18" not in viewpoint["enum"]
+
+
+def test_the_security_viewpoint_rejects_a_trailing_newline_the_old_pattern_let_through() -> None:
+    # 旧の pattern は $ が末尾の改行の手前にも合い、S-ASVS-V1 に改行を足した値を受けていた。
+    # enum は完全一致のため受けない。旧との一致の試験の値から外し、ここで拒むことを確かめる
+    validator = jsonschema.Draft202012Validator(security.DISCOVERY.schema())
+    for viewpoint, accepted in (("S-ASVS-V17", True), ("S-ASVS-V1\n", False)):
+        output = _discovery_output(viewpoint)
+        assert validator.is_valid(output) is accepted, viewpoint
 
 
 @pytest.mark.parametrize("name", list(_DISCOVERY_GROUPS))
 def test_the_discovery_model_schema_carries_no_description_from_a_docstring(name: str) -> None:
     module, _viewpoints = _DISCOVERY_GROUPS[name]
-    item = module.discovery_schema()["properties"]["findings"]["items"]
+    item = module.DISCOVERY.schema()["properties"]["findings"]["items"]
     assert "description" not in item
     assert "description" not in item["properties"]["evidence"]["items"]
 
@@ -181,6 +193,6 @@ def test_the_discovery_model_schema_keeps_the_legacy_disclosed_at_description(na
         found: dict[str, Any] = node
         return found
 
-    model = disclosed_at(module.discovery_schema())
+    model = disclosed_at(module.DISCOVERY.schema())
     legacy = disclosed_at(frozen_schema(f"{name}_discovery"))
     assert model["description"] == legacy["description"]

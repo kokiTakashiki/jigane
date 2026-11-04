@@ -50,6 +50,11 @@ def git(repo: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def clone_bare(origin: Path, destination: Path) -> None:
+    # --no-local: hardlink で写すローカルの最適化は並列の負荷で失敗しうる。pack の転送にする
+    git(destination.parent, "clone", "--bare", "--no-local", str(origin), str(destination))
+
+
 def commit_all(repo: Path, message: str) -> str:
     git(repo, "add", "-A")
     git(repo, "commit", "-m", message)

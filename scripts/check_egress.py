@@ -291,11 +291,12 @@ def check_network_sites(root: Path, allowlist: dict[str, Any]) -> list[str]:
     problems = []
     for path in sorted((root / "jigane").rglob("*.py")):
         module = _module_name(root, path)
+        where = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node, scope, what in _network_uses(tree):
             if (module, scope) not in sites:
                 problems.append(
-                    f"{path.relative_to(root)}:{_line_number(node)}: {what}が許した場所の外にある"
+                    f"{where}:{_line_number(node)}: {what}が許した場所の外にある"
                     f"（{module} の {scope}）。許すなら {ALLOWLIST_NAME} の site へ足す"
                 )
     return problems
@@ -338,7 +339,7 @@ def check_destinations(root: Path, allowlist: dict[str, Any]) -> list[str]:
             if id(node) in docstrings:
                 continue
             problems.extend(
-                f"{path.relative_to(root)}:{node.lineno}: 許可リストに無い宛先 {host}。"
+                f"{path.relative_to(root).as_posix()}:{node.lineno}: 許可リストに無い宛先 {host}。"
                 f"許すなら {ALLOWLIST_NAME} へ足し、{DOCUMENT_NAME} の表も直す"
                 for host in _hosts_in(node.value)
                 if host not in allowed and host not in not_hosts
@@ -403,7 +404,7 @@ def check_commands(root: Path) -> list[str]:
         if module == PROCESS_MODULE:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        where = path.relative_to(root)
+        where = path.relative_to(root).as_posix()
         callee_ids = set()
         for node, scope in _scopes(tree):
             if isinstance(node, ast.Call) and _callee_name(node) in LAUNCHERS:

@@ -8,16 +8,16 @@ import threading
 from functools import partial
 from pathlib import Path
 
-from test_review_lock import _overlapping_merge, _run_in_threads
+from lock_support import overlapping_merge, run_in_threads
 
 from jigane.findings.records import load_findings_state
 
 
 def test_without_lock_a_group_is_lost(tmp_path: Path) -> None:
     barrier = threading.Barrier(2)
-    _run_in_threads(
+    run_in_threads(
         [
-            partial(_overlapping_merge, tmp_path, g, locked=False, barrier=barrier)
+            partial(overlapping_merge, tmp_path, g, locked=False, barrier=barrier)
             for g in ("macro", "security")
         ]
     )

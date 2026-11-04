@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import pytest
+from design_materials_support import work
 from fakes import MacroFake, settings_for, with_budget
-from test_design_materials import DOCUMENT, _work
+from test_design_materials import DOCUMENT
 
 from jigane.policy_materials.design_doc import design_materials
 from jigane.reviews.lifecycle import create_feature_review
@@ -26,7 +27,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _prompt(tmp_path: Path, declaration: str = "カートを直す。") -> str:
-    materials = design_materials(_work(tmp_path), "docs/d.md", DOCUMENT, ["shop/cart.py"])
+    materials = design_materials(work(tmp_path), "docs/d.md", DOCUMENT, ["shop/cart.py"])
     return build_design_prompt(materials, HISTORY, declaration)
 
 
@@ -36,7 +37,7 @@ def test_prompt_carries_every_section_in_order(tmp_path: Path) -> None:
         "### 設計書の全文",
         "### 設計書の構造",
         "### 名指しの照合の表",
-        "### 選んだファイルと推しの理由",
+        "### 選んだファイルと候補にした理由",
         "### いまの形の図",
         "### 前の回の指摘",
     ]

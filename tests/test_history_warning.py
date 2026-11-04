@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fakes import MacroFake, discovered
+from review_fakes import break_history
 from test_security import SecurityFake, s_finding, write_mcp
 
 from jigane.commands import main
@@ -27,15 +28,6 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
         )
     monkeypatch.chdir(root)
     return create_feature_review(root, ["src"], "p")
-
-
-def _break_history(review: Review) -> HistoryWarning:
-    directory = review.id.directory()
-    (directory / HISTORY_FILE).write_text("{not json", encoding="utf-8")
-    [warning] = load_history_checked(directory).warnings
-    assert warning.path == directory / HISTORY_FILE
-    assert warning.reason.startswith("JSONDecodeError")
-    return warning
 
 
 def _json_of(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
@@ -77,7 +69,7 @@ def test_the_related_warning_names_the_review_and_marks_its_origin() -> None:
 def test_run_shows_the_warning_in_the_body_and_in_json(
     review: Review, capsys: pytest.CaptureFixture[str], *, as_json: bool
 ) -> None:
-    warning = _break_history(review)
+    warning = break_history(review)
     arguments = ["run", str(review.id), "macro", *(["--json"] if as_json else [])]
     assert main(arguments, invoke=MacroFake([discovered("M4")])) == EXIT_OK
     if as_json:
@@ -90,7 +82,7 @@ def test_run_shows_the_warning_in_the_body_and_in_json(
 def test_run_of_the_sharded_groups_shows_the_warning(
     review: Review, capsys: pytest.CaptureFixture[str], *, as_json: bool
 ) -> None:
-    warning = _break_history(review)
+    warning = break_history(review)
     write_mcp()
     arguments = ["run", str(review.id), "security", *(["--json"] if as_json else [])]
     assert main(arguments, invoke=SecurityFake({1: [s_finding()], 2: []})) == EXIT_OK
@@ -122,7 +114,7 @@ def test_show_shows_the_warning_in_the_body_and_in_json(
 ) -> None:
     name = str(review.id)
     assert main(["run", name, "macro"], invoke=MacroFake([discovered("M4")])) == EXIT_OK
-    warning = _break_history(review)
+    warning = break_history(review)
     capsys.readouterr()
     arguments = ["show", name, *([view] if view else [])]
     assert main(arguments) == EXIT_OK
@@ -144,7 +136,7 @@ def test_show_reads_the_history_once_per_view(
 ) -> None:
     name = str(review.id)
     assert main(["run", name, "macro"], invoke=MacroFake([discovered("M4")])) == EXIT_OK
-    _break_history(review)
+    break_history(review)
     capsys.readouterr()
     reads: list[Path] = []
     original = findings_module._read_history

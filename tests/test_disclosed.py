@@ -35,7 +35,7 @@ def disclosed(finding: dict[str, Any], severity: str = "nit") -> dict[str, Any]:
     return {**finding, "severity": severity, KEY_DISCLOSED_AT: PLACE}
 
 
-@pytest.mark.parametrize("schema", [micro.discovery_schema(), security.discovery_schema()])
+@pytest.mark.parametrize("schema", [micro.DISCOVERY.schema(), security.DISCOVERY.schema()])
 def test_discovery_schema_has_an_optional_disclosed_at(schema: dict[str, Any]) -> None:
     item = schema["properties"]["findings"]["items"]
     assert item["properties"][KEY_DISCLOSED_AT]["type"] == "string"
@@ -59,7 +59,7 @@ def test_disclosed_at_becomes_a_disclosed_limitation_nit() -> None:
     assert result == {**candidate, "nit_reason": reason.to_json()}
 
 
-@pytest.mark.parametrize("schema", [micro.discovery_schema(), security.discovery_schema()])
+@pytest.mark.parametrize("schema", [micro.DISCOVERY.schema(), security.DISCOVERY.schema()])
 def test_disclosed_at_description_asks_to_merge_places(schema: dict[str, Any]) -> None:
     item = schema["properties"]["findings"]["items"]
     description = item["properties"][KEY_DISCLOSED_AT]["description"]

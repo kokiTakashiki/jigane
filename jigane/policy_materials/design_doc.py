@@ -48,15 +48,15 @@ SECTION_MAIN_DOCUMENT = "主の設計書"
 SECTION_ATTACHMENT_PREFIX = "付属の文書: "
 SECTION_STRUCTURE = "設計書の構造"
 SECTION_MENTIONS = "名指しの照合の表"
-SECTION_SELECTION = "選んだファイルと推しの理由"
+SECTION_SELECTION = "選んだファイルと候補にした理由"
 SECTION_CURRENT_SHAPE = "いまの形の図"
 
 NO_STRUCTURE_TEXT = "見出し、図、表のどれも読めなかった。"
 NO_MENTIONS_TEXT = "設計書が名指した型、ファイル、副コマンド、保存物は無い。"
 NO_SELECTION_TEXT = "利用者が選んだファイルは無い。"
 NO_CURRENT_SHAPE_TEXT = "選んだファイルから描けるいまの形の図は無い。"
-NOT_RECOMMENDED_TEXT = "推しの候補に無いファイル（利用者が選んだ）"
-# recommend の上限。選んだファイルの理由を、推しの上限で落とさずに引くために大きく取る
+NOT_RECOMMENDED_TEXT = "候補に無いファイル（利用者が選んだ）"
+# recommend の上限。選んだファイルの理由を、候補の上限で落とさずに引くために大きく取る
 REASON_LIMIT = 10_000
 
 _VIA_LABELS = {
@@ -150,7 +150,7 @@ def design_materials(
 
     root はいまのコードの作業ディレクトリ。selected は root からの相対パス。
     attachments は付属の文書で、主の設計書とは別の節にする。
-    名指しの照合と構造は主の設計書だけから作る（付属の名指しは推しに入れない）。
+    名指しの照合と構造は主の設計書だけから作る（付属の名指しは候補に入れない）。
     """
     document = parse_design(document_text)
     chosen = tuple(sorted(set(selected)))
@@ -336,7 +336,7 @@ def _reason_text(reason: Reason) -> str:
 
 
 def _selection_blocks(chosen: tuple[str, ...], recommendation: Recommendation) -> dict[str, str]:
-    """選んだファイルごとの、名指した節と推しの理由の文。"""
+    """選んだファイルごとの、名指した節と候補にした理由の文。"""
     by_path = {candidate.path: candidate for candidate in recommendation.candidates}
     blocks: dict[str, str] = {}
     for path in chosen:
@@ -370,7 +370,7 @@ def shard_materials(
     document_text: str,
     selected: Collection[str],
 ) -> ShardMaterials:
-    """設計書の本文と選んだファイルから、シャードの資料の部品を組む。推しは一度だけ引く。"""
+    """設計書の本文と選んだファイルから、シャードの資料の部品を組む。候補は一度だけ引く。"""
     document = parse_design(document_text)
     chosen = tuple(sorted(set(selected)))
     recommendation = recommend(root, document, REASON_LIMIT)

@@ -1,6 +1,7 @@
 """`jigane run` が Claude Code CLI を起動する前に取る、利用者の同意。"""
 
 import sys
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -10,14 +11,14 @@ from jigane.git.process import CONSENT_PROMPT_END
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, SECURITY, Effort, GroupId
 from jigane.judgment_map.map_kind import CodeMap
 from jigane.languages import registry
-from jigane.languages.plugins import one_line_text
 from jigane.llm_runs import claude
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.reviews.lifecycle import Review, ReviewError
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.estimate_result import Estimate
+from jigane.skills.estimate_result import DiagramPolicyEstimate, Estimate
 from jigane.skills.estimator import estimate_of
 from jigane.skills.mcp import ALL_TOOLS_NOTICE, NO_MCP, McpSelection
+from jigane.text.terminal import one_line_text
 
 
 class ConsentDeclinedError(Exception):
@@ -39,10 +40,46 @@ class GroupBreakdown:
     has_verifier: bool
     # 記録にある前回の実行の実績。記録が無ければ None
     past_cost_usd: float | None
+    # 図の形の方針だけが持つ原則の起動。discovery_calls はこの本数を含む
+    # 組み立てた原則ごとの上限。空は原則の組を持たない群
+    principle_limits_usd: tuple[float, ...] = ()
+
+    @property
+    def principle_calls(self) -> int:
+        return len(self.principle_limits_usd)
+
+    @property
+    def diagram_calls(self) -> int:
+        return self.discovery_calls - self.principle_calls
 
     @property
     def known_usd(self) -> float:
-        return self.discovery_calls * self.per_call_usd
+        # 0.1 + 0.4 のような和の丸めの誤差を表示に出さない
+        return round(
+            self.diagram_calls * self.per_call_usd + sum(self.principle_limits_usd),
+            6,
+        )
+
+    def row_calls_text(self) -> str:
+        """群ごとの内訳の行の式。原則の組を持たなければ先頭に「発見役」を付ける。"""
+        return self.calls_text() if self.principle_calls else f"発見役 {self.calls_text()}"
+
+    def calls_text(self) -> str:
+        """起動の本数と目安の式。原則の組を持たなければ発見役の回数だけで表す。"""
+        if self.principle_calls == 0:
+            return (
+                f"{self.discovery_calls} 回 × 1 回の目安 {self.per_call_usd:g} USD"
+                f" = {self.known_usd:g} USD"
+            )
+        groups = Counter(self.principle_limits_usd)
+        terms = [
+            f"図の起動 {self.diagram_calls} 回 × 1 回の目安 {self.per_call_usd:g} USD",
+            *(
+                f"原則の起動 {count} 回 × 1 回の目安 {limit:g} USD"
+                for limit, count in groups.items()
+            ),
+        ]
+        return f"{' + '.join(terms)} = {self.known_usd:g} USD"
 
 
 @dataclass(frozen=True)
@@ -82,14 +119,23 @@ class LaunchPlan:
         return sum(item.known_usd for item in self.groups)
 
 
-def _breakdown_of(group: GroupId, estimate: Estimate, per_call_usd: float) -> GroupBreakdown:
+def _breakdown_of(group: GroupId, estimate: Estimate, budget: claude.RunBudget) -> GroupBreakdown:
     past = estimate.past_run
+    principle_limits = (
+        tuple(
+            budget.for_principle(number).max_budget_usd
+            for number, _ in estimate.principle_input_tokens
+        )
+        if isinstance(estimate, DiagramPolicyEstimate)
+        else ()
+    )
     return GroupBreakdown(
         group,
         estimate.discovery_calls,
-        per_call_usd,
+        budget.max_budget_usd,
         estimate.has_verifier,
         None if past is None else past["cost_usd"],
+        principle_limits,
     )
 
 
@@ -100,7 +146,6 @@ def launch_plan(
     mcp: McpSelection = NO_MCP,
 ) -> LaunchPlan:
     """見積もりと同じ関数から、確実に起動する回数を求める。"""
-    budget = settings.budget.max_budget_usd
     estimates = {group: estimate_of(assembly, group, mcp)}
     for each in (MACRO, MICRO, SECURITY):
         if each in estimates:
@@ -114,11 +159,9 @@ def launch_plan(
         _breakdown_of(
             each,
             estimates[each],
-            budget
+            settings.budget
             if each == group
-            else resolve_run_defaults(
-                each, estimates[each].policy_shape(), None
-            ).budget.max_budget_usd,
+            else resolve_run_defaults(each, estimates[each].policy_shape(), None).budget,
         )
         for each in (MACRO, MICRO, SECURITY)
         if each in estimates
@@ -141,10 +184,7 @@ def launch_plan(
 def _group_row(item: GroupBreakdown) -> str:
     verifier = "検証役は回数が未定" if item.has_verifier else "検証役なし"
     past = "" if item.past_cost_usd is None else f"、前回の実績 {item.past_cost_usd:.4f} USD"
-    return (
-        f"  {GROUP_BY_ID[item.group].label}: 発見役 {item.discovery_calls} 回 × 1 回の目安 "
-        f"{item.per_call_usd:g} USD = {item.known_usd:g} USD、{verifier}{past}"
-    )
+    return f"  {GROUP_BY_ID[item.group].label}: {item.row_calls_text()}、{verifier}{past}"
 
 
 def consent_text(
@@ -169,10 +209,7 @@ def consent_text(
         f"起動の回数: {calls}",
         f"effort: {plan.effort or '渡さない（Claude Code CLI の既定）'}",
         f"この群の内訳（{label}）:",
-        (
-            f"  発見役: {plan.minimum_calls} 回 × 1 回の目安 {per_call:g} USD"
-            f" = {plan.minimum_calls * per_call:g} USD"
-        ),
+        f"  発見役: {plan.breakdown.calls_text()}",
     ]
     if plan.can_increase:
         lines.append("  検証役: 回数は見つかった指摘の数で決まり、事前には分かりません")
@@ -191,7 +228,7 @@ def consent_text(
         f"  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: {plan.known_usd:g} USD"
     )
     lines.append(
-        "実際の額は、検証役の回数と出力の量で変わり、この額より少ないことも多いこともあります。"
+        "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"
     )
     lines.append("1 回の目安は往復の合間にしか確かめられないので、超えることがあります。")
     security = terms_urls(version_lookup()).security

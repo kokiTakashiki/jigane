@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 from jigane.git.process import is_windows
-from jigane.languages.plugins import sanitize_text
 from jigane.static_analysis.models import DropReason
+from jigane.text.terminal import sanitize_text
 
 # URI のスキームは英字で始まる。1 文字のスキームはドライブ文字の `C:` と形が同じなので、
 # 先にドライブ文字として見る

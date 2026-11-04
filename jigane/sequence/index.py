@@ -81,6 +81,7 @@ class Member:
     parameters: tuple[Parameter, ...]
     declaration: Declaration | None
     node: Node = field(compare=False, repr=False)
+    abstract: bool = False
 
     def accepts(self, argument_count: int) -> bool:
         required_count = sum(1 for p in self.parameters if not p.optional)
@@ -145,6 +146,7 @@ class TypeInfo:
     line: int = 0
     # 型の宣言と拡張ごとの (パス, 節点)。宣言の順
     syntaxes: tuple[tuple[str, Node], ...] = field(default=(), compare=False, repr=False)
+    abstract: bool = False
 
 
 @dataclass
@@ -387,6 +389,7 @@ def _add_type(index: Index, decl: TypeDecl, key: TypeKey) -> None:
         (decl.path,),
         decl.line,
         ((decl.path, decl.node),),
+        decl.abstract,
     )
     previous = index.types.get(key)
     if previous is None:
@@ -398,6 +401,7 @@ def _add_type(index: Index, decl: TypeDecl, key: TypeKey) -> None:
             bases=previous.bases + tuple(b for b in info.bases if b not in previous.bases),
             paths=previous.paths + (() if decl.path in previous.paths else (decl.path,)),
             syntaxes=previous.syntaxes + info.syntaxes,
+            abstract=previous.abstract or info.abstract,
         )
         siblings = index.by_name[decl.name]
         siblings[siblings.index(previous)] = info
@@ -431,6 +435,7 @@ def _add_member(
         if decl.kind == "parameter"
         else declarations.get((_declaration_name(index, decl, path), decl.line)),
         decl.node,
+        decl.abstract,
     )
     members = index.types[owner].members
     members[decl.name] = (*members.get(decl.name, ()), member)

@@ -21,6 +21,8 @@ from pydantic import (
 from jigane.findings.discard import DiscardKind
 from jigane.findings.records import ToolBasis, Triage, Verdict
 from jigane.groups.definitions import GroupId
+from jigane.groups.viewpoints import of_group
+from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.output_common import STRICT_OUTPUT, SchemaInt
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
@@ -169,6 +171,7 @@ class Finding(BaseModel):
 KEY_IN_SCOPE = "in_scope"
 KEY_SCOPE_REASON = "scope_reason"
 KEY_DISCLOSED_AT = "disclosed_at"
+KEY_DEEPENS = "deepens"
 
 # 開示の場所を書く欄の説明の共通部分。発見役、判定役、方針の群の結論の役の欄が引く
 PLACES_DESCRIPTION = "開示の場所（ファイルと節）を書く。複数の場所は読点で区切って並べる。"
@@ -213,7 +216,9 @@ class MergedGroup(BaseModel):
     sources: Annotated[list[SourceId], Field(min_length=2)]
 
 
-class DiscardedSource(BaseModel):
+class DiscardedSourceCore(BaseModel):
+    """disclosed_at を読まない後段へ渡す、捨てた候補の形。"""
+
     model_config = STRICT_OUTPUT
 
     source: SourceId
@@ -221,18 +226,20 @@ class DiscardedSource(BaseModel):
     # 項目を欠く出力も受け、欠けた分は読み戻す側が文から補う
     kind: Annotated[DiscardKind, Field(strict=False)] | MISSING = MISSING
     concern: NonEmpty | MISSING = MISSING
+
+
+class DiscardedSource(DiscardedSourceCore):
+    # findings は llm_runs を読めないため、同じ項目の組を discard.DiscardedCandidate が別に持つ
     disclosed_at: Annotated[NonEmpty, Field(description=DISCLOSED_AT_DESCRIPTION)] | MISSING = (
         MISSING
     )
 
 
-def _viewpoint_check(viewpoints: tuple[str, ...], pattern: str | None) -> AfterValidator:
+def _viewpoint_check(viewpoints: tuple[str, ...]) -> AfterValidator:
     allowed = frozenset(viewpoints)
-    compiled = None if pattern is None else re.compile(pattern)
 
     def check(value: str) -> str:
-        # 列挙か pattern のどちらかに合えばよい。pattern は部分一致
-        if value in allowed or (compiled is not None and compiled.search(value) is not None):
+        if value in allowed:
             return value
         raise ValueError("観点の識別子が許す値の外")
 
@@ -240,12 +247,11 @@ def _viewpoint_check(viewpoints: tuple[str, ...], pattern: str | None) -> AfterV
 
 
 @dataclass(frozen=True)
-class RoleShape:
+class RoleSpec:
     """役ごとの違い。同じ値には同じモデルを返すため、不変にする。"""
 
-    viewpoints: tuple[str, ...] | None = None
-    # 列挙に加えて、正規表現に合う観点も許す
-    viewpoint_pattern: str | None = None
+    # 渡すと、観点はその群の表の全行に限る
+    group: GroupId | None = None
     require_references: bool = False
     require_scope_fields: bool = False
     allow_disclosed_at: bool = False
@@ -253,32 +259,41 @@ class RoleShape:
     conclusion: bool = False
     # 渡すと、その欄だけを持つ。渡さないと、ASSIGNED_LATER を除いた全部を持つ
     model_written: tuple[str, ...] | None = None
+    # 渡すと、観点はこの一つに限る（原則ごとの起動が、その原則の番号だけを許すため）
+    only_viewpoint: str | None = None
+    # 真なら、後段が読まない merged と discarded の disclosed_at を持たず、deepens の null を受ける
+    omit_unread: bool = False
 
     def __post_init__(self) -> None:
-        # _apply_shape は効く欄が無い指定を黙って飛ばす。組み立てた後では気づけないため、ここで拒む
-        if self.viewpoint_pattern is not None and self.viewpoints is None:
-            raise ValueError("viewpoint_pattern は viewpoints と一緒に渡す")
+        # _apply_spec は効く欄が無い指定を黙って飛ばす。組み立てた後では気づけないため、ここで拒む
         if self.model_written is None:
             return
-        if self.viewpoints is not None and "viewpoint" not in self.model_written:
-            raise ValueError("viewpoints は model_written に viewpoint が要る")
+        if self.group is not None and "viewpoint" not in self.model_written:
+            raise ValueError("group は model_written に viewpoint が要る")
         if self.require_references and "references" not in self.model_written:
             raise ValueError("require_references は model_written に references が要る")
 
+    def schema(self) -> dict[str, Any]:
+        """claude に渡すスキーマ。"""
+        return json_schema_of(role_findings_model(self))
 
-def _viewpoint_schema(
-    viewpoints: tuple[str, ...], pattern: str | None
-) -> Callable[[dict[str, JsonValue]], None]:
-    """claude に渡す観点のスキーマ。pattern があれば、列挙か pattern のどちらかに合えばよい。"""
-    listed: dict[str, JsonValue] = {"enum": list(viewpoints)}
+    def lenient_model(self) -> type[BaseModel]:
+        """入口の検証に使うモデル。schema と同じ形で、location.path の形の決まりを外してある。"""
+        return role_findings_model(self, lenient=True)
+
+    def viewpoint_numbers(self) -> tuple[str, ...] | None:
+        if self.only_viewpoint is not None:
+            return (self.only_viewpoint,)
+        if self.group is None:
+            return None
+        return tuple(viewpoint.number for viewpoint in of_group(self.group))
+
+
+def _viewpoint_schema(viewpoints: tuple[str, ...]) -> Callable[[dict[str, JsonValue]], None]:
+    """claude に渡す観点のスキーマ。"""
 
     def extend(schema: dict[str, JsonValue]) -> None:
-        if pattern is None:
-            schema.update(listed)
-            return
-        # 旧のスキーマと同じ anyOf にするため、欄の type は腕の側へ移す
-        schema.pop("type", None)
-        schema["anyOf"] = [listed, {"type": "string", "pattern": pattern}]
+        schema.update({"enum": list(viewpoints)})
 
     return extend
 
@@ -292,30 +307,31 @@ def _shown_fields(model_written: tuple[str, ...] | None) -> dict[str, Any]:
     return fields
 
 
-def _apply_shape(fields: dict[str, Any], shape: RoleShape, location: type[BaseModel]) -> None:
+def _apply_spec(fields: dict[str, Any], spec: RoleSpec, location: type[BaseModel]) -> None:
     # 根拠は常に 1 件以上を要る。保存の形（Finding）だけが、捨てた候補から写す指摘の空の根拠を許す
     if "evidence" in fields:
         fields["evidence"] = (list[location], Field(min_length=1))  # type: ignore[valid-type]
     if "declaration_ref" in fields:
         fields["declaration_ref"] = (location | None, ...)
-    if shape.viewpoints is not None and "viewpoint" in fields:
-        check = _viewpoint_check(shape.viewpoints, shape.viewpoint_pattern)
+    viewpoints = spec.viewpoint_numbers()
+    if viewpoints is not None and "viewpoint" in fields:
         fields["viewpoint"] = (
             Annotated[
                 str,
-                check,
-                Field(
-                    json_schema_extra=_viewpoint_schema(shape.viewpoints, shape.viewpoint_pattern)
-                ),
+                _viewpoint_check(viewpoints),
+                Field(json_schema_extra=_viewpoint_schema(viewpoints)),
             ],
             ...,
         )
-    if shape.require_references and "references" in fields:
+    if spec.require_references and "references" in fields:
         fields["references"] = (list[NonEmpty], Field(min_length=1))
-    if shape.require_scope_fields:
+    if spec.require_scope_fields:
         fields[KEY_IN_SCOPE] = (bool, ...)
         fields[KEY_SCOPE_REASON] = (str, ...)
-    if shape.allow_disclosed_at:
+    if spec.omit_unread and KEY_DEEPENS in fields:
+        # null で再試行を使い切らないよう受ける。null を欄が無い形へ直すのは読む側（macro）
+        fields[KEY_DEEPENS] = (FindingId | None | MISSING, MISSING)
+    if spec.allow_disclosed_at:
         fields[KEY_DISCLOSED_AT] = (
             Annotated[NonEmpty, Field(description=DISCOVERY_DISCLOSED_AT_DESCRIPTION)] | MISSING,
             MISSING,
@@ -323,17 +339,19 @@ def _apply_shape(fields: dict[str, Any], shape: RoleShape, location: type[BaseMo
 
 
 @cache
-def role_findings_model(shape: RoleShape, *, lenient: bool = False) -> type[BaseModel]:
+def role_findings_model(spec: RoleSpec, *, lenient: bool = False) -> type[BaseModel]:
     """役の出力のモデル。Finding から、LLM が書く欄だけを持つ形を組み立てる。
 
     lenient は location.path の形の決まりを外す（入口の検証用）。
     """
     location: type[BaseModel] = LenientLocation if lenient else Location
-    fields = _shown_fields(shape.model_written)
-    _apply_shape(fields, shape, location)
+    fields = _shown_fields(spec.model_written)
+    _apply_spec(fields, spec, location)
     item = create_model("RoleFinding", __config__=STRICT_OUTPUT, **fields)
     top: dict[str, Any] = {"findings": (list[item], ...)}  # type: ignore[valid-type]
-    if shape.conclusion:
-        top["merged"] = (list[MergedGroup], ...)
-        top["discarded"] = (list[DiscardedSource], ...)
+    if spec.conclusion:
+        if not spec.omit_unread:
+            top["merged"] = (list[MergedGroup], ...)
+        discarded = DiscardedSourceCore if spec.omit_unread else DiscardedSource
+        top["discarded"] = (list[discarded], ...)  # type: ignore[valid-type]
     return create_model("RoleOutput", __config__=STRICT_OUTPUT, **top)

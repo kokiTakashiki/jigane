@@ -1,5 +1,4 @@
 import importlib.util
-import shutil
 from pathlib import Path
 from types import ModuleType
 
@@ -23,14 +22,19 @@ def read_exact(path: Path) -> str:
     return path.read_bytes().decode("utf-8")
 
 
+def copy_lf(source: Path, target: Path) -> None:
+    # 取り出しの改行に依らず LF に揃えて写す。CRLF の取り出しでも期待の LF と合わせるため
+    target.write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+
+
 def copy_tree(destination: Path) -> Path:
-    """生成器が読むファイルだけを一時の場所へ写す。"""
-    shutil.copy(ROOT / "pyproject.toml", destination / "pyproject.toml")
+    """生成器が読むファイルだけを一時の場所へ写す。取り出しの改行に依らず LF で写す。"""
+    copy_lf(ROOT / "pyproject.toml", destination / "pyproject.toml")
     for readme in (ROOT / "jigane").glob("*/README.md"):
         target = destination / "jigane" / readme.parent.name / "README.md"
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(readme, target)
-    shutil.copy(ROOT / "jigane" / "README.md", destination / "jigane" / "README.md")
+        copy_lf(readme, target)
+    copy_lf(ROOT / "jigane" / "README.md", destination / "jigane" / "README.md")
     return destination
 
 
