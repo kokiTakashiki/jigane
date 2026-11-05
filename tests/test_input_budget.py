@@ -246,7 +246,15 @@ def test_run_output_lists_stopped_roles(project: Path, capsys: pytest.CaptureFix
     clear_policy(review)
     big, small = shard_costs(review)
     fake = MicroFake({1: [], 2: []})
-    budget = f"{big + small:.6f}"
+    # 起動前の判定は書き込みと出力の見込みを足した額を CLI に渡す上限と比べる。
+    # 止まり始める上限は、その額に余裕（読み出しと出力の分）を足したもの。大きい側だけが止まる上限
+    reserved = claude.RunBudget("m", 1.0, reserve_margin=True, output_allowance_tokens=4_000)
+    thresholds = []
+    for cost in (big, small):
+        tokens = round(cost / PRICE_PER_TOKEN)
+        margin = 1.0 - (reserved.cli_usd(tokens) or 0.0)
+        thresholds.append(reserved.launch_cost(tokens).usd + margin)
+    budget = f"{(thresholds[0] + thresholds[1]) / 2:.6f}"
     code = main(
         ["run", str(review.id), "micro", "--model", "m", "--max-budget-usd-per-call", budget],
         invoke=fake,

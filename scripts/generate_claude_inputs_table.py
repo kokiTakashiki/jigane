@@ -33,7 +33,11 @@ NOT_PASSED = ClaudeInput.REMOVED_ENVIRONMENT
 
 OUTSIDE_SENTENCE = (
     "Claude Code が自分で足してモデルへ送る情報（Claude Code の版や設定による）は、"
-    "この表の外です。"
+    "この表の外です。環境の節（作業ディレクトリのパス、OS）とログイン中のアカウントの"
+    "メールアドレスは、claude 2.1.308 で、jigane の指定でも API キーでの認証でも"
+    "入ることを確かめました。切る手段は確かめた範囲で見つかっていません。"
+    "リポジトリの状態の節は、`--settings` の `includeGitInstructions: false` で切っていて、"
+    "claude 2.1.308 で消えることを確かめました。"
 )
 GROUPS_SENTENCE = "「渡る群」の macro は方針、micro は実装、security はセキュリティの群です。"
 # 道具の名前は claude.py の build_command と security.py の DISCOVERY_TOOLS が渡すもの

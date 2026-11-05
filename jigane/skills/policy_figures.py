@@ -20,10 +20,13 @@ from jigane.languages import registry
 from jigane.languages.base import (
     CommandArgumentAdapter,
     ConcurrencyAdapter,
+    DiscriminatorReader,
     FilePathAdapter,
+    PublicNameReader,
     RegexAdapter,
     SequenceAdapter,
     StoreAccessReader,
+    TypeFieldReader,
     ValueSetReader,
 )
 from jigane.policy_materials import changed_files, classes, discriminators, er
@@ -151,7 +154,7 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         discriminators.SECTION_DISCRIMINATORS,
         discriminators.discriminator_diagram,
         FigureSlot.AFTER_TREE,
-        interface=SequenceAdapter,
+        interface=DiscriminatorReader,
     ),
     PolicyFigure(
         "readers",
@@ -214,14 +217,14 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_field_copies.SECTION_FIELD_COPIES,
         policy_field_copies.field_copy_table,
         FigureSlot.AFTER_REGIONS,
-        interface=LANGUAGE_AGNOSTIC,
+        interface=TypeFieldReader,
     ),
     PolicyFigure(
         "callers",
         policy_callers.SECTION_CALLERS,
         policy_callers.caller_table,
         FigureSlot.AFTER_REGIONS,
-        interface=LANGUAGE_AGNOSTIC,
+        interface=PublicNameReader,
     ),
 )
 

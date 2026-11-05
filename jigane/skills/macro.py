@@ -16,8 +16,6 @@ from jigane.findings.discard import (
     KEY_FROM_CONCERN,
     Considered,
     DiscardedCandidate,
-    DiscardKind,
-    discard_kind_of,
 )
 from jigane.findings.discarded_nits import discarded_nit_candidate
 from jigane.findings.records import GroupResult, TriagedFinding, triaged
@@ -492,12 +490,6 @@ class _Outcome:
     notice: str | None = None
 
 
-def _passes_on_from_principle(item: DiscardedCandidate) -> bool:
-    """原則の起動の「図から確かめられない」は、nit にも実装のレビューの懸念にもしない。"""
-    kind = discard_kind_of(item.reason) if item.kind is None else item.kind
-    return kind is not DiscardKind.UNVERIFIABLE_FROM_DIAGRAM
-
-
 def _without_null_deepens(finding: dict[str, Any]) -> dict[str, Any]:
     """null の deepens を欄が無い形にする。保存の形は null を許さない。"""
     if KEY_DEEPENS in finding and finding[KEY_DEEPENS] is None:
@@ -590,9 +582,13 @@ def _outcome(
         stamp,
         viewpoint=None if extra is None else extra.viewpoint,
     )
-    discarded = tuple(DiscardedCandidate.from_json(item) for item in checked["discarded"])
-    kept = discarded if extra is None else tuple(filter(_passes_on_from_principle, discarded))
-    considered = Considered(len(written) + len(discarded), kept)
+    # 原則の起動のスキーマは discarded を持たず、迷う候補は nit の指摘として findings に入る
+    discarded = (
+        ()
+        if extra is not None
+        else tuple(DiscardedCandidate.from_json(item) for item in checked["discarded"])
+    )
+    considered = Considered(len(written) + len(discarded), discarded)
     return _Outcome(tuple(final), (record,), considered, notice)
 
 

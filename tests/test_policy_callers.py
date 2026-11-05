@@ -1,19 +1,24 @@
+from collections.abc import Collection, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from review_fakes import make_review
 from test_policy_classes import feature_review, whole
+from tree_sitter import Node
 
 from jigane.figures.models import FigureKind, TableFigure
+from jigane.languages import registry
+from jigane.languages.base import Declaration, PublicName, PublicNameKind, PublicNameReader
+from jigane.languages.java import JavaAdapter
+from jigane.languages.python_public_names import added_public_names
 from jigane.reviews.lifecycle import Review
 from jigane.skills import macro, policy_callers
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.policy_callers_ast import PublicName, PublicNameKind, added_public_names
 from jigane.skills.policy_figures import (
     REGISTRY,
     FigureSlot,
-    LanguageAgnostic,
     diagrams_of,
     section_texts,
     unsupported_figures,
@@ -108,6 +113,60 @@ def test_class_counts_calls_and_subclasses() -> None:
     names = _names({"m.py": ""}, {"m.py": after})
     assert names["Base"].kind is PublicNameKind.CLASS
     assert names["Base"].callers == ("m.py の make", "m.py の Child")
+
+
+def test_class_counts_annotations_and_references_by_name() -> None:
+    after = (
+        "class Draft:\n    pass\n\n\n"
+        "class Maker:\n    SHARED = 1\n\n\n"
+        "class Checked:\n    pass\n\n\n"
+        "class Unused:\n    pass\n\n\n"
+        "def annotate(draft: Draft) -> None:\n    pass\n\n\n"
+        "def read():\n    return Maker.SHARED\n\n\n"
+        "def check(value):\n    return isinstance(value, Checked)\n"
+    )
+    names = _names({"m.py": ""}, {"m.py": after})
+    assert names["Draft"].callers == ("m.py の annotate",)
+    assert names["Maker"].callers == ("m.py の read",)
+    assert names["Checked"].callers == ("m.py の check",)
+    assert names["Unused"].callers == ()
+
+
+def test_class_counts_a_reference_through_a_module() -> None:
+    after = {"m.py": "class Draft:\n    pass\n", "n.py": "def f(value: m.Draft):\n    pass\n"}
+    assert _names({"m.py": ""}, after)["Draft"].callers == ("n.py の f",)
+
+
+def test_class_named_only_inside_itself_has_no_caller() -> None:
+    after = "class Node:\n    def copy(self) -> Node:\n        return Node()\n"
+    assert _names({"m.py": ""}, {"m.py": after})["Node"].callers == ()
+
+
+def test_class_counts_uses_of_another_definition_with_the_same_name() -> None:
+    after = {
+        "m.py": "class Badge:\n    pass\n",
+        "n.py": "class Badge:\n    pass\n\n\ndef tile(badge: Badge):\n    pass\n",
+    }
+    names = _names({"m.py": "", "n.py": ""}, after)
+    assert names["Badge"].callers == ("n.py の tile",)
+
+
+def test_string_annotation_and_nested_class_are_not_counted() -> None:
+    after = (
+        "class Outer:\n    class Nested:\n        pass\n\n\n"
+        "class Draft:\n    pass\n\n\n"
+        "def f(draft: 'Draft'):\n    return Outer.Nested\n"
+    )
+    names = _names({"m.py": ""}, {"m.py": after})
+    assert "Outer.Nested" not in names
+    assert names["Draft"].callers == ()
+
+
+def test_intro_does_not_claim_that_zero_callers_means_unused() -> None:
+    assert "使う箇所が無い" not in policy_callers.INTRO
+    assert "名前だけを照合" in policy_callers.INTRO
+    assert "`.a`" in policy_callers.INTRO
+    assert "入れ子のクラス" in policy_callers.INTRO
 
 
 def test_recursion_is_not_a_caller() -> None:
@@ -237,16 +296,18 @@ def _mixed_review(tmp_path: Path, extra: str, extra_text: str, python_text: str)
     )
 
 
-def test_change_without_python_has_no_section_and_no_unsupported_note(tmp_path: Path) -> None:
+def test_change_without_a_reader_has_no_section_and_names_the_language_as_unsupported(
+    tmp_path: Path,
+) -> None:
     review = _mixed_review(tmp_path, "A.java", "class A { void run() {} }\n", "")
     (tmp_path / "after" / "m.py").unlink()
     assert policy_callers.caller_table(review) is None
-    sections = section_texts(review, FigureSlot.AFTER_REGIONS)
-    assert not any(policy_callers.SECTION_CALLERS in s for s in sections)
-    assert not any(e.key == "callers" for e in unsupported_figures(review))
+    assert any(e.key == "callers" for e in unsupported_figures(review))
 
 
-def test_mixed_languages_list_python_rows_only_without_unsupported_note(tmp_path: Path) -> None:
+def test_mixed_languages_list_python_rows_and_name_the_language_without_a_reader(
+    tmp_path: Path,
+) -> None:
     review = _mixed_review(
         tmp_path, "A.java", "class A { void run() {} }\n", "def helper():\n    pass\n"
     )
@@ -258,14 +319,53 @@ def test_mixed_languages_list_python_rows_only_without_unsupported_note(tmp_path
         for s in section_texts(review, FigureSlot.AFTER_REGIONS)
         if policy_callers.SECTION_CALLERS in s
     )
-    assert "対応外" not in section
-    assert not any(e.key == "callers" for e in unsupported_figures(review))
+    assert "対応外の言語: Java" in section
+    assert any(e.key == "callers" for e in unsupported_figures(review))
+
+
+class _FakeReaderAdapter:
+    name = "fake-reader"
+    grammar = "java"
+    suffixes = frozenset({".fkr"})
+    comment_node_types = JavaAdapter.comment_node_types
+    import_node_types = JavaAdapter.import_node_types
+    test_directory_names = JavaAdapter.test_directory_names
+    test_file_patterns = JavaAdapter.test_file_patterns
+    build_file_patterns = JavaAdapter.build_file_patterns
+
+    def declarations(self, root_node: Node, source: bytes) -> list[Declaration]:
+        return JavaAdapter().declarations(root_node, source)
+
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        return [
+            PublicName(f"fake_{path}", PublicNameKind.FUNCTION, path, 1, ())
+            for path in changed
+            if after[path] != before.get(path)
+        ]
+
+
+def test_each_reader_adds_its_own_rows_to_a_mixed_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    java = next(p for p in registry.builtin_plugins() if p.adapter.name == "java")
+    fake = replace(java, adapter=_FakeReaderAdapter(), label="fake-reader")
+    monkeypatch.setattr(registry, "_plugins", (*registry.builtin_plugins(), fake))
+    review = _mixed_review(tmp_path, "a.fkr", "x\n", "def helper():\n    pass\n")
+    figure = policy_callers.caller_table(review)
+    assert isinstance(figure, TableFigure)
+    assert [row.cells[0] for row in figure.rows] == ["`helper`", "`fake_a.fkr`"]
 
 
 def test_registered_after_regions_and_reaches_prompt_and_diagrams(tmp_path: Path) -> None:
     entry = next(e for e in REGISTRY if e.key == "callers")
     assert entry.slot is FigureSlot.AFTER_REGIONS
-    assert entry.interface is LanguageAgnostic.VALUE
+    assert entry.interface is PublicNameReader
     review = _case("p2-a07", tmp_path)
     placed = next(p for p in diagrams_of(review).figures if p.key == "callers")
     assert placed.to_json()["kind"] == "table"

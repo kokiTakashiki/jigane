@@ -16,7 +16,7 @@
 
 文法は、導入の後に `jigane languages fetch` で取得します。照合は「[文法の取得](data-destinations.md#文法の取得)」の節にあります。
 
-`jigane languages list [--json]` は、言語ごとの出どころ、状態、拡張子、使える図と対応外の図を示します。有効にした言語が使えないと、`languages` の副コマンド以外は止まります。
+`jigane languages list [--json]` は、言語ごとの出どころ、状態、拡張子、使える図と対応外の図を示します。図は、アダプタが満たす口（`SequenceAdapter`、`DiscriminatorReader` など）で決まります。判別の流れ図は `DiscriminatorReader`（`discriminator_branches`）、足した型と同じ項目を持つ型は `TypeFieldReader`（`type_fields`）を実装した言語だけが対応し、足した公開の口と呼ぶ側は `PublicNameReader`（`added_public_names`）を実装した言語だけが対応します。有効にした言語が使えないと、`languages` の副コマンド以外は止まります。
 
 作り方の例は `examples/jigane-language-kotlin/README.md` にあります。
 

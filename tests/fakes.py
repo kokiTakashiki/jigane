@@ -266,10 +266,11 @@ class MacroFake:
             if f["viewpoint"] == only or (only is None and not f["viewpoint"].startswith("P"))
         ]
         findings = [{**f, "in_scope": True, "scope_reason": ""} for f in mine]
-        # 原則の起動のスキーマは merged を持たない
-        output: dict[str, Any] = {"findings": findings, "discarded": []}
+        # 原則の起動のスキーマは merged と discarded を持たない
+        output: dict[str, Any] = {"findings": findings}
         if only is None:
             output["merged"] = []
+            output["discarded"] = []
         return claude.InvocationResult(output, RECORD)
 
 

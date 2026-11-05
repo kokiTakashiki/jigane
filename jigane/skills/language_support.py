@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from jigane.languages.api import capabilities
 from jigane.languages.base import LanguageAdapter
 from jigane.languages.plugin import LanguagePlugin
-from jigane.skills.policy_figures import LANGUAGE_AGNOSTIC, REGISTRY, FigureKey
+from jigane.skills.policy_figures import LANGUAGE_AGNOSTIC, REGISTRY, FigureKey, PolicyFigure
 
 
 def _interfaces() -> tuple[type, ...]:
@@ -65,6 +65,11 @@ class LanguageSupport:
         }
 
 
+def _supports(plugin: LanguagePlugin, figure: PolicyFigure) -> bool:
+    interface = figure.interface
+    return not isinstance(interface, type) or isinstance(plugin.adapter, interface)
+
+
 def support_of(plugin: LanguagePlugin) -> LanguageSupport:
     adapter = plugin.adapter
     interfaces = tuple(
@@ -72,7 +77,7 @@ def support_of(plugin: LanguagePlugin) -> LanguageSupport:
         for interface in INTERFACES
     )
     figures = tuple(
-        FigureSupport(figure.key, isinstance(adapter, figure.interface))
+        FigureSupport(figure.key, _supports(plugin, figure))
         for figure in REGISTRY
         # 言語に依らない図は全ての言語が描けるので、水準に数えない
         if figure.interface is not LANGUAGE_AGNOSTIC

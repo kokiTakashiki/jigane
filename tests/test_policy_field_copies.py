@@ -5,10 +5,10 @@ from review_fakes import make_review
 from test_policy_classes import whole
 
 from jigane.figures.models import TableFigure
+from jigane.languages.base import TypeFieldReader
 from jigane.reviews.lifecycle import Review
 from jigane.skills import policy_field_copies
 from jigane.skills.policy_figures import (
-    LANGUAGE_AGNOSTIC,
     REGISTRY,
     FigureSlot,
     diagrams_of,
@@ -146,7 +146,7 @@ def test_only_python_reads_type_fields(tmp_path: Path) -> None:
     assert _table(review) is None
 
 
-def test_python_rows_without_unsupported_note_when_languages_are_mixed(tmp_path: Path) -> None:
+def test_python_rows_state_java_as_unsupported_when_languages_are_mixed(tmp_path: Path) -> None:
     java = "class A { int x; int y; }\n"
     before = {"b.py": "class B:\n    x: int\n    y: int\n"}
     after = {**before, "a.py": "class A:\n    x: int\n    y: int\n", "J.java": java}
@@ -154,7 +154,10 @@ def test_python_rows_without_unsupported_note_when_languages_are_mixed(tmp_path:
     figure = _table(review)
     assert figure is not None
     assert [row.cells[0] for row in figure.rows] == ["`A`"]
-    assert all(u.key != "field_copies" for u in diagrams_of(review).unsupported)
+    unsupported = {
+        u.key: [language.name for language in u.languages] for u in diagrams_of(review).unsupported
+    }
+    assert unsupported["field_copies"] == ["Java"]
 
 
 def test_file_review_has_no_table(tmp_path: Path) -> None:
@@ -168,10 +171,10 @@ def test_file_review_has_no_table(tmp_path: Path) -> None:
     assert _table(review) is None
 
 
-def test_registered_in_after_regions_as_language_agnostic(tmp_path: Path) -> None:
+def test_registered_in_after_regions_with_the_type_field_reader(tmp_path: Path) -> None:
     entry = next(e for e in REGISTRY if e.key == "field_copies")
     assert entry.slot == FigureSlot.AFTER_REGIONS
-    assert entry.interface is LANGUAGE_AGNOSTIC
+    assert entry.interface is TypeFieldReader
     review = _range_review(tmp_path, _tree(CASE / "before"), _tree(CASE / "after"))
     placed = next(p for p in diagrams_of(review).figures if p.key == "field_copies")
     assert placed.to_json()["kind"] == "table"
@@ -192,3 +195,58 @@ def test_file_with_a_deep_expression_is_skipped_and_others_remain(
     )
     assert figure is not None
     assert [row.cells[0] for row in figure.rows] == ["`A`", "`B`"]
+
+
+SWIFT_BOOK = """struct Book {
+    let isbn: String
+    var title: String
+    static var shared = 1
+    var label: String { title }
+}
+"""
+SWIFT_ROW = """struct BookRow {
+    let isbn: String
+    var title: String
+    var pages: Int
+    var total: Int { pages }
+}
+"""
+
+
+def test_swift_struct_sharing_stored_properties_is_a_row(tmp_path: Path) -> None:
+    figure = _table(
+        _range_review(
+            tmp_path,
+            {"Book.swift": SWIFT_BOOK},
+            {"Book.swift": SWIFT_BOOK, "Row.swift": SWIFT_ROW},
+        )
+    )
+    assert figure is not None
+    assert [row.cells for row in figure.rows] == [
+        ("`BookRow`", "Row.swift:1", "`Book`", "Book.swift:1", "`isbn`、`title`", "2")
+    ]
+
+
+def test_swift_computed_and_static_properties_are_not_fields(tmp_path: Path) -> None:
+    # label と shared を共有していても、計算プロパティと static は項目に数えない
+    other = (
+        "struct Other {\n    static var shared = 1\n"
+        '    var label: String { "" }\n    let isbn: String\n}\n'
+    )
+    figure = _table(
+        _range_review(
+            tmp_path, {"Book.swift": SWIFT_BOOK}, {"Book.swift": SWIFT_BOOK, "O.swift": other}
+        )
+    )
+    assert figure is None
+
+
+def test_swift_enum_cases_are_fields(tmp_path: Path) -> None:
+    first = "enum Kind { case draft, review\n    case done(Int) }\n"
+    second = "enum Phase: String { case draft, review }\n"
+    figure = _table(
+        _range_review(tmp_path, {"a.swift": first}, {"a.swift": first, "b.swift": second})
+    )
+    assert figure is not None
+    assert [row.cells[0] for row in figure.rows] == ["`Phase`"]
+    assert figure.rows[0].cells[4] == "`draft`、`review`"

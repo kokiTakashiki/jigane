@@ -1,12 +1,16 @@
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping
 
 from tree_sitter import Node
 
 from jigane.languages import (
     calls_core,
     swift_concurrency,
+    swift_discriminators,
+    swift_file_paths,
+    swift_public_names,
     swift_regex,
     swift_string_comparisons,
+    swift_type_fields,
     swift_value_sets,
     type_names,
 )
@@ -19,6 +23,7 @@ from jigane.languages.base import (
     Declaration,
     DeclarationKind,
     DeferredSite,
+    FilePathPattern,
     Import,
     Isolation,
     IsolationContext,
@@ -27,12 +32,14 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
+    PublicName,
     ReceiverKind,
     RegexScan,
     Sharing,
     Step,
     StringComparison,
     TypeDecl,
+    TypeFields,
     TypeKind,
     TypeScope,
     ValueSet,
@@ -718,10 +725,6 @@ class SwiftAdapter:
         self._collect_types(root_node, "", path, result)
         return result
 
-    def discriminator_branches(self, _body_node: Node, _source: bytes, /) -> list[Step] | None:
-        # 分岐の読み取りは Python だけが持つ。判別の流れ図は省いた件数に数える。
-        return None
-
     def body_of(self, member_node: Node) -> Node | None:
         if member_node.type in ("property_declaration", "protocol_property_declaration"):
             computed = self._computed(member_node)
@@ -733,6 +736,14 @@ class SwiftAdapter:
             # get を書かない計算プロパティは、波括弧の中の文が getter の本体になる
             return computed if any(c.type == "statements" for c in computed.children) else None
         return member_node.child_by_field_name("body")
+
+    def file_path_patterns(
+        self, root_node: Node, _source: bytes, path: str, /
+    ) -> list[FilePathPattern]:
+        return swift_file_paths.file_path_patterns(root_node, path)
+
+    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+        return swift_discriminators.discriminator_steps(body_node)
 
     def call_sites(self, body_node: Node, _source: bytes, /) -> list[CallSite | DeferredSite]:
         sites = calls_core.call_sites(body_node, load_queries(self.grammar), _RULES)
@@ -781,6 +792,20 @@ class SwiftAdapter:
 
     def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
         return swift_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
+
+    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+        return swift_type_fields.type_fields_of(parse(self, text.encode()).root_node, path)
+
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        return swift_public_names.added_public_names_of(
+            lambda source: parse(self, source.encode()).root_node, before, after, changed
+        )
 
     def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
         return swift_string_comparisons.string_comparisons_of(

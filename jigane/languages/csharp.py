@@ -32,7 +32,6 @@ from jigane.languages.base import (
     ReceiverKind,
     RegexScan,
     Sharing,
-    Step,
     StringComparison,
     TypeDecl,
     TypeKind,
@@ -384,10 +383,6 @@ class CSharpAdapter:
         result: list[TypeDecl | MemberDecl] = []
         self._collect_types(root_node, "", path, result)
         return result
-
-    def discriminator_branches(self, _body_node: Node, _source: bytes, /) -> list[Step] | None:
-        # 分岐の読み取りは Python だけが持つ。判別の流れ図は省いた件数に数える。
-        return None
 
     def isolation_of(
         self, declaration_node: Node, _source: bytes, context: IsolationContext, /

@@ -3,19 +3,26 @@
 from typing import assert_never
 
 from jigane.groups.definitions import GroupId
+from jigane.llm_runs import claude
 from jigane.skills import macro_principles_run, micro, security
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import Estimate
 from jigane.skills.mcp import NO_MCP, McpSelection
 
 
-def estimate_of(assembly: AssemblyInput, group: GroupId, mcp: McpSelection = NO_MCP) -> Estimate:
+def estimate_of(
+    assembly: AssemblyInput,
+    group: GroupId,
+    mcp: McpSelection = NO_MCP,
+    budget: claude.RunBudget | None = None,
+) -> Estimate:
+    """budget は実行が使う上限の組。実行と同じシャードの数にするため、実行の入口は必ず渡す。"""
     match group:
         case GroupId.MACRO:
             return macro_principles_run.estimate_policy(assembly)
         case GroupId.MICRO:
-            return micro.estimate_micro(assembly, group)
+            return micro.estimate_micro(assembly, group, budget)
         case GroupId.SECURITY:
-            return security.estimate_security(assembly, mcp)
+            return security.estimate_security(assembly, mcp, budget)
         case _:
             assert_never(group)

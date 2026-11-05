@@ -1,4 +1,4 @@
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
@@ -419,14 +419,6 @@ class SequenceAdapter(LanguageAdapter, Protocol):
         """本体の中の局所変数、局所の関数、ラムダの仮引数を返す。"""
         ...
 
-    def discriminator_branches(self, body_node: Node, source: bytes, /) -> list[Step] | None:
-        """本体の分岐と return を、言語に依らない形で文書順に返す。
-
-        関数が列挙型の値を返すかの判定はせず、メンバ参照を返す return を Return.value に載せる。
-        この言語がこの読み取りを持たなければ None。
-        """
-        ...
-
     def imported_names(self, root_node: Node, source: bytes, path: str, /) -> dict[str, str]:
         """ファイルの import が束縛する名前から、取り込んだ元の修飾名への表を返す。
 
@@ -637,6 +629,18 @@ class IsolationContext(Protocol):
 
     def supertype_names(self, type_name: str, /) -> Sequence[str]:
         """型の上位の型（継承と準拠）の単純名を返す。文脈に無い型は空。"""
+        ...
+
+
+@runtime_checkable
+class DiscriminatorReader(SequenceAdapter, Protocol):
+    """判別の流れ図に関数の本体の分岐を渡せる言語アダプタ。"""
+
+    def discriminator_branches(self, body_node: Node, source: bytes, /) -> list[Step]:
+        """本体の分岐と return を、言語に依らない形で文書順に返す。
+
+        関数が列挙型の値を返すかの判定はせず、メンバ参照を返す return を Return.value に載せる。
+        """
         ...
 
 
@@ -872,6 +876,47 @@ class StoreAccessReader(LanguageAdapter, Protocol):
         ...
 
 
+class PublicNameKind(StrEnum):
+    """変更で足した公開の名前の種類。"""
+
+    FUNCTION = "function"
+    METHOD = "method"
+    CLASS = "class"
+    ENUM_VALUE = "enum_value"
+    PARAMETER = "parameter"
+
+
+@dataclass(frozen=True)
+class PublicName:
+    """変更で足した、または引数を足した公開の名前一つと、変更の後の木の中の呼ぶ側。"""
+
+    name: str
+    kind: PublicNameKind
+    path: str
+    line: int
+    # 呼ぶ側の関数。「パス の 所属」の形で、重複を除き、再帰は含めない
+    callers: tuple[str, ...]
+
+
+@runtime_checkable
+class PublicNameReader(LanguageAdapter, Protocol):
+    """変更で足した公開の名前と、変更の後の木の中の呼ぶ側を読める言語アダプタ。"""
+
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        """相対パスからソースへの対応（変更の前と後の木）を受け取り、足した公開の名前を返す。
+
+        changed は変更の後の木で変えたファイルのパス。名前の定義はそこから拾い、
+        呼ぶ側は after の全ファイルから数える。
+        """
+        ...
+
+
 class RegexDialect(StrEnum):
     """正規表現の方言。共通部分の構文解析は同じで、方言に固有の書き方の読み分けだけに使う。"""
 
@@ -1012,6 +1057,29 @@ class ValueSetReader(LanguageAdapter, Protocol):
 
         形は等値と不等値、`in`（名前の付いた組はそのファイルの中の定義を引く）、
         接頭辞と接尾辞の判定、正規表現の一致。長さの上限は設けない。
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class TypeFields:
+    """トップレベルの型一つの、宣言した項目の名前（宣言の順）。"""
+
+    name: str
+    path: str
+    # 1 始まり
+    line: int
+    fields: tuple[str, ...]
+
+
+@runtime_checkable
+class TypeFieldReader(LanguageAdapter, Protocol):
+    """型の宣言と、その項目の名前を静的に読める言語アダプタ。"""
+
+    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+        """一つのファイルのトップレベルの型と項目の名前を、文書順に返す。
+
+        項目のある型だけを返す。読めないファイルは空を返す。
         """
         ...
 

@@ -51,6 +51,10 @@ def run_security(
         return sharded.run_sharded(spec, assembly, settings)
 
 
-def estimate_security(assembly: AssemblyInput, mcp: McpSelection = NO_MCP) -> SecurityEstimate:
+def estimate_security(
+    assembly: AssemblyInput,
+    mcp: McpSelection = NO_MCP,
+    budget: claude.RunBudget | None = None,
+) -> SecurityEstimate:
     """mcp は実行に渡す選択。プロンプトの MCP の注記が選択で変わるため、見積もりも同じ値で組む。"""
-    return sharded.estimate_sharded(SecurityEstimate, assembly, GROUP, ESTIMATE_NOTE, mcp)
+    return sharded.estimate_sharded(SecurityEstimate, assembly, GROUP, ESTIMATE_NOTE, mcp, budget)

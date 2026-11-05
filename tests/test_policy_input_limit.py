@@ -97,15 +97,17 @@ def test_unlisted_model_gets_the_highest_price_and_is_marked() -> None:
     assert cost.usd == pytest.approx((1000 * 20.0 + 1000 * 50.0) / 1_000_000)
 
 
-def test_implementation_and_security_judgement_is_unchanged() -> None:
+def test_implementation_and_security_judgement_follows_the_billing() -> None:
     for group in (MICRO, SECURITY):
         budget = resolve_run_defaults(group, None, None).budget
-        assert budget.output_allowance_tokens is None
-        assert budget.prompt_tokens(300) == claude.estimate_input_tokens(300) == 100
-        assert budget.launch_cost(1_000_000) == claude.input_cost_usd(SONNET, 1_000_000)
-        assert budget.launch_cost(1_000_000).usd == 2.0
+        assert budget.output_allowance_tokens == 4_000
+        assert budget.prompt_tokens(900) == 400
+        # 1,000,000 トークンの書き込み 4.00 USD に、4,000 トークンの出力 0.04 USD を足す
+        assert budget.launch_cost(1_000_000).usd == pytest.approx(4.04)
         assert claude.input_cost_usd(HAIKU, 1_000_000).usd == 0.1
-        assert budget.input_stops_run(100_000) is (budget.cli_usd(100_000) is None)
+        # 4.00 * T + 0.04 >= 0.5 - 0.10 * T - 0.04（T は百万トークン）を満たす最小は 102,440
+        assert budget.input_stops_run(102_440)
+        assert not budget.input_stops_run(102_439)
 
 
 def test_design_shape_is_unchanged() -> None:

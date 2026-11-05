@@ -1,14 +1,17 @@
 import hashlib
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fakes import NoSequenceAdapter
 from language_plugin_support import Installer, approved, legacy_record
 
 from jigane import commands
 from jigane.languages import registry
 from jigane.languages.plugins import EnabledLanguage
+from jigane.skills.language_support import support_of
 from jigane.skills.policy_figures import REGISTRY, LanguageAgnostic
 
 NOTICE_TRUST = (
@@ -481,21 +484,30 @@ def test_json_shape_of_unavailable_row_is_unchanged(
 
 _COMMON = {"SequenceAdapter", "ConcurrencyAdapter", "ImportAdapter", "RegexAdapter"}
 _EXTRA = {
-    "python": {"CommandArgumentAdapter", "FilePathAdapter", "StoreAccessReader"},
+    "python": {
+        "CommandArgumentAdapter",
+        "DiscriminatorReader",
+        "FilePathAdapter",
+        "PublicNameReader",
+        "StoreAccessReader",
+        "TypeFieldReader",
+    },
     "csharp": {"MarkupBindingAdapter"},
-    "java": set(),
-    "swift": set(),
+    "java": {"DiscriminatorReader"},
+    "swift": {"DiscriminatorReader", "FilePathAdapter", "PublicNameReader", "TypeFieldReader"},
 }
-_FIGURE_ONLY_INTERFACES = {key: {"ValueSetReader"} for key in _EXTRA}
 _ALL_INTERFACES = {
     "SequenceAdapter",
     "ConcurrencyAdapter",
+    "DiscriminatorReader",
     "ImportAdapter",
     "MarkupBindingAdapter",
     "CommandArgumentAdapter",
     "FilePathAdapter",
+    "PublicNameReader",
     "StoreAccessReader",
     "RegexAdapter",
+    "TypeFieldReader",
 }
 
 
@@ -510,25 +522,35 @@ def test_builtin_interfaces_match_the_implementation(
         assert {key for key, value in interfaces.items() if value} == _COMMON | extra
 
 
-def test_builtin_figures_follow_the_figure_interfaces(
+# 図の鍵で固定した、組み込みの言語ごとの対応外の図。
+# 口の無い言語の図の一覧（`REGISTRY`）から導かず、実態をそのまま書く
+_JAVA_UNSUPPORTED = {"commands", "file_paths", "stores", "field_copies", "callers"}
+_UNSUPPORTED_FIGURES = {
+    "python": set(),
+    "java": _JAVA_UNSUPPORTED,
+    "swift": _JAVA_UNSUPPORTED - {"file_paths", "field_copies", "callers"},
+    "csharp": _JAVA_UNSUPPORTED | {"discriminators"},
+}
+
+
+def test_builtin_figures_are_pinned_by_key(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     rows = _rows(capsys)
-    language_figures = [
-        (f.key, f.interface.__name__)
-        for f in REGISTRY
-        if not isinstance(f.interface, LanguageAgnostic)
-    ]
-    for name, extra in _EXTRA.items():
+    counted = {f.key for f in REGISTRY if not isinstance(f.interface, LanguageAgnostic)}
+    for name, unsupported in _UNSUPPORTED_FIGURES.items():
         figures = rows[name]["figures"]
         assert isinstance(figures, dict)
-        assert set(figures) == {key for key, _ in language_figures}
-        # ValueSetReader は言語一覧の口の列には出さず、図の有無にだけ現れる
-        extra_for_figures = extra | _FIGURE_ONLY_INTERFACES.get(name, set())
-        expected = {
-            key for key, interface in language_figures if interface in _COMMON | extra_for_figures
-        }
-        assert {key for key, value in figures.items() if value} == expected
+        assert set(figures) == counted
+        assert {key for key, value in figures.items() if not value} == unsupported
+
+
+def test_a_language_without_a_py_suffix_cannot_read_the_python_only_tables() -> None:
+    java = next(p for p in registry.builtin_plugins() if p.adapter.name == "java")
+    plugin = replace(java, adapter=NoSequenceAdapter())
+    assert ".py" not in plugin.adapter.suffixes
+    unsupported = support_of(plugin).unsupported_figures()
+    assert {"field_copies", "callers", "discriminators"} <= set(unsupported)
 
 
 def test_declarations_only_external_language_supports_no_language_figure(

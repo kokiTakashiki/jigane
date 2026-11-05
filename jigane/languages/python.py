@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import PurePosixPath
 
 from tree_sitter import Node
@@ -25,6 +25,7 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
+    PublicName,
     ReceiverKind,
     RegexScan,
     Return,
@@ -33,6 +34,7 @@ from jigane.languages.base import (
     StoreAccess,
     StringComparison,
     TypeDecl,
+    TypeFields,
     TypeKind,
     ValueSet,
     Visibility,
@@ -43,11 +45,13 @@ from jigane.languages.base import (
 from jigane.languages.calls_core import Captures
 from jigane.languages.python_arguments import command_arguments as _command_arguments
 from jigane.languages.python_file_paths import file_path_patterns as _file_path_patterns
+from jigane.languages.python_public_names import added_public_names as _added_public_names
 from jigane.languages.python_regex import regex_scan as _regex_scan
 from jigane.languages.python_stores import store_accesses as _store_accesses
 from jigane.languages.python_string_comparisons import (
     string_comparisons as _string_comparisons,
 )
+from jigane.languages.python_type_fields import type_fields_of as _type_fields_of
 from jigane.languages.python_value_sets import value_sets as _value_sets
 from jigane.languages.queries import load_queries
 from jigane.preconditions.required import required
@@ -536,6 +540,15 @@ class PythonAdapter:
     ) -> list[FilePathPattern]:
         return _file_path_patterns(root_node, path)
 
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        return _added_public_names(before, after, changed)
+
     def store_accesses(self, sources: Mapping[str, str]) -> list[StoreAccess]:
         return _store_accesses(sources)
 
@@ -544,6 +557,9 @@ class PythonAdapter:
 
     def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
         return _string_comparisons(source, path)
+
+    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+        return _type_fields_of(text, path)
 
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return _regex_scan(root_node, path)
@@ -627,7 +643,7 @@ class PythonAdapter:
         self._collect_members(root_node, module, module, path, imported, result)
         return result
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step] | None:
+    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
         return _steps(body_node)
 
     def isolation_of(

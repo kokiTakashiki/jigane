@@ -216,9 +216,7 @@ class MergedGroup(BaseModel):
     sources: Annotated[list[SourceId], Field(min_length=2)]
 
 
-class DiscardedSourceCore(BaseModel):
-    """disclosed_at を読まない後段へ渡す、捨てた候補の形。"""
-
+class DiscardedSource(BaseModel):
     model_config = STRICT_OUTPUT
 
     source: SourceId
@@ -226,9 +224,6 @@ class DiscardedSourceCore(BaseModel):
     # 項目を欠く出力も受け、欠けた分は読み戻す側が文から補う
     kind: Annotated[DiscardKind, Field(strict=False)] | MISSING = MISSING
     concern: NonEmpty | MISSING = MISSING
-
-
-class DiscardedSource(DiscardedSourceCore):
     # findings は llm_runs を読めないため、同じ項目の組を discard.DiscardedCandidate が別に持つ
     disclosed_at: Annotated[NonEmpty, Field(description=DISCLOSED_AT_DESCRIPTION)] | MISSING = (
         MISSING
@@ -261,7 +256,7 @@ class RoleSpec:
     model_written: tuple[str, ...] | None = None
     # 渡すと、観点はこの一つに限る（原則ごとの起動が、その原則の番号だけを許すため）
     only_viewpoint: str | None = None
-    # 真なら、後段が読まない merged と discarded の disclosed_at を持たず、deepens の null を受ける
+    # 真なら、後段が読まない merged と discarded を持たず、deepens の null を受ける
     omit_unread: bool = False
 
     def __post_init__(self) -> None:
@@ -349,9 +344,7 @@ def role_findings_model(spec: RoleSpec, *, lenient: bool = False) -> type[BaseMo
     _apply_spec(fields, spec, location)
     item = create_model("RoleFinding", __config__=STRICT_OUTPUT, **fields)
     top: dict[str, Any] = {"findings": (list[item], ...)}  # type: ignore[valid-type]
-    if spec.conclusion:
-        if not spec.omit_unread:
-            top["merged"] = (list[MergedGroup], ...)
-        discarded = DiscardedSourceCore if spec.omit_unread else DiscardedSource
-        top["discarded"] = (list[discarded], ...)  # type: ignore[valid-type]
+    if spec.conclusion and not spec.omit_unread:
+        top["merged"] = (list[MergedGroup], ...)
+        top["discarded"] = (list[DiscardedSource], ...)
     return create_model("RoleOutput", __config__=STRICT_OUTPUT, **top)

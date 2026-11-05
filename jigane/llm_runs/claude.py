@@ -148,13 +148,14 @@ class RunBudget:
     reserve_margin: bool
     # 原則の番号ごとの組。図の形の方針の実行だけが持ち、他は None
     principles: "Mapping[str, RunBudget] | None" = None
-    # 出力の見込みのトークン数。値のある組（方針の図の形）は、課金に合わせたトークン数と
-    # 単価で起動の費用を見積もる。None の組は入力だけの見積もりのまま
+    # 出力の見込みのトークン数。値のある組は、課金に合わせたトークン数（2.25 バイト / トークン）
+    # と単価で起動の費用を見積もる。方針の図の形は応答 1 回分、実装とセキュリティは最後の一往復分。
+    # None の組は入力だけの見積もりのまま
     output_allowance_tokens: int | None = None
 
     @property
     def counts_output(self) -> bool:
-        """費用に出力の見込みを含めるか。真なら課金に合わせた係数と単価で見積もる。"""
+        """費用に出力の見込みを含めるか。"""
         return self.output_allowance_tokens is not None
 
     def prompt_tokens(self, prompt_bytes: int) -> int:
@@ -164,7 +165,7 @@ class RunBudget:
         return billed_input_tokens(prompt_bytes)
 
     def launch_cost(self, prompt_tokens: int) -> "InputCost":
-        """起動の費用の見込み。値のある組は入力に見込みの出力を足し、None の組は入力だけ。"""
+        """起動の費用の見込み。出力の見込みのある組は書き込みに出力を足し、None の組は入力だけ。"""
         if self.output_allowance_tokens is None:
             return input_cost_usd(self.model, prompt_tokens)
         return billed_launch_cost(self.model, prompt_tokens, self.output_allowance_tokens)
@@ -176,17 +177,29 @@ class RunBudget:
         return self.principles[number]
 
     def cli_usd(self, prompt_tokens: int) -> float | None:
-        return cli_budget_usd(self.model, prompt_tokens, self.max_budget_usd)
+        # 最後の一往復の出力を引くのは、余裕を引く組で出力の見込みのあるものだけ
+        output_tokens = self.output_allowance_tokens if self.reserve_margin else None
+        return cli_budget_usd(self.model, prompt_tokens, self.max_budget_usd, output_tokens)
 
     def input_stops_run(self, prompt_tokens: int) -> bool:
-        """プロンプトの大きさから見積もった費用で、その起動を止めるか。実行前の検査と見積もりが、止めの判定をここから引く。
+        """プロンプトの大きさから見積もった費用で、その起動を止めるか。
 
-        reserve_margin が真なら、CLI に渡す上限が下限を割るときに止める。偽なら、launch_cost
-        （出力の見込みのある組は、それを足した額）が上限以上のときに止める。
+        実行前の検査と見積もりが、止めの判定をここから引く。
+
+        reserve_margin が偽の組は、launch_cost（出力の見込みの無い組は入力だけの費用）が
+        上限以上のときに止める。真で出力の見込みのある組は、launch_cost が CLI に渡す上限以上の
+        ときに止め、見込みの無い組は、CLI に渡す上限が下限を割るときに止める。
         """
-        if self.reserve_margin:
-            return self.cli_usd(prompt_tokens) is None
-        return self.launch_cost(prompt_tokens).usd >= self.max_budget_usd
+        if not self.reserve_margin:
+            return self.launch_cost(prompt_tokens).usd >= self.max_budget_usd
+        cli_usd = self.cli_usd(prompt_tokens)
+        if cli_usd is None:
+            return True
+        if not self.counts_output:
+            return False
+        # CLI は往復の合間に、渡した上限で打ち切る。最初の往復の書き込みだけで CLI の上限に
+        # 届く入力は、費用を使って指摘が 0 件になるので、上限そのものとの比較では通さない。
+        return self.launch_cost(prompt_tokens).usd >= cli_usd
 
 
 @dataclass(frozen=True)
@@ -447,14 +460,17 @@ def build_command(invocation: Invocation) -> list[str]:
         "--restricted",
         # --restricted だけでは作業ディレクトリの .env を Read で読めるため、deny で塞ぐ。
         # deny は作業ディレクトリの下にしか当たらないので、外の読み取りは
-        # blockReadsOutsideWorkingDirectories（Claude Code 2.1.257 以降）で拒む
+        # blockReadsOutsideWorkingDirectories（Claude Code 2.1.257 以降）で拒む。
+        # includeGitInstructions は、Claude Code が要求に足すリポジトリの状態の節
+        # （利用者名、枝、状態、直近のコミットの件名）を切る
         "--settings",
         json.dumps(
             {
                 "permissions": {
                     "deny": secret_read_denials(),
                     "blockReadsOutsideWorkingDirectories": True,
-                }
+                },
+                "includeGitInstructions": False,
             }
         ),
         "-p",
@@ -723,6 +739,8 @@ class PriceTier:
     # この段階に入るプロンプトのトークン数の上限（含む）。None は上限なし
     up_to_prompt_tokens: int | None
     cache_write_1h: float
+    # キャッシュの読み出し（cache hits）の単価
+    cache_read: float
     output: float
 
 
@@ -735,16 +753,15 @@ class ModelPrices:
 
 
 # モデルごとの単価の表。出典 https://platform.claude.com/docs/en/about-claude/pricing
-# 入力の単価は 2026-10-06 時点、段階の単価は 2026-11-04 に確認した。表に無いモデルには、
-# 表の最高の単価を仮に当てる。Haiku 5.5 は、プロンプトが 100,000 トークンを超える起動の
-# 入力全体と出力全体に高い単価が掛かる
+# 2026-11-04 に本文で確かめた。表に無いモデルには、表の最高の単価を仮に当てる。
+# Haiku 5.5 は、プロンプトが 100,000 トークンを超える起動の入力全体と出力全体に高い単価が掛かる
 MODEL_PRICES: dict[str, ModelPrices] = {
-    "claude-sonnet-5-5": ModelPrices(2.00, (PriceTier(None, 4.00, 10.00),)),
-    "claude-opus-5-5": ModelPrices(4.00, (PriceTier(None, 8.00, 20.00),)),
+    "claude-sonnet-5-5": ModelPrices(2.00, (PriceTier(None, 4.00, 0.10, 10.00),)),
+    "claude-opus-5-5": ModelPrices(4.00, (PriceTier(None, 8.00, 0.20, 20.00),)),
     "claude-haiku-5-5": ModelPrices(
-        0.10, (PriceTier(100_000, 0.20, 0.50), PriceTier(None, 1.00, 2.50))
+        0.10, (PriceTier(100_000, 0.20, 0.01, 0.50), PriceTier(None, 1.00, 0.05, 2.50))
     ),
-    "claude-fable-5-1": ModelPrices(10.00, (PriceTier(None, 20.00, 50.00),)),
+    "claude-fable-5-1": ModelPrices(10.00, (PriceTier(None, 20.00, 0.25, 50.00),)),
 }
 
 # 名前を変えない口。値は MODEL_PRICES から導く
@@ -779,25 +796,33 @@ def billed_input_tokens(text_bytes: int) -> int:
     return math.ceil(text_bytes / BILLED_BYTES_PER_TOKEN)
 
 
-def billed_launch_cost(model: str, prompt_tokens: int, output_tokens: int) -> "InputCost":
-    """入力を 1 時間のキャッシュの書き込みの単価、見込みの出力を出力の単価で見積もる。"""
+def tier_prices(model: str, prompt_tokens: int) -> tuple[PriceTier, bool]:
+    """単価の段階を選ぶ。表に無いモデルは、全段階の最高の単価を各欄に持つ段階と True を返す。"""
     prices = MODEL_PRICES.get(model)
-    assumed = prices is None
     if prices is None:
         # 表の手入れに安全弁が左右されないよう、全段階の最高の単価で見積もる
         every = [tier for each in MODEL_PRICES.values() for tier in each.tiers]
-        write = max(tier.cache_write_1h for tier in every)
-        output = max(tier.output for tier in every)
-    else:
-        tier = next(
-            item
-            for item in prices.tiers
-            if item.up_to_prompt_tokens is None or prompt_tokens <= item.up_to_prompt_tokens
+        highest = PriceTier(
+            None,
+            max(tier.cache_write_1h for tier in every),
+            max(tier.cache_read for tier in every),
+            max(tier.output for tier in every),
         )
-        write, output = tier.cache_write_1h, tier.output
+        return highest, True
+    tier = next(
+        item
+        for item in prices.tiers
+        if item.up_to_prompt_tokens is None or prompt_tokens <= item.up_to_prompt_tokens
+    )
+    return tier, False
+
+
+def billed_launch_cost(model: str, prompt_tokens: int, output_tokens: int) -> "InputCost":
+    """入力を 1 時間のキャッシュの書き込みの単価、見込みの出力を出力の単価で見積もる。"""
+    tier, assumed = tier_prices(model, prompt_tokens)
     # 浮動小数の誤差で上限ちょうどの判定が揺れないよう、百万分の一 USD の下で丸める
-    usd = round((prompt_tokens * write + output_tokens * output) / 1_000_000, 9)
-    return InputCost(usd, write, assumed)
+    usd = round((prompt_tokens * tier.cache_write_1h + output_tokens * tier.output) / 1_000_000, 9)
+    return InputCost(usd, tier.cache_write_1h, assumed)
 
 
 def assumed_price_notice(model: str, cost: InputCost) -> str:
@@ -807,18 +832,31 @@ def assumed_price_notice(model: str, cost: InputCost) -> str:
     )
 
 
-# CLI は --max-budget-usd を往復の合間にしか確かめず、最後の一往復で文脈の全部を読み直す分だけ
-# 上限を超える（micro の記録 55 件中 36 件が上限 0.5 USD を超えた）。そこで CLI へ渡す値は、
-# 上限から「プロンプト全体をもう一度入力する費用」を引いた値にする。プロンプトの大きさは
-# 道具で読む分を含まない下限なので、引く額は不足しうるが、超過の大半を占める読み直しは覆える。
+# CLI は --max-budget-usd を往復の合間にしか確かめないので、最後の一往復の分だけ上限を超えうる。
+# そこで CLI へ渡す値は、上限から最後の一往復の見込みを引いた値にする。それでも超えることはある。
+# 最後の一往復は、文脈の全部をキャッシュの読み出しで読み直し、応答を出力する。
+# output_tokens のある組は、プロンプトのトークン × 読み出しの単価に、
+# その出力 × 出力の単価を足した額を引く。
+# 無い組（設計）は、プロンプトのトークン × 入力の単価を引く。
+# プロンプトの大きさは道具で読む分を含まない下限なので、引く額は不足しうる。
 # 引いた値が上限のこの割合を割るときは、予算がほとんど残らず走らせる意味が無いので、
 # 走らせる前の検査で止める。
 MIN_CLI_BUDGET_FRACTION = 0.5
 
 
-def cli_budget_usd(model: str, prompt_tokens: int, max_budget_usd: float) -> float | None:
+def cli_budget_usd(
+    model: str,
+    prompt_tokens: int,
+    max_budget_usd: float,
+    output_tokens: int | None = None,
+) -> float | None:
     """CLI に渡す上限。引いた値が下限を割るときは None で、その起動は走らせない。"""
-    budget = max_budget_usd - input_cost_usd(model, prompt_tokens).usd
+    if output_tokens is None:
+        reserve = input_cost_usd(model, prompt_tokens).usd
+    else:
+        tier, _ = tier_prices(model, prompt_tokens)
+        reserve = (prompt_tokens * tier.cache_read + output_tokens * tier.output) / 1_000_000
+    budget = max_budget_usd - reserve
     if budget < max_budget_usd * MIN_CLI_BUDGET_FRACTION:
         return None
     return budget

@@ -931,9 +931,7 @@ def test_the_principle_launch_schema_omits_fields_the_later_stages_do_not_read()
     assert not {"nit_reason", "from_concern", "out_of_scope", "triage_reason"} & finding
     assert {"deepens", "in_scope", "scope_reason"} <= finding
     assert "merged" not in schema["properties"]
-    discarded = _discarded_fields(schema)
-    assert "disclosed_at" not in discarded
-    assert {"kind", "concern"} <= discarded
+    assert "discarded" not in schema["properties"]
 
 
 def test_the_diagram_launch_schema_keeps_every_field() -> None:
@@ -983,10 +981,12 @@ def test_a_principle_launch_output_with_a_null_deepens_is_not_a_deepening(projec
     assert stored[0]["triage"] == "must_read"
 
 
-def test_a_principle_launch_drops_only_its_unverifiable_discards(project: Path) -> None:
+def test_a_principle_launch_has_no_discards_and_its_nit_is_kept_as_a_finding(
+    project: Path,
+) -> None:
     review = create_feature_review(project, ["src"], "p")
     unverifiable = {"reason": "図だけでは確かめられない", "kind": "unverifiable_from_diagram"}
-    other = {"reason": "別の理由", "kind": "other"}
+    nit = {**discovered("P1"), "severity": "nit"}
 
     class Discarding(MacroFake):
         def __call__(self, invocation: claude.Invocation) -> claude.InvocationResult:
@@ -994,8 +994,9 @@ def test_a_principle_launch_drops_only_its_unverifiable_discards(project: Path) 
                 sources = [{"source": "S1", **unverifiable}]
                 output = {"findings": [], "merged": [], "discarded": sources}
                 return claude.InvocationResult(output, RECORD)
-            sources = [{"source": "S2", **unverifiable}, {"source": "S3", **other}]
-            return claude.InvocationResult({"findings": [], "discarded": sources}, RECORD)
+            assert "discarded" not in invocation.json_schema["properties"]
+            findings = [{**nit, "in_scope": True, "scope_reason": ""}]
+            return claude.InvocationResult({"findings": findings}, RECORD)
 
     result = macro.run_macro(
         AssemblyInput.load(review),
@@ -1003,5 +1004,7 @@ def test_a_principle_launch_drops_only_its_unverifiable_discards(project: Path) 
         extras=[_extra(1, "短い")],
     )
     assert result.run_state.discarded is not None
-    assert [item.source for item in result.run_state.discarded] == ["S1", "S3"]
-    assert result.run_state.discovered == 3
+    assert [item.source for item in result.run_state.discarded] == ["S1"]
+    assert result.run_state.discovered == 2
+    stored = [f for f in triaged_dicts(result.findings) if f["viewpoint"] == "P1"]
+    assert [f["severity"] for f in stored] == ["nit"]

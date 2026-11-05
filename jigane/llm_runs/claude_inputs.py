@@ -330,7 +330,8 @@ class ClaudeInput(Enum):
     TOOL_PERMISSIONS = InputSpec(
         Channel.ARGV,
         "--restricted、--tools、--settings の秘密のファイル名の deny と"
-        "作業ディレクトリの外の読み取りの拒否、--strict-mcp-config",
+        "作業ディレクトリの外の読み取りの拒否とリポジトリの状態の節の無効化、"
+        "--strict-mcp-config",
         (
             "jigane/llm_runs/claude.py:build_command",
             "jigane/llm_runs/claude.py:SECRET_FILE_PATTERNS",

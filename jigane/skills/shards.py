@@ -38,7 +38,10 @@ from jigane.reviews.lifecycle import (
 )
 
 SHARD_BYTES = 30_000
+# 既定のシャード数の上限。小さな差分はこの数までで収まる
 MAX_SHARDS = 4
+# 4 シャードのプロンプトが 1 回の起動の上限で止まるときだけ、ここまで増やす（sharded.plan_shards）
+MAX_GROWN_SHARDS = 8
 LOGGER = logging.getLogger(__name__)
 _OMITTED_MARKERS = (OMITTED_GENERATED, OMITTED_BINARY, OMITTED_TOO_LARGE)
 
@@ -255,17 +258,22 @@ def _file_units(review: Review, root: Path, withheld: list[str]) -> list[Unit]:
     return units
 
 
-def shard_count(total_bytes: int, unit_count: int) -> int:
+def shard_count(total_bytes: int, unit_count: int, limit: int = MAX_SHARDS) -> int:
     if unit_count == 0:
         return 0
     wanted = math.ceil(total_bytes / SHARD_BYTES)
     # 単位より多く分けても空のシャードが増えるだけのため、単位の数も上限にする。
-    return max(1, min(wanted, MAX_SHARDS, unit_count))
+    return max(1, min(wanted, limit, unit_count))
 
 
-def assign_shards[S](units: list[Unit], make: Callable[[tuple[Unit, ...]], S]) -> list[S]:
-    """最長処理時間優先。大きい順（同じ大きさはパス順）に、最も軽いシャードへ入れる。"""
-    count = shard_count(sum(unit.size for unit in units), len(units))
+def assign_shards[S](
+    units: list[Unit], make: Callable[[tuple[Unit, ...]], S], limit: int = MAX_SHARDS
+) -> list[S]:
+    """最長処理時間優先。大きい順（同じ大きさはパス順）に、最も軽いシャードへ入れる。
+
+    limit は分ける数の上限。既定は MAX_SHARDS で、増やすのは sharded.plan_shards だけ。
+    """
+    count = shard_count(sum(unit.size for unit in units), len(units), limit)
     buckets: list[list[Unit]] = [[] for _ in range(count)]
     loads = [0] * count
     for unit in sorted(units, key=lambda item: (-item.size, item.path)):
@@ -276,7 +284,7 @@ def assign_shards[S](units: list[Unit], make: Callable[[tuple[Unit, ...]], S]) -
 
 
 def _design_shards(
-    review: Review, origin: DesignDocOrigin, units: list[Unit]
+    review: Review, origin: DesignDocOrigin, units: list[Unit], limit: int
 ) -> tuple[list[Shard], tuple[VersionDrift, ...]]:
     root = Path(review.repository_root)
     document = root / origin.document_path
@@ -302,7 +310,7 @@ def _design_shards(
             attached,
         )
 
-    file_shards = assign_shards(units, file_shard)
+    file_shards = assign_shards(units, file_shard, limit)
     document_shard = DesignDocumentShard(
         origin.document_path,
         materials.document,
@@ -313,18 +321,24 @@ def _design_shards(
     return [document_shard, *file_shards], drifts
 
 
-def build_plan(review: Review, group: GroupId) -> ShardPlan:
+def build_plan(review: Review, group: GroupId, limit: int = MAX_SHARDS) -> ShardPlan:
     """群と出所から、計画の種類、単位、シャードを組む。種類ごとの分岐はここだけ。"""
     kind = plan_kind_for(group, review)
     units, withheld = build_units_and_withheld(review)
     match kind:
         case ShardPlanKind.DIFF:
             return ShardPlan(
-                kind, tuple(units), tuple(assign_shards(units, DiffShard)), withheld=withheld
+                kind,
+                tuple(units),
+                tuple(assign_shards(units, DiffShard, limit)),
+                withheld=withheld,
             )
         case ShardPlanKind.FILES:
             return ShardPlan(
-                kind, tuple(units), tuple(assign_shards(units, FullTextShard)), withheld=withheld
+                kind,
+                tuple(units),
+                tuple(assign_shards(units, FullTextShard, limit)),
+                withheld=withheld,
             )
         case ShardPlanKind.DESIGN:
             origin = review.origin
@@ -333,7 +347,7 @@ def build_plan(review: Review, group: GroupId) -> ShardPlan:
                 raise TypeError("設計書の計画は設計書の出所にだけ組めます")
             # 選んだファイルが 0 件ならファイルのシャードは無く、設計書のシャードだけが残る。
             # 設計書の全文はシャードの上限で切らない。上限は assign_shards の単位にだけ掛かる
-            design_shards, drifts = _design_shards(review, origin, units)
+            design_shards, drifts = _design_shards(review, origin, units, limit)
             return ShardPlan(kind, tuple(units), tuple(design_shards), drifts, withheld)
         case _:
             assert_never(kind)

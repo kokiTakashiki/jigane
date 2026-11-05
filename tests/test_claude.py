@@ -48,6 +48,14 @@ def fake_runner(
     return runner
 
 
+def test_build_command_turns_off_repository_status(tmp_path: Path) -> None:
+    # 根拠: claude 2.1.308 を 127.0.0.1 の偽サーバへ向け、受けた本文で確かめた。
+    # この設定を渡すと、要求から gitStatus（利用者名、枝、状態、コミットの件名）だけが消えた
+    command = build_command(make_invocation(tmp_path))
+    settings = json.loads(command[command.index("--settings") + 1])
+    assert settings["includeGitInstructions"] is False
+
+
 def test_build_command_without_mcp(tmp_path: Path) -> None:
     command = build_command(make_invocation(tmp_path))
     assert command == [
@@ -59,7 +67,8 @@ def test_build_command_without_mcp(tmp_path: Path) -> None:
                 "permissions": {
                     "deny": secret_read_denials(),
                     "blockReadsOutsideWorkingDirectories": True,
-                }
+                },
+                "includeGitInstructions": False,
             }
         ),
         "-p",

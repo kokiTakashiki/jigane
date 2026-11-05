@@ -58,9 +58,31 @@ def test_csharp_only_change_is_unsupported_for_the_interface_tables(
         "commands": ("C#",),
         "file_paths": ("C#",),
         "stores": ("C#",),
+        "field_copies": ("C#",),
+        "callers": ("C#",),
+        "discriminators": ("C#",),
     }
     text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
     assert NOTE in text
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        (
+            "src/A.cs",
+            {"commands", "file_paths", "stores", "field_copies", "callers", "discriminators"},
+        ),
+        # Swift はファイルの名前の組み立て、項目の写し、呼ぶ側の表を読める
+        ("src/B.swift", {"commands", "stores"}),
+    ],
+)
+def test_swift_and_csharp_changes_report_the_unsupported_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, expected: set[str]
+) -> None:
+    # 判別の流れ図は DiscriminatorReader を持たない C# だけが対応外に挙がり、Swift は読める
+    review = _review(tmp_path, monkeypatch, {name: CSHARP})
+    assert set(_unsupported(review)) == expected
 
 
 def test_python_only_change_is_not_unsupported(
@@ -87,6 +109,7 @@ def test_mixed_change_names_only_the_unsupported_languages(
     review = _review(tmp_path, monkeypatch, files)
     assert _unsupported(review)["commands"] == ("C#", "Swift")
     assert _unsupported(review)["stores"] == ("C#", "Swift")
+    assert _unsupported(review)["file_paths"] == ("C#",)
     sections = section_texts(review, FigureSlot.AFTER_TREE)
     assert any(BUILTIN_NOTE_CSHARP_SWIFT in s for s in sections)
     assert not any("Python" in s for s in sections if "対応外" in s)
@@ -130,6 +153,8 @@ def test_language_without_any_interface_is_unsupported_for_every_interface_figur
         "stores",
         "regex",
         "value_sets",
+        "field_copies",
+        "callers",
     )
     # ツリーとシグネチャは言語の口に依らないので、対応外に載らない。
     # クラス図などは SequenceAdapter の索引から宣言を引くので、その口の無い言語では対応外に載る
@@ -164,8 +189,6 @@ def test_every_figure_states_its_language_interface() -> None:
         "tree",
         "signatures",
         "cochange",
-        "field_copies",
-        "callers",
     }
 
 
@@ -189,7 +212,8 @@ def test_builtin_languages_share_one_sentence(
 ) -> None:
     review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP, "src/B.swift": "struct B {}\n"})
     notes = {u.note() for u in diagrams_of(review).unsupported}
-    assert notes == {BUILTIN_NOTE_CSHARP_SWIFT}
+    # ファイルの名前の組み立てと項目の写しは Swift が読めるので、その図の文は C# だけを挙げる
+    assert notes == {BUILTIN_NOTE_CSHARP_SWIFT, NOTE}
 
 
 def test_plugin_language_gets_the_plugin_sentence(

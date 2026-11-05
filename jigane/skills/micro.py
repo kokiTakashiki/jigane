@@ -52,5 +52,9 @@ def run_micro(assembly: AssemblyInput, settings: claude.RunSettings) -> MicroRun
     return sharded.run_sharded(spec, assembly, settings)
 
 
-def estimate_micro(assembly: AssemblyInput, group: GroupId) -> ImplementationEstimate:
-    return sharded.estimate_sharded(ImplementationEstimate, assembly, group, ESTIMATE_NOTE)
+def estimate_micro(
+    assembly: AssemblyInput, group: GroupId, budget: claude.RunBudget | None = None
+) -> ImplementationEstimate:
+    return sharded.estimate_sharded(
+        ImplementationEstimate, assembly, group, ESTIMATE_NOTE, budget=budget
+    )

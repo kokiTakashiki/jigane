@@ -65,7 +65,7 @@ flowchart TD
 
 <!-- BEGIN GENERATED: claude-inputs-table (scripts/generate_claude_inputs_table.py) -->
 
-Claude Code が自分で足してモデルへ送る情報（Claude Code の版や設定による）は、この表の外です。
+Claude Code が自分で足してモデルへ送る情報（Claude Code の版や設定による）は、この表の外です。環境の節（作業ディレクトリのパス、OS）とログイン中のアカウントのメールアドレスは、claude 2.1.308 で、jigane の指定でも API キーでの認証でも入ることを確かめました。切る手段は確かめた範囲で見つかっていません。リポジトリの状態の節は、`--settings` の `includeGitInstructions: false` で切っていて、claude 2.1.308 で消えることを確かめました。
 
 「渡る群」の macro は方針、micro は実装、security はセキュリティの群です。
 
@@ -91,7 +91,7 @@ Claude Code が自分で足してモデルへ送る情報（Claude Code の版�
 | 標準入力 | 検証の段で確かめた位置の抜粋。jigane が作業ディレクトリから読み直して渡す | micro、security | はい（作業ディレクトリのファイル。秘密のファイル名は除く） |
 | 標準入力 | 利用者の MCP の使い分けの TOML と、使える MCP の名前の注記 | security | はい（利用者自身が jigane に渡した設定を jigane が整形したもの） |
 | 標準入力 | jigane の雛形の固定の文で、利用者のデータではない（観点、基準、範囲の規則、捨てる理由の表、担当のファイルの番号など） | macro、micro、security | はい（公開の雛形の文。利用者のデータを含まない） |
-| コマンドの引数 | --restricted、--tools、--settings の秘密のファイル名の deny と作業ディレクトリの外の読み取りの拒否、--strict-mcp-config | macro、micro、security | はい（利用者も渡せる。値の組は jigane のもの） |
+| コマンドの引数 | --restricted、--tools、--settings の秘密のファイル名の deny と作業ディレクトリの外の読み取りの拒否とリポジトリの状態の節の無効化、--strict-mcp-config | macro、micro、security | はい（利用者も渡せる。値の組は jigane のもの） |
 | コマンドの引数 | --output-format json と --json-schema（段ごとの出力の形） | macro、micro、security | はい（jigane の固定の出力モデルから作る文） |
 | コマンドの引数 | --model、--effort、--max-turns、--max-budget-usd | macro、micro、security | はい（利用者も渡せる） |
 | コマンドの引数 | --mcp-config の一時ファイル（利用者の mcp.json から選んだサーバの定義）と --allowedTools | security | はい（利用者の MCP の設定。認証情報を含みうる） |
@@ -133,11 +133,12 @@ Claude Code が自分で足してモデルへ送る情報（Claude Code の版�
 ### 費用の上限
 
 - 1 回の起動の費用の上限は、既定で 0.5 USD です。`--max-budget-usd-per-call` で変えられます。
-- Claude Code の上限は往復の合間にしか確かめられないので、超えることがあります。jigane は実装とセキュリティの群で、次の一往復の分を上限から引いて渡し、超過を減らしますが、超えないことは保証しません。
+- Claude Code の上限は往復の合間にしか確かめられないので、超えることがあります。jigane は実装とセキュリティの群で、最後の一往復の分（プロンプト全体の読み出しと 4,000 トークンの出力）を上限から引いて渡し、超過を減らしますが、超えないことは保証しません。最初の往復の超過は、引き額では防げません。
 - 実行全体の合計の上限はありません。実装とセキュリティはシャードと役ごとに複数回起動するため、実行全体では上限の数倍を使うことがあります。
 
 ## 既知の限界
 
+- `PYTHONPATH` に空の項目があると、空の項目は作業ディレクトリを指すので、レビューするリポジトリの根で起動したときに、そのリポジトリの `jigane/`、`sitecustomize.py`、`functools.py` のようなファイルが jigane のコードに届く前に実行されます。jigane は起動の最初に作業ディレクトリを `sys.path` から外しますが、それより前に読まれるものは守れません。`PYTHONPATH` に空の項目を入れないでください。
 - `mcp.json` の権限が 0600 より広い（グループか他人が読める・書ける）と、POSIX では警告を出します。警告にとどめ、読み込みは止めません。Windows では権限を確かめません。認証情報を書くときは `chmod 600` で絞ってください。
 - `--mcps` で渡したサーバの設定は、権限 0600 の一時のファイルに書き、抜けるときに消します。SIGKILL で止められた場合は消す処理が走らず、一時のディレクトリに `jigane-mcp-*.json` が残ります。認証情報を含むので、残っていれば手で消してください。
 - Claude Code に渡すレビューの本文に載せるファイルは 1 MB（1,000,000 バイト）までです。これを超えるファイルの本文は載せません。全文のレビューでは警告を出して対象から除きますが、差分のレビューでは警告を出さずに除きます。除いたファイルは、レビューされません。大きなファイルに入れた変更は、レビューを通りません。

@@ -43,8 +43,15 @@ class RunShape:
     # 真なら、CLI に渡す上限から次の一往復の余裕を引く
     reserve_margin: bool
     # 出力の見込みのトークン数。値があれば、起動の前の検査と見積もりが課金に合わせた単価で数える。
+    # reserve_margin が真なら、CLI に渡す上限からも最後の一往復の出力としてこの分を引く。
     # None は入力だけで数える
     output_allowance_tokens: int | None = None
+
+
+# 実装とセキュリティの最後の一往復の出力の見込み。micro の最後の往復の実測の
+# 90 パーセンタイルが 0.0396 USD（requests.csv、2026-11-02）で、出力 10 USD / 100 万トークンの
+# 4,000 トークンが 0.04 USD に当たる
+LAST_ROUND_TRIP_OUTPUT_TOKENS = 4_000
 
 
 # 方針の図の形は、どの起動にも道具を渡さないので、応答は起動ごとに一回で終わる。
@@ -88,6 +95,15 @@ class Group:
     shape: RunShape
 
 
+# 実装とセキュリティの形。シャードごとに起動し、次の一往復の余裕を引く
+SHARDED_SHAPE = RunShape(
+    effort=None,
+    max_budget_usd=0.5,
+    max_turns=None,
+    reserve_margin=True,
+    output_allowance_tokens=LAST_ROUND_TRIP_OUTPUT_TOKENS,
+)
+
 # 並びは方針、実装、セキュリティ
 GROUPS = (
     Group(MACRO, "方針", "claude-sonnet-5-5", DIAGRAM_SHAPE),
@@ -95,13 +111,13 @@ GROUPS = (
         MICRO,
         "実装",
         "claude-sonnet-5-5",
-        RunShape(effort=None, max_budget_usd=0.5, max_turns=None, reserve_margin=True),
+        SHARDED_SHAPE,
     ),
     Group(
         SECURITY,
         "セキュリティ",
         "claude-sonnet-5-5",
-        RunShape(effort=None, max_budget_usd=0.5, max_turns=None, reserve_margin=True),
+        SHARDED_SHAPE,
     ),
 )
 GROUP_IDS = tuple(group.identifier for group in GROUPS)

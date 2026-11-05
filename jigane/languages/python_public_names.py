@@ -5,38 +5,18 @@
 前から在る関数とメソッドに足した引数を拾う。
 呼ぶ側は変更の後の木の中で名前だけを照合して数え、型の解決はしない。
 関数とメソッドの呼び出し、クラスの呼び出しと継承、列挙の値の `型.値` の参照を呼ぶ側とする。
+クラスは、型注記と式の中で名前を書いた箇所も呼ぶ側とする。文字列で書いた型注記は数えない。
+入れ子のクラスは定義に数えないので行にならない。
 引数は、その引数を実際に渡す呼び出し（キーワード、または位置）の関数を呼ぶ側とする。
 """
 
 import ast
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 
+from jigane.languages.base import PublicName, PublicNameKind
+from jigane.languages.python_type_fields import ENUM_BASES
 
-class PublicNameKind(StrEnum):
-    """変更で足した公開の名前の種類。"""
-
-    FUNCTION = "function"
-    METHOD = "method"
-    CLASS = "class"
-    ENUM_VALUE = "enum_value"
-    PARAMETER = "parameter"
-
-
-@dataclass(frozen=True)
-class PublicName:
-    """変更で足した、または引数を足した公開の名前一つと、変更の後の木の中の呼ぶ側。"""
-
-    name: str
-    kind: PublicNameKind
-    path: str
-    line: int
-    # 呼ぶ側の関数。「パス の 所属」の形で、重複を除き、再帰は含めない
-    callers: tuple[str, ...]
-
-
-_ENUM_BASES = {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"}
 _MODULE_LEVEL = "モジュール"
 
 type _Function = ast.FunctionDef | ast.AsyncFunctionDef
@@ -70,7 +50,7 @@ def _is_enum(node: ast.ClassDef) -> bool:
         for base in node.bases
         if isinstance(base, ast.Name | ast.Attribute)
     }
-    return bool(names & _ENUM_BASES)
+    return bool(names & ENUM_BASES)
 
 
 def _enum_value_names(item: ast.stmt) -> list[str]:
@@ -158,19 +138,12 @@ class _SiteCollector(ast.NodeVisitor):
         self.stack: list[str] = []
         self.calls: list[_Site] = []
         self.attributes: list[_Site] = []
-        self.bases: list[_Site] = []
+        self.names: dict[str, list[_Site]] = {}
 
     def _where(self) -> str:
         return ".".join(self.stack) or _MODULE_LEVEL
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        for base in node.bases:
-            if isinstance(base, ast.Name | ast.Attribute):
-                name = base.id if isinstance(base, ast.Name) else base.attr
-                where = ".".join([*self.stack, node.name])
-                self.bases.append(
-                    _Site(path=self.path, where=where, name=name, is_attribute=False, node=base)
-                )
         self.stack.append(node.name)
         self.generic_visit(node)
         self.stack.pop()
@@ -207,6 +180,13 @@ class _SiteCollector(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            site = _Site(
+                path=self.path, where=self._where(), name=node.id, is_attribute=False, node=node
+            )
+            self.names.setdefault(node.id, []).append(site)
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
         value = node.value
         if isinstance(value, ast.Name | ast.Attribute):
@@ -228,17 +208,22 @@ class _SiteCollector(ast.NodeVisitor):
 class _Sites:
     calls: tuple[_Site, ...]
     attributes: tuple[_Site, ...]
-    bases: tuple[_Site, ...]
+    # 名前ごとの出現。呼ぶ側を数える表は行ごとに引くので、名前で索引にする
+    names: Mapping[str, tuple[_Site, ...]]
 
 
 def _collect_sites(trees: Mapping[str, ast.Module]) -> _Sites:
     collectors = [_SiteCollector(path) for path in trees]
     for collector, module in zip(collectors, trees.values(), strict=True):
         collector.visit(module)
+    names: dict[str, list[_Site]] = {}
+    for collector in collectors:
+        for name, sites in collector.names.items():
+            names.setdefault(name, []).extend(sites)
     return _Sites(
         tuple(site for collector in collectors for site in collector.calls),
         tuple(site for collector in collectors for site in collector.attributes),
-        tuple(site for collector in collectors for site in collector.bases),
+        {name: tuple(sites) for name, sites in names.items()},
     )
 
 
@@ -264,7 +249,10 @@ def _sites_of(definition: _Definition, sites: _Sites) -> list[_Site]:
                 if s.is_attribute and s.name == method and not _inside(s, definition)
             ]
         case PublicNameKind.CLASS:
-            return [s for s in [*sites.calls, *sites.bases] if s.name == definition.qualified]
+            name = definition.qualified
+            # calls は引数の照合が使う
+            found = [*sites.calls, *sites.names.get(name, ()), *sites.attributes]
+            return [s for s in found if s.name == name and not _inside(s, definition)]
         case _:
             value = definition.qualified.split(".")[1]
             return [

@@ -440,7 +440,7 @@ class JavaAdapter:
         # import は型の名前を束縛するが、索引は単純名で型を引くので、受け手の解決に使う表は持たない
         return {}
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step] | None:
+    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
         return _steps(_statements(body_node), is_value=False)
 
     def type_members(

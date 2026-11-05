@@ -399,20 +399,74 @@ def build_shard_prompts(
     ]
 
 
+@dataclass(frozen=True)
+class PlannedShards:
+    """シャードの計画と、実行と見積もりが同じに使うプロンプトと懸念。"""
+
+    plan: shards.ShardPlan
+    concerns: tuple[ShardConcerns, ...]
+    prompts: tuple[str, ...]
+    # 既定の数に達し、MAX_GROWN_SHARDS まで増やしてもどれかのプロンプトが止まるか。
+    # 単位が少なくて増やせない差分では偽のまま、収まるシャードだけを走らせる
+    grown_unfit: bool = False
+
+
+def _any_prompt_stops(prompts: Sequence[str], budget: claude.RunBudget) -> bool:
+    return any(
+        budget.input_stops_run(budget.prompt_tokens(len(prompt.encode("utf-8"))))
+        for prompt in prompts
+    )
+
+
+def plan_shards(
+    assembly: AssemblyInput,
+    group: GroupId,
+    mcp: McpSelection,
+    budget: claude.RunBudget | None,
+) -> PlannedShards:
+    """シャードの数を決める唯一の置き場。実行、見積もり、同意の文の回数はこの結果を使う。
+
+    既定の MAX_SHARDS 個のプロンプトがどれも止まらなければ、そのまま使う。
+    既定の数に達していて止まるときだけ、MAX_GROWN_SHARDS まで 1 つずつ増やし、
+    どのプロンプトも止まらない最小の数を選ぶ。budget が None なら増やさない。
+    """
+    review = assembly.review
+
+    def planned(limit: int) -> PlannedShards:
+        plan = shards.build_plan(review, group, limit)
+        concern_list = [shard_concerns(group, review, shard) for shard in plan.shards]
+        prompts = tuple(build_shard_prompts(group, assembly, plan.shards, concern_list, mcp))
+        return PlannedShards(plan, tuple(concern_list), prompts)
+
+    def stops(candidate: PlannedShards) -> bool:
+        return budget is not None and _any_prompt_stops(candidate.prompts, budget)
+
+    result = planned(shards.MAX_SHARDS)
+    if not stops(result) or len(result.plan.shards) < shards.MAX_SHARDS:
+        # 既定の数に達していなければ、単位が少なく、増やしても分けられない
+        return result
+    for limit in range(shards.MAX_SHARDS + 1, shards.MAX_GROWN_SHARDS + 1):
+        grown = planned(limit)
+        if not stops(grown):
+            return grown
+        result = grown
+    return replace(result, grown_unfit=True)
+
+
 def estimate_sharded[E: ShardedEstimate](
     estimate_type: type[E],
     assembly: AssemblyInput,
     group: GroupId,
     note: str,
     mcp: McpSelection = NO_MCP,
+    budget: claude.RunBudget | None = None,
 ) -> E:
-    """シャードを持つ群の見積もり。prompt_bytes は実行と同じ build_shard_prompts で求める。"""
+    """シャードを持つ群の見積もり。数とプロンプトは実行と同じ plan_shards で求める。"""
     review = assembly.review
-    plan = shards.build_plan(review, group)
-    shard_list = plan.shards
-    sizes = [shard.size for shard in shard_list]
-    concern_list = [shard_concerns(group, review, shard) for shard in shard_list]
-    prompts = build_shard_prompts(group, assembly, shard_list, concern_list, mcp)
+    planned = plan_shards(assembly, group, mcp, budget)
+    plan = planned.plan
+    prompts = planned.prompts
+    sizes = [shard.size for shard in plan.shards]
     return estimate_type(
         discovery_input_tokens=claude.estimate_input_tokens(sum(sizes)),
         past_run=pipeline.past_run(review, group),
@@ -422,6 +476,13 @@ def estimate_sharded[E: ShardedEstimate](
         shard_bytes=tuple(sizes),
         prompt_bytes=tuple(len(prompt.encode("utf-8")) for prompt in prompts),
     )
+
+
+UNFIT_GUIDE = (
+    f"。シャードを {shards.MAX_GROWN_SHARDS} 個まで増やしても、1 回の起動の上限に収まりません"
+    "（1 ファイルが大きいときは増やしても分けられません）。"
+    "差分を分けて範囲を狭めるか、--max-budget-usd-per-call で上限を上げてください"
+)
 
 
 def _discovery_failure(index: int, kind: claude.FailureKind, reason: str) -> DiscoveryLaunchFailed:
@@ -560,18 +621,27 @@ def run_sharded(
     review = assembly.review
     started = time.monotonic()
     working_directory = Path(review.repository_root)
-    plan = shards.build_plan(review, spec.group)
+    planned = plan_shards(assembly, spec.group, spec.mcp, settings.budget)
+    plan = planned.plan
     units = plan.units
     shard_list = plan.shards
     total = len(shard_list)
+    if planned.grown_unfit:
+        # 増やしても収まらない差分は、一部のシャードだけでも、費用を使う前に見送る
+        for index, prompt in enumerate(planned.prompts):
+            check = input_budget.check_input_budget(
+                prompt, settings, role=DISCOVERY_ROLE, index=index
+            )
+            if check.stop is not None:
+                raise pipeline.InputBudgetError(
+                    spec.group, check.stop.message() + UNFIT_GUIDE, check.stop
+                )
 
-    shard_concern_list = [shard_concerns(spec.group, review, shard) for shard in shard_list]
+    shard_concern_list = planned.concerns
     sent_concerns = [item.passed for item in shard_concern_list]
     results: list[_ShardResult] = []
     if total:
-        prompts = build_shard_prompts(
-            spec.group, assembly, shard_list, shard_concern_list, spec.mcp
-        )
+        prompts = planned.prompts
         with ThreadPoolExecutor(max_workers=shards.MAX_SHARDS) as pool:
             futures = [
                 pool.submit(_discover_shard, spec, review, prompt, index, settings)
@@ -587,7 +657,9 @@ def run_sharded(
             raise pipeline.InputBudgetError(
                 spec.group,
                 f"全 {total} シャードの発見役が失敗しました"
-                f"（{len(stops)} 個は起動しませんでした）。" + stops[0].message(),
+                f"（{len(stops)} 個は起動しませんでした）。"
+                + stops[0].message()
+                + (UNFIT_GUIDE if planned.grown_unfit else ""),
                 stops[0],
             )
         raise pipeline.DiscoveryError(spec.group, f"全 {total} シャードの発見役が失敗しました")

@@ -223,7 +223,9 @@ def estimate_and_print(
     assembly = AssemblyInput.load(review)
     # 資料の組み立てはロガーに警告を流さない。警告を描く縁はここなので、両方の履歴の分を渡す
     warnings = (*assembly.source.own.warnings, *assembly.source.related_warnings)
-    estimate = estimate_of(assembly, group, mcp)
+    # シャードの数は実行と同じ上限の組から決まる（実行の入口と同じ resolve_run_defaults）
+    budget = resolve_run_defaults(group, None, effort, max_budget_usd=max_budget_usd).budget
+    estimate = estimate_of(assembly, group, mcp, budget)
     print_estimate(
         EstimateReport(estimate, warnings),
         review,

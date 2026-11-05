@@ -91,9 +91,11 @@ def test_unassigned_section_is_absent_but_assigned_one_is_present(tmp_path: Path
     assert TITLES["stores"] not in _headings(by_number["P2"])
 
 
-def test_prompt_wording_asks_for_every_violation() -> None:
+def test_prompt_wording_asks_for_every_violation_or_nit_and_never_for_discards() -> None:
     template = adversarial.template_text("macro_principles")
-    assert "一件も省かずに指摘します" in template
+    assert "一件も省かずに、違反か nit かを判断して" in template
+    assert "捨て" not in template
+    assert "discarded" not in template
     assert "指摘は少なく" not in template
 
 

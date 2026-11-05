@@ -59,7 +59,11 @@ def describe_invocation(role: str, index: int | None) -> str:
 
 def stop_limit_text(*, reserved: bool) -> str:
     """止めの文が「達する」と言う上限の呼び名。余裕を引いて比べる群はその旨を添える。"""
-    return "1 回の起動の上限から次の一往復の分を引いた額" if reserved else "1 回の起動の上限"
+    return (
+        "CLI に渡す上限（1 回の起動の上限から次の一往復の分を引いた額）"
+        if reserved
+        else "1 回の起動の上限"
+    )
 
 
 def cost_basis_text(*, with_output: bool) -> str:
@@ -80,9 +84,9 @@ class BudgetStop:
     limit_usd: float
     sections: tuple[SectionSize, ...]
     notice: str | None
-    # 余裕を引いた上限で検査したか。False は上限そのもので検査した
+    # 余裕を引いた上限で検査したか。False は費用の見込みを上限そのものと比べた
     reserved: bool
-    # 費用に出力の見込みを含めたか（方針の図の形）。False は入力だけ
+    # 費用に出力の見込みを含めたか（方針の図の形、実装、セキュリティ）。False は入力だけ
     with_output: bool = False
 
     def message(self) -> str:
@@ -131,8 +135,9 @@ def check_input_budget(
     """プロンプトの大きさだけの下限の見積もりで、その起動を呼んでよいかを返す。切り詰めはしない。
 
     settings.budget.reserve_margin が真なら、CLI に渡す上限から次の一往復の余裕を引くので
-    （claude.cli_budget_usd）、引いた値が下限を割る入力も止める。偽なら、起動の費用の見込み
-    （出力の見込みのある組は、それを足した額）が上限以上のときだけ止める。
+    （claude.cli_budget_usd）、引いた値が下限を割る入力と、出力の見込みのある組で起動の費用の見込みが
+    引いた値以上の入力を止める。偽なら、起動の費用の見込み（出力の分のある組は、それを足した額）が
+    上限以上のときに止める。
     単価の表に無いモデルは、表の最高の単価で見積もって検査し、その旨の文を返す。
     """
     budget = settings.budget

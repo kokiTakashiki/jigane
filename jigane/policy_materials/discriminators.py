@@ -12,7 +12,7 @@ from tree_sitter import Node
 from jigane.figures.models import MermaidFigure, Panel
 from jigane.git.tree_files import walk_tree_files
 from jigane.judgment_map.classification import Segment
-from jigane.languages.base import Branch, Return, Span, Step
+from jigane.languages.base import Branch, DiscriminatorReader, Return, Span, Step
 from jigane.languages.base import Member as MemberRef
 from jigane.policy_materials import er
 from jigane.policy_materials.type_deltas import _changed_types, _flat
@@ -29,7 +29,7 @@ SECTION_READERS = "読む側の対応"
 DISCRIMINATOR_LEGEND = (
     "変更した範囲の関数のうち、列挙型の値を返す分岐を持つものの、条件の原文と、その腕で返す列挙型の値だけ。"
     "腕の中のそれ以外の文は描かない。菱形が条件、角の丸い箱が返す値。"
-    "Python と Java の関数だけを読む。"
+    "Python、Java、Swift の関数だけを読む。"
 )
 READER_LEGEND = (
     "ER 図の任意の項目ごとに、その型（または派生の型）の項目を属性として参照する（`.項目名`）"
@@ -144,7 +144,9 @@ def _touches(member: Member, path: str, span: Span, name: str) -> bool:
 
 
 def discriminator_steps(index: Index, member: Member, body: Node) -> list[Step] | None:
-    """関数の本体の分岐と return。流れ図に載らない言語の関数なら None。"""
+    """関数の本体の分岐と return。分岐の読み取りを持たない言語の関数なら None。"""
+    if not isinstance(index.adapter, DiscriminatorReader):
+        return None
     return index.adapter.discriminator_branches(
         body, required(index.trees[member.path].root_node.text)
     )
@@ -221,7 +223,7 @@ def discriminator_diagram(review: Review) -> MermaidFigure | None:
     if not blocks:
         return None
     note = (
-        f"対応言語の外で省いたもの: Python と Java 以外の言語の関数 {skipped} 件。"
+        f"対応言語の外で省いたもの: Python、Java、Swift 以外の言語の関数 {skipped} 件。"
         if skipped
         else None
     )

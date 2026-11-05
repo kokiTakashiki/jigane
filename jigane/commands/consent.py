@@ -146,12 +146,14 @@ def launch_plan(
     mcp: McpSelection = NO_MCP,
 ) -> LaunchPlan:
     """見積もりと同じ関数から、確実に起動する回数を求める。"""
-    estimates = {group: estimate_of(assembly, group, mcp)}
+    estimates = {group: estimate_of(assembly, group, mcp, settings.budget)}
     for each in (MACRO, MICRO, SECURITY):
         if each in estimates:
             continue
         try:
-            estimates[each] = estimate_of(assembly, each)
+            estimates[each] = estimate_of(
+                assembly, each, budget=resolve_run_defaults(each, None, None).budget
+            )
         except ReviewError:
             # 他の群の材料が欠けていても、この群の実行は止めない。その群は表から外す
             continue

@@ -13,7 +13,7 @@ jigane が外へ送る相手の一覧です。ここに無い相手へ、jigane 
 | `github.com` | gh と git の取得の要求（ref と commit の SHA）と、gh と git の認証。文法の配布物の取得の要求 | `jigane new pr`、`jigane refresh`（gh と git）。`jigane languages fetch`（文法） | gh、git、tree-sitter-language-pack |
 | `api.github.com` | リポジトリと PR の番号、gh の認証 | `jigane new pr`、`jigane refresh` | gh |
 | `release-assets.githubusercontent.com` | 文法の配布物の取得の要求 | `jigane languages fetch` | tree-sitter-language-pack |
-| （claude を通して） | プロンプト（差分、PR の題と本文、ボットのコメント、図と表、前の回の指摘）、claude が読んだファイルの中身、モデルの出力。宛先は claude が決める。このほか claude 自身が、環境の節（作業ディレクトリのパス、OS の名前と版）と、ログイン中のアカウントのメールアドレスを要求に付け足します。作業ディレクトリが Git のリポジトリのときは、リポジトリの状態の節も付きます。これらは jigane の指定では止まりません。claude 2.1.308 にログインした環境で、起動の環境を `HOME`、`PATH`、`USER`、`LOGNAME`、`TMPDIR` だけに絞っても、メールアドレスと環境の節が入ることを確かめました。API キーで認証する場合は確かめていません | `jigane run` の各起動 | 起動する外部コマンド claude |
+| （claude を通して） | プロンプト（差分、PR の題と本文、ボットのコメント、図と表、前の回の指摘）、claude が読んだファイルの中身、モデルの出力。宛先は claude が決める。このほか claude 自身が、環境の節（作業ディレクトリのパス、OS の名前と版）と、ログイン中のアカウントのメールアドレスを要求に付け足します。環境の節とメールアドレスは jigane の指定では止まらず、切る手段は確かめた範囲で見つかりませんでした。claude 2.1.308 にログインした環境で、起動の環境を `HOME`、`PATH`、`USER`、`LOGNAME`、`TMPDIR` だけに絞っても入ること、`ANTHROPIC_API_KEY` で認証しても入ることを確かめました。作業ディレクトリが Git のリポジトリのときに付くリポジトリの状態の節（Git の利用者名、枝、状態、直近のコミットの件名）は、jigane が `--settings` に `includeGitInstructions: false` を渡して切っています。claude 2.1.308 で要求から消えることを確かめました | `jigane run` の各起動 | 起動する外部コマンド claude |
 | （利用者が選ぶ MCP サーバ） | モデルがその MCP サーバの道具に渡す問い。宛先は利用者の `mcp.json` の設定が決める | `jigane run security --mcps <名前>` を指定したときだけ | claude が呼ぶ MCP サーバ |
 
 ホストの列が括弧で始まる行は、ホスト名を持ちません。送り先が jigane の外（claude の設定や利用者の MCP の設定）で決まるためです。
