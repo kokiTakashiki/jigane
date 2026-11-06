@@ -16,7 +16,7 @@ from jigane.commands.output import print_lines
 from jigane.commands.run_guide import run_guide
 from jigane.findings.records import HistoryWarning
 from jigane.groups.definitions import Effort, GroupId
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
 from jigane.reviews.lifecycle import Review, load_review, resolve_review
 from jigane.skills.assembly import AssemblyInput
@@ -78,7 +78,7 @@ def input_cost_lines(estimate: Estimate, basis: claude.RunBudget) -> list[str]:
     label = "入力と出力の見込みの費用の見積もり" if basis.counts_output else "入力の費用の見積もり"
     lines = [f"{label}: {cost.cost.usd:.4f} USD"]
     if cost.cost.assumed_price:
-        lines.append(claude.assumed_price_notice(model, cost.cost))
+        lines.append(pricing.assumed_price_notice(model, cost.cost))
     warning = estimate.expected_budget_warning(basis)
     if warning is not None:
         lines.append(warning)

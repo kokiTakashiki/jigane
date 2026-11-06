@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from jigane.groups.policy_runs import PolicyShape
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.skills.input_budget import SectionSize, cost_basis_text, stop_limit_text
 from jigane.skills.output_estimate import OutputEstimate, warning_message
 
@@ -17,7 +17,7 @@ from jigane.skills.output_estimate import OutputEstimate, warning_message
 class InputCostEstimate:
     """入力の費用の欄。確認の画面と --json は、ここから読む。"""
 
-    cost: claude.InputCost
+    cost: pricing.InputCost
     exceeds_budget: bool
 
     def as_record(self) -> dict[str, Any]:
@@ -214,7 +214,7 @@ class DiagramPolicyEstimate(PolicyEstimateBase):
         # 費用は全起動の和、止まるかどうかは起動ごとの上限と一本ずつ比べる。
         # 単価と assumed_price は図の起動のモデルの値で代表させる
         return InputCostEstimate(
-            claude.InputCost(
+            pricing.InputCost(
                 diagram_cost.usd + sum(cost.usd for cost in principle_costs),
                 diagram_cost.price_per_million,
                 diagram_cost.assumed_price,
@@ -259,7 +259,7 @@ class DesignPolicyEstimate(PolicyEstimateBase):
         return self.expected
 
     def input_cost(self, basis: claude.RunBudget) -> InputCostEstimate | None:
-        cost = claude.input_cost_usd(basis.model, self.discovery_input_tokens)
+        cost = pricing.input_cost_usd(basis.model, self.discovery_input_tokens)
         return ExpectedInputCost(
             cost,
             basis.input_stops_run(self.discovery_input_tokens),
@@ -315,10 +315,10 @@ class ShardedEstimate(EstimateCommon, ABC):
 
     def input_cost(self, basis: claude.RunBudget) -> InputCostEstimate | None:
         # 上限は起動ごとなので、シャード単位で比べる
-        tokens = [claude.estimate_input_tokens(size) for size in self.prompt_bytes]
-        costs = [claude.input_cost_usd(basis.model, count) for count in tokens]
+        tokens = [pricing.estimate_input_tokens(size) for size in self.prompt_bytes]
+        costs = [pricing.input_cost_usd(basis.model, count) for count in tokens]
         return ShardedInputCost(
-            cost=claude.InputCost(
+            cost=pricing.InputCost(
                 sum(cost.usd for cost in costs),
                 costs[0].price_per_million if costs else 0.0,
                 any(cost.assumed_price for cost in costs),

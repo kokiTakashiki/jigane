@@ -61,7 +61,9 @@ def test_unknown_figure_key_is_rejected(tmp_path: Path) -> None:
     review = _range_review(tmp_path, _tree(P1_CASE / "before"), _tree(P1_CASE / "after"))
     sections = policy_sections(review)
     with pytest.raises(ValueError, match="no_such_figure"):
-        policy_figures.prompt_figure_texts(review, sections.figures, ("tree", "no_such_figure"))
+        policy_figures.prompt_figure_texts(
+            AssemblyInput.load(review), sections.figures, ("tree", "no_such_figure")
+        )
 
 
 @pytest.mark.usefixtures("all_principle_shapes")

@@ -6,8 +6,9 @@ from fakes import MacroFake, settings_for, with_budget
 from jigane.commands import failures
 from jigane.commands.subcommands.estimate import blocker_lines, input_cost_lines, notice_lines
 from jigane.groups.policy_runs import PolicyShape
-from jigane.llm_runs import claude
-from jigane.llm_runs.claude import INPUT_USD_PER_MILLION_TOKENS, RunBudget
+from jigane.llm_runs import pricing
+from jigane.llm_runs.claude import RunBudget
+from jigane.llm_runs.pricing import INPUT_USD_PER_MILLION_TOKENS
 from jigane.skills import input_budget
 from jigane.skills.estimate_result import (
     DesignPolicyEstimate,
@@ -44,7 +45,7 @@ def micro_record(
 
 
 def shard_cost(size: int) -> float:
-    return claude.input_cost_usd(MODEL, claude.estimate_input_tokens(size)).usd
+    return pricing.input_cost_usd(MODEL, pricing.estimate_input_tokens(size)).usd
 
 
 def test_micro_input_cost_is_the_sum_of_shard_prompts() -> None:
@@ -96,7 +97,7 @@ def test_cost_lines_omit_largest_sections_when_the_estimate_has_none() -> None:
 
 def test_cost_lines_list_largest_sections_when_present() -> None:
     estimate = DiagramPolicyEstimate(
-        discovery_input_tokens=claude.estimate_input_tokens(3_000_000),
+        discovery_input_tokens=pricing.estimate_input_tokens(3_000_000),
         past_run=None,
         note="",
         largest_sections=(SectionSize("背景", 12), SectionSize("図", 3)),
@@ -133,7 +134,7 @@ def design_policy(expected: OutputEstimate) -> DesignPolicyEstimate:
 
 
 def test_policy_input_cost_record_nests_the_expectation_only_for_the_design_shape() -> None:
-    input_usd = claude.input_cost_usd(MODEL, 1000).usd
+    input_usd = pricing.input_cost_usd(MODEL, 1000).usd
     without = diagram_policy().input_cost_record(RunBudget(MODEL, 100.0, reserve_margin=False))
     assert list(without) == [
         "input_cost_usd",
@@ -215,7 +216,7 @@ def test_security_input_cost_is_the_sum_of_shard_prompts() -> None:
 
 def test_cost_lines_warn_when_the_expected_total_reaches_the_limit_but_input_does_not() -> None:
     estimate = design_policy(
-        OutputEstimate(claude.input_cost_usd(MODEL, 1000).usd, 6.0, MultiplierSource.DEFAULT)
+        OutputEstimate(pricing.input_cost_usd(MODEL, 1000).usd, 6.0, MultiplierSource.DEFAULT)
     )
     limit = estimate.expected_total_usd()
     assert limit is not None

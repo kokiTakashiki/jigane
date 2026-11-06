@@ -24,7 +24,7 @@ from jigane.groups.definitions import GROUP_BY_ID, MACRO
 from jigane.groups.policy_runs import PolicyRole, PolicyShape, role_of
 from jigane.judgment_map.changes import CHANGES_FILE, without_whole_deletions
 from jigane.judgment_map.declaration import demote_headings
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import (
     KEY_DEEPENS,
@@ -309,9 +309,8 @@ def diagram_materials_text(assembly: AssemblyInput, sections: PolicySections) ->
     図の節は `policy_figures.REGISTRY` の置き場と順で並ぶ。その後ろに、同じ形の箇所、技術選定、
     前の回の指摘が続く。
     """
-    review = assembly.review
     ordered = [
-        *policy_figures.prompt_figure_texts(review, sections.figures),
+        *policy_figures.prompt_figure_texts(assembly, sections.figures),
         sections.repeats,
         sections.technology,
         f"### {SECTION_HISTORY}\n\n{history_text(assembly)}",
@@ -361,11 +360,11 @@ def check_input_budget(
 
 def design_expected(review: Review, prompt: str, model: str) -> output_estimate.OutputEstimate:
     """設計書の形の、出力と推論の分を含めた見込み。"""
-    tokens = claude.estimate_input_tokens(len(prompt.encode("utf-8")))
+    tokens = pricing.estimate_input_tokens(len(prompt.encode("utf-8")))
     return output_estimate.estimate_output(
         Path(review.repository_root),
         pipeline.past_run(review, GROUP, PolicyShape.DESIGN),
-        claude.input_cost_usd(model, tokens).usd,
+        pricing.input_cost_usd(model, tokens).usd,
     )
 
 
@@ -500,18 +499,19 @@ def _without_null_deepens(finding: dict[str, Any]) -> dict[str, Any]:
 def _outcome(
     review: Review,
     settings: claude.RunSettings,
-    working_directory: Path,
     plan: "MacroPlan",
+    main_prompt: str,
     drops: pipeline.DropCounts,
     *,
     has_bot_findings: bool,
     extra: ExtraLaunch | None = None,
 ) -> _Outcome:
+    working_directory = Path(review.repository_root)
     index = 0 if extra is None else extra.index
     if extra is not None:
         # 原則の起動は、検査も見積もりの警告も起動も、原則の組を通す
         settings = replace(settings, budget=settings.budget.for_principle(extra.viewpoint))
-    prompt = plan.build_prompt() if extra is None else extra.prompt
+    prompt = main_prompt if extra is None else extra.prompt
     spec = (
         CONCLUDE
         if extra is None
@@ -702,6 +702,16 @@ def macro_plan(assembly: AssemblyInput) -> MacroPlan:
             assert_never(origin)
 
 
+def remembered_plan(assembly: AssemblyInput) -> MacroPlan:
+    """macro_plan の結果を assembly の中で一度だけ作る。見積もりと実行が同じ plan を使う。"""
+    return assembly.remember("macro_plan", lambda: macro_plan(assembly))
+
+
+def remembered_prompt(assembly: AssemblyInput) -> str:
+    """図の形か設計書の形の起動のプロンプトを、assembly の中で一度だけ組み立てる。"""
+    return assembly.remember("macro_prompt", lambda: remembered_plan(assembly).build_prompt())
+
+
 def join_notices(*notices: str | None) -> str | None:
     present = [notice for notice in notices if notice]
     return "\n".join(present) if present else None
@@ -744,13 +754,14 @@ def run_macro(
     """assembly の履歴は縁が読んだもので、資料の組み立てで読み直さない。"""
     review = assembly.review
     started = time.monotonic()
-    working_directory = Path(review.repository_root)
-    plan = macro_plan(assembly)
+    plan = remembered_plan(assembly)
     # 資料が空なら、読ませるものが無いので起動の前に止める。入力の見積もりも要らない
     if plan.missing:
         return _no_material_run(
             review, settings, started, plan.missing, plan.warning, shape=plan.shape
         )
+    # 並列の起動へ入る前に主の流れで組み立てておき、起動の中では組み立てない
+    main_prompt = remembered_prompt(assembly)
     drops = pipeline.DropCounts()
     has_bot_findings = bot_findings(review) is not None
     launches: list[ExtraLaunch | None] = [None, *extras]
@@ -762,8 +773,8 @@ def run_macro(
             outcome = _outcome(
                 review,
                 settings,
-                working_directory,
                 plan,
+                main_prompt,
                 own,
                 has_bot_findings=has_bot_findings,
                 extra=launches[index],
@@ -849,8 +860,8 @@ def run_macro(
 
 def estimate_macro(assembly: AssemblyInput) -> PolicyEstimate:
     review = assembly.review
-    plan = macro_plan(assembly)
-    prompt = plan.build_prompt()
+    plan = remembered_plan(assembly)
+    prompt = remembered_prompt(assembly)
     prompt_bytes = len(prompt.encode("utf-8"))
     discovery_input_tokens = resolve_run_defaults(GROUP, plan.shape, None).budget.prompt_tokens(
         prompt_bytes

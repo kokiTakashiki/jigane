@@ -24,17 +24,15 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def test_the_breakdown_takes_calls_and_verifier_from_each_estimate(project: Path) -> None:
+def test_the_breakdown_takes_calls_and_verifier_from_the_selected_estimate(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     assembly = AssemblyInput.load(review)
 
-    plan = consent.launch_plan(assembly, MICRO, settings_for(never_invoked))
-
-    by_group = {item.group: item for item in plan.groups}
-    for group in (MACRO, MICRO, SECURITY):
+    for group, has_verifier in ((MACRO, False), (MICRO, True), (SECURITY, True)):
+        plan = consent.launch_plan(assembly, group, settings_for(never_invoked))
         estimate = estimator.estimate_of(assembly, group)
-        item = by_group[group]
-        assert item.discovery_calls == estimate.discovery_calls
-        assert item.has_verifier == estimate.has_verifier
-    assert by_group[MACRO].has_verifier is False
-    assert by_group[MICRO].has_verifier is True
+        assert plan.breakdown.group == group
+        assert plan.group == group
+        assert plan.breakdown.discovery_calls == estimate.discovery_calls
+        assert plan.breakdown.has_verifier == estimate.has_verifier
+        assert plan.breakdown.has_verifier is has_verifier

@@ -11,7 +11,12 @@ from jigane.skills.estimate_result import DiagramPolicyEstimate, PolicyEstimate
 
 
 def principle_launches(assembly: AssemblyInput) -> tuple[macro.ExtraLaunch, ...]:
-    """図の形の、原則ごとの起動。設計書の形は原則の起動を持たない。"""
+    """図の形の、原則ごとの起動。assembly の中で一度だけ組み立て、見積もりと実行で共有する。"""
+    return assembly.remember("principle_launches", lambda: _build_principle_launches(assembly))
+
+
+def _build_principle_launches(assembly: AssemblyInput) -> tuple[macro.ExtraLaunch, ...]:
+    """設計書の形は原則の起動を持たない。"""
     if macro.policy_shape(assembly.review) is not PolicyShape.DIAGRAM:
         return ()
     return tuple(

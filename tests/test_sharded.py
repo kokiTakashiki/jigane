@@ -30,7 +30,7 @@ from jigane.findings.records import (
     triaged_dicts,
 )
 from jigane.groups.definitions import MICRO, GroupId
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import Disposition, Stage
 from jigane.reviews.lifecycle import Review, create_feature_review
@@ -230,7 +230,7 @@ def test_input_budget_stop_is_in_budget_stops_only(project: Path) -> None:
     shard_list = shards.assign_shards(shards.build_units(review), shards.FullTextShard)
     total = len(shard_list)
     costs = [
-        claude.estimate_input_tokens(
+        pricing.estimate_input_tokens(
             len(
                 shard_prompt(MICRO, AssemblyInput.load(review), shard, i + 1, total).encode(
                     "utf-8"

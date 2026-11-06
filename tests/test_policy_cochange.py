@@ -6,6 +6,7 @@ from review_fakes import make_review
 
 from jigane.reviews.lifecycle import LocalRange, RangeOrigin, Review
 from jigane.skills import policy_cochange
+from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_cochange import StructuralDependency
 from jigane.skills.policy_figures import REGISTRY, FigureSlot, section_texts
 from jigane.storage.store import ReviewKind
@@ -85,7 +86,9 @@ def test_a_review_without_history_omits_the_section(tmp_path: Path) -> None:
     assert policy_cochange.cochange_table(range_review(tmp_path, empty, "0" * 40)) is None
     assert not any(
         text.startswith(f"### {policy_cochange.SECTION_COCHANGE}")
-        for text in section_texts(feature_review(plain), FigureSlot.AFTER_REGIONS)
+        for text in section_texts(
+            AssemblyInput.load(feature_review(plain)), FigureSlot.AFTER_REGIONS
+        )
     )
 
 

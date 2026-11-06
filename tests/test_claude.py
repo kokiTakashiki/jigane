@@ -15,13 +15,13 @@ from jigane.llm_runs.claude import (
     StoredInvocationRecord,
     build_command,
     classify_failure_text,
-    estimate_input_tokens,
     normalize_path,
     parse_record,
     run,
     secret_read_denials,
 )
 from jigane.llm_runs.cost import LimitSubstitute, Measured
+from jigane.llm_runs.pricing import estimate_input_tokens
 
 FIXTURES = Path(__file__).parent / "fixtures" / "claude"
 SCHEMA = {"type": "object"}

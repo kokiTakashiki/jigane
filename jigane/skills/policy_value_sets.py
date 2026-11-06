@@ -20,6 +20,7 @@ from jigane.policy_materials.value_sets import (
     value_set_rows,
 )
 from jigane.reviews.lifecycle import Review, load_pairs, scope_files
+from jigane.skills.assembly import AssemblyInput
 
 SECTION_VALUE_SETS = "値の組の表"
 INTRO = (
@@ -238,15 +239,13 @@ def _values_cell(row: ValueSetRow) -> str:
     return f"{shown} ほか {rest} 個" if rest > 0 else shown
 
 
-def _selected_rows(review: Review, max_rows: int) -> tuple[list[ValueSetRow], int]:
+def _selected_rows(
+    review: Review, all_rows: tuple[ValueSetRow, ...], max_rows: int
+) -> tuple[list[ValueSetRow], int]:
     """表に載せる行（上限まで）と、上限で省いた件数。表と触れ方の一覧で同じ組を使う。"""
     changed = scope_files(review)
     # 値の組は履歴を使わないので、変更後の木だけから読む
-    rows = [
-        row
-        for row in value_set_rows(Path(review.repository_root))
-        if changed & _touched_paths(row)
-    ]
+    rows = [row for row in all_rows if changed & _touched_paths(row)]
     # テストの数は、コードと文書の合計が並んだ行の順位づけにだけ使う
     ordered = sorted(
         rows,
@@ -262,7 +261,19 @@ def _selected_rows(review: Review, max_rows: int) -> tuple[list[ValueSetRow], in
 
 def value_set_table(review: Review, max_rows: int = MAX_ROWS) -> TableFigure | None:
     """値の組の表。変更したファイルに関わる組が無ければ None。"""
-    shown, over = _selected_rows(review, max_rows)
+    return _table(review, value_set_rows(Path(review.repository_root)), max_rows)
+
+
+def value_set_table_of(assembly: AssemblyInput, max_rows: int = MAX_ROWS) -> TableFigure | None:
+    """`value_set_table` と同じ表。値の組の読み込みは assembly ごとに一度で済ませる。"""
+    root = Path(assembly.review.repository_root)
+    rows = assembly.remember(("value_set_rows", root), lambda: value_set_rows(root))
+    return _table(assembly.review, rows, max_rows)
+
+
+def _table(review: Review, all_rows: tuple[ValueSetRow, ...], max_rows: int) -> TableFigure | None:
+    """表を組む。all_rows は変更したファイルで絞る前の、リポジトリの全行。"""
+    shown, over = _selected_rows(review, all_rows, max_rows)
     if not shown:
         return None
     added = _added_lines(review)

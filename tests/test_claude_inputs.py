@@ -10,7 +10,7 @@ from jigane.llm_runs.claude_inputs import HEADING_INPUTS, PLACEHOLDER_INPUTS, Cl
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIRECTORY = REPOSITORY_ROOT / "jigane" / "skills" / "prompts"
 SOURCE_SYMBOL = re.compile(r"(jigane/[\w/]+\.py):(\w+)")
-INPUT_COUNT = 26
+INPUT_COUNT = 27
 
 
 def _defined_names(path: Path) -> set[str]:

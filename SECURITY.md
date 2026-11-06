@@ -95,7 +95,8 @@ Claude Code が自分で足してモデルへ送る情報（Claude Code の版�
 | コマンドの引数 | --output-format json と --json-schema（段ごとの出力の形） | macro、micro、security | はい（jigane の固定の出力モデルから作る文） |
 | コマンドの引数 | --model、--effort、--max-turns、--max-budget-usd | macro、micro、security | はい（利用者も渡せる） |
 | コマンドの引数 | --mcp-config の一時ファイル（利用者の mcp.json から選んだサーバの定義）と --allowedTools | security | はい（利用者の MCP の設定。認証情報を含みうる） |
-| 環境変数 | ENABLE_CLAUDEAI_MCP_SERVERS=false と CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1。jigane が自分のプロセスに設定し、子が受け継ぐ文法の置き場のパス（TREE_SITTER_LANGUAGE_PACK_CACHE_DIR）。このパスの値は利用者名を含む絶対パスで、jigane の仮想環境の中の文法の置き場を指す | macro、micro、security | いいえ（jigane が足す） |
+| 環境変数 | ENABLE_CLAUDEAI_MCP_SERVERS=false と CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 | macro、micro、security | いいえ（jigane が足す） |
+| 環境変数 | jigane がその実行の中で文法を読んだときだけ、自分のプロセスに設定して子が受け継ぐ文法の置き場のパス（TREE_SITTER_LANGUAGE_PACK_CACHE_DIR）。文法を読むのは、ソースのファイルの構文木が要る資料を組むときで、macro は図と原則の資料、micro と security は正規表現の札の資料である。変更に対象の言語のソースのファイルが無ければ読まず、渡らない。このパスの値は利用者名を含む絶対パスで、jigane の仮想環境の中の文法の置き場を指す | macro、micro、security | いいえ（jigane が足す） |
 | 環境変数 | 除いたものと足したものを除く、親の環境のそのまま（文法の置き場のパスは含まない）。利用者の環境に置いた API キーやトークン（CLAUDE_CODE_OAUTH_TOKEN を含む）もそのまま受け継ぐ | macro、micro、security | はい（普通の利用でも受け継ぐ） |
 | 作業ディレクトリ | cwd。ファイルのレビューと設計書のレビューは利用者のリポジトリの根、範囲と PR はデータの置き場の中の変更後の木。Claude Code は cwd のパスを自分の環境の情報としてモデルへ送る（Claude Code 2.1.292 で、道具を使わずにパスを答えることを確かめた）。範囲と PR ではそのパスに利用者名、JIGANE_HOME、owner/repo、レビューの識別子（@ の後に 40 桁の SHA を含む）が入る | macro、micro、security | いいえ（範囲と PR では cwd が jigane のデータの置き場の中になり、利用者が手で claude を起動するときの cwd と違う。ファイルのレビューと設計書のレビューでは利用者のリポジトリの根で、手でも同じ） |
 

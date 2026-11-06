@@ -21,6 +21,7 @@ from jigane.policy_materials.changed_files import (
     file_changes,
 )
 from jigane.skills import policy_figures
+from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import (
     LANGUAGE_AGNOSTIC,
     PROMPT_ORDER,
@@ -121,7 +122,7 @@ def test_registry_order_decides_the_section_order(
     y = _fake("Y", FigureSlot.AFTER_TREE)
     z = _fake("Z", FigureSlot.AFTER_REGIONS)
     monkeypatch.setattr(policy_figures, "REGISTRY", (x, y, z))
-    assert policy_figures.prompt_figure_texts(review, prebuilt) == [
+    assert policy_figures.prompt_figure_texts(AssemblyInput.load(review), prebuilt) == [
         "<TREE>",
         "### X\n\nX",
         "### Y\n\nY",
@@ -130,7 +131,7 @@ def test_registry_order_decides_the_section_order(
         "### Z\n\nZ",
     ]
     monkeypatch.setattr(policy_figures, "REGISTRY", (y, x, z))
-    swapped = policy_figures.prompt_figure_texts(review, prebuilt)
+    swapped = policy_figures.prompt_figure_texts(AssemblyInput.load(review), prebuilt)
     assert swapped.index("### Y\n\nY") < swapped.index("### X\n\nX")
 
 

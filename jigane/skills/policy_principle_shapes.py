@@ -9,10 +9,10 @@ from enum import StrEnum
 from jigane.figures.models import SequenceFigure
 from jigane.policy_materials.classes import by_simple_name
 from jigane.policy_materials.type_deltas import TypeDelta, type_deltas
-from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import Member, TypeInfo, TypeKey
 from jigane.sequence.indexes import Indexes
-from jigane.skills.policy_figures import REGISTRY
+from jigane.skills.assembly import AssemblyInput
+from jigane.skills.policy_figures import REGISTRY, build_figure
 
 WIDE_SIGNATURE_PARAMETERS = 3
 
@@ -90,17 +90,17 @@ def _has_wide_signature(deltas: tuple[TypeDelta, ...], before_indexes: Indexes |
     return False
 
 
-def present_shapes(review: Review, sequence: SequenceFigure) -> frozenset[Shape]:
+def present_shapes(assembly: AssemblyInput, sequence: SequenceFigure) -> frozenset[Shape]:
     """レビューの図にある形。重い図は一度だけ読む。sequence は節の組み立てで作った値。"""
     found = {
         shape
         for figure in REGISTRY
         for shape in TABLE_SHAPES
-        if figure.key == shape.value and figure.build(review) is not None
+        if figure.key == shape.value and build_figure(figure, assembly) is not None
     }
     if sequence.flows:
         found.add(Shape.SEQUENCE)
-    result = type_deltas(review)
+    result = type_deltas(assembly.review)
     shown = [delta.info for delta in result.deltas]
     edges = _edges(shown)
     if edges:

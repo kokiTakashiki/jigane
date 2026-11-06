@@ -250,7 +250,7 @@ def test_example_cases_put_each_name_and_its_callers_on_one_line(
     case: str, tmp_path: Path
 ) -> None:
     review = _case(case, tmp_path)
-    sections = section_texts(review, FigureSlot.AFTER_REGIONS)
+    sections = section_texts(AssemblyInput.load(review), FigureSlot.AFTER_REGIONS)
     section = next(s for s in sections if s.startswith(f"### {policy_callers.SECTION_CALLERS}"))
     for group in PRESENCE[case]:
         assert any(all(word in line for word in group) for line in section.splitlines()), group
@@ -316,7 +316,7 @@ def test_mixed_languages_list_python_rows_and_name_the_language_without_a_reader
     assert [row.cells[0] for row in figure.rows] == ["`helper`"]
     section = next(
         s
-        for s in section_texts(review, FigureSlot.AFTER_REGIONS)
+        for s in section_texts(AssemblyInput.load(review), FigureSlot.AFTER_REGIONS)
         if policy_callers.SECTION_CALLERS in s
     )
     assert "対応外の言語: Java" in section

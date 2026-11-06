@@ -12,7 +12,7 @@ from jigane.commands.exit_codes import EXIT_OK
 from jigane.design.review_documents import create_design_doc_review
 from jigane.findings.records import triaged_dicts
 from jigane.groups.policy_runs import PolicyRole, PolicyShape, role_of
-from jigane.llm_runs import claude
+from jigane.llm_runs import pricing
 from jigane.policy_materials.missing import MissingMaterial
 from jigane.reviews.lifecycle import Review, ReviewError, load_review
 from jigane.skills import macro, macro_principles_run
@@ -142,7 +142,7 @@ def test_estimate_uses_the_design_prompt(repo: Path, capsys: pytest.CaptureFixtu
     prompt = macro.macro_plan(AssemblyInput.load(review)).build_prompt()
     assert "### 設計書の全文" in prompt
     assert estimate["materials_bytes"] == len(prompt.encode("utf-8"))
-    assert estimate["discovery_input_tokens"] == claude.estimate_input_tokens(
+    assert estimate["discovery_input_tokens"] == pricing.estimate_input_tokens(
         len(prompt.encode("utf-8"))
     )
     assert estimate["planned_invocations"] == 1

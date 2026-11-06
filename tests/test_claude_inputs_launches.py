@@ -268,7 +268,10 @@ def test_every_environment_difference_is_in_environment_inputs(launches: list[La
         added = set(environment["added"]) - WRAPPER_ENVIRONMENT
         removed = set(environment["removed"]) - WRAPPER_ENVIRONMENT
         for name in added:
-            assert ENVIRONMENT_INPUTS.get(name) is ClaudeInput.ADDED_ENVIRONMENT, name
+            assert ENVIRONMENT_INPUTS.get(name) in {
+                ClaudeInput.ADDED_ENVIRONMENT,
+                ClaudeInput.GRAMMAR_CACHE_PATH,
+            }, name
         for name in removed:
             assert ENVIRONMENT_INPUTS.get(name) is ClaudeInput.REMOVED_ENVIRONMENT, name
         # 親に資格情報を置いたので、除く変数は全て除かれている
@@ -278,8 +281,19 @@ def test_every_environment_difference_is_in_environment_inputs(launches: list[La
             if item is ClaudeInput.REMOVED_ENVIRONMENT
         }
         assert removed == expected_removed, _label(launch)
-        # 文法の置き場の変数は、値に利用者のホームのパスが入る。jigane の置き場を指すことを確かめる
-        assert Path(environment["added"][CACHE_ENV]).is_relative_to(cache_root()), _label(launch)
+        # 文法の置き場の変数は、値に利用者のホームのパスが入る。足されたときは
+        # jigane の置き場を指す。足されるのは、その実行の準備で文法を読んだときだけで、
+        # 選んだ群しか見積もらない同意の確認は、他の群の分の文法を読まない
+        if CACHE_ENV in environment["added"]:
+            assert Path(environment["added"][CACHE_ENV]).is_relative_to(cache_root()), _label(
+                launch
+            )
+    # 方針の起動は文法を読むので、この変数が足される。足されない形になれば検査が空振りする
+    assert any(
+        CACHE_ENV in launch["environment"]["added"]
+        for launch in launches
+        if launch.group == "macro"
+    )
 
 
 def test_every_launched_role_is_in_the_roles_of_the_inputs_it_received(

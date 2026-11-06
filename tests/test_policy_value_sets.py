@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 
+import pytest
 from review_fakes import make_review
 from test_policy_classes import whole
 
 from jigane.languages.base import ComparisonKind, DefinitionKind, StringComparison
+from jigane.policy_materials import value_sets
 from jigane.policy_materials.value_sets import (
     FileCounts,
     ValueSetLocation,
@@ -12,10 +14,14 @@ from jigane.policy_materials.value_sets import (
 )
 from jigane.reviews.lifecycle import PAIRS_FILE, Review
 from jigane.skills import policy_value_sets
+from jigane.skills.assembly import AssemblyInput
+from jigane.skills.macro_principles_run import estimate_policy
 from jigane.skills.policy_figures import REGISTRY, FigureSlot, diagrams_of
+from jigane.skills.policy_principles import principle_prompts
 from jigane.storage.store import ReviewKind
 
 COMMON_FILES = 100
+TITLES_VALUE_SETS = policy_value_sets.SECTION_VALUE_SETS
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -313,3 +319,35 @@ def test_definition_cell_shows_named_literal_and_undetermined_places() -> None:
         )
     )
     assert policy_value_sets._definition_cell(row) == "a.py:1 STATUSES, b.py:2（リテラル）, c.rb:3"
+
+
+def _counting_value_set_rows(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    calls: list[Path] = []
+    real = value_sets.value_set_rows
+
+    def counting(root: Path) -> tuple[ValueSetRow, ...]:
+        calls.append(root)
+        return real(root)
+
+    monkeypatch.setattr(policy_value_sets, "value_set_rows", counting)
+    return calls
+
+
+def test_one_policy_estimate_reads_value_sets_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review = _review(tmp_path, _set_files("alpha"), ["alpha/use.py"])
+    assert policy_value_sets.value_set_table(review) is not None
+    calls = _counting_value_set_rows(monkeypatch)
+    estimate_policy(AssemblyInput.load(review))
+    assert calls == [tmp_path]
+
+
+def test_remembered_value_sets_give_the_same_principle_prompts(tmp_path: Path) -> None:
+    review = _review(tmp_path, _set_files("alpha"), ["alpha/use.py"])
+    reused = AssemblyInput.load(review)
+    first = principle_prompts(reused)
+    # 覚えた後に組み直しても、新しい AssemblyInput で組んだものと文字列で一致する
+    assert principle_prompts(reused) == first
+    assert principle_prompts(AssemblyInput.load(review)) == first
+    assert any(TITLES_VALUE_SETS in item.prompt for item in first)

@@ -11,7 +11,7 @@ from jigane.commands import failures, main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.groups.definitions import MACRO, MICRO, SECURITY
 from jigane.groups.policy_runs import PolicyShape
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import input_budget, macro, macro_principles_run, pipeline
@@ -41,7 +41,7 @@ def stops(budget: claude.RunBudget, prompt_bytes: int) -> bool:
 
 
 def bytes_for_tokens(tokens: int) -> int:
-    return math.floor(tokens * claude.BILLED_BYTES_PER_TOKEN)
+    return math.floor(tokens * pricing.BILLED_BYTES_PER_TOKEN)
 
 
 @pytest.mark.parametrize("prompt_bytes", [424_351, 360_645, 502_737])
@@ -104,7 +104,7 @@ def test_implementation_and_security_judgement_follows_the_billing() -> None:
         assert budget.prompt_tokens(900) == 400
         # 1,000,000 トークンの書き込み 4.00 USD に、4,000 トークンの出力 0.04 USD を足す
         assert budget.launch_cost(1_000_000).usd == pytest.approx(4.04)
-        assert claude.input_cost_usd(HAIKU, 1_000_000).usd == 0.1
+        assert pricing.input_cost_usd(HAIKU, 1_000_000).usd == 0.1
         # 4.00 * T + 0.04 >= 0.5 - 0.10 * T - 0.04（T は百万トークン）を満たす最小は 102,440
         assert budget.input_stops_run(102_440)
         assert not budget.input_stops_run(102_439)
@@ -114,7 +114,7 @@ def test_design_shape_is_unchanged() -> None:
     budget = resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget
     assert budget.output_allowance_tokens is None
     assert budget.prompt_tokens(900) == 300
-    assert budget.launch_cost(300) == claude.input_cost_usd(SONNET, 300)
+    assert budget.launch_cost(300) == pricing.input_cost_usd(SONNET, 300)
 
 
 def test_model_and_limit_flags_keep_the_output_allowance() -> None:

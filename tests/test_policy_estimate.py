@@ -11,7 +11,7 @@ from test_usage import invocation
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.groups.policy_runs import PolicyRole, PolicyShape, estimate_basis_row_labels
-from jigane.llm_runs import claude
+from jigane.llm_runs import pricing
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import macro, macro_principles_run
 from jigane.skills.assembly import AssemblyInput
@@ -42,7 +42,7 @@ def test_diagram_estimate_is_five_runs_and_the_input_is_the_sum(project: Path) -
     assert estimate["planned_invocations"] == 5
     assert estimate["materials_bytes"] == sum(sizes)
     assert estimate["discovery_input_tokens"] == sum(
-        claude.billed_input_tokens(size) for size in sizes
+        pricing.billed_input_tokens(size) for size in sizes
     )
 
 
@@ -122,7 +122,7 @@ def test_policy_estimate_keeps_the_principle_runs_input_tokens_apart(project: Pa
     prompts = [macro.build_diagram_prompt(assembly)] + [
         item.prompt for item in principle_prompts(assembly)
     ]
-    sizes = [claude.billed_input_tokens(len(p.encode("utf-8"))) for p in prompts]
+    sizes = [pricing.billed_input_tokens(len(p.encode("utf-8"))) for p in prompts]
     assert isinstance(estimate, DiagramPolicyEstimate)
     assert estimate.principle_input_tokens == tuple(
         zip(("P1", "P2", "P3", "P4"), sizes[1:], strict=True)

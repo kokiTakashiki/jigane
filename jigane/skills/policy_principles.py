@@ -72,7 +72,7 @@ def principle_prompt(
     materials = "\n\n".join(
         [
             *policy_figures.prompt_figure_texts(
-                review, sections.figures, figure_keys_of(principle)
+                assembly, sections.figures, figure_keys_of(principle)
             ),
             sections.technology,
             f"### {macro.SECTION_HISTORY}\n\n{macro.history_text(assembly)}",
@@ -92,7 +92,7 @@ def principle_prompt(
 def principle_prompts(assembly: AssemblyInput) -> tuple[PrinciplePrompt, ...]:
     """問える図の形がある原則だけの、原則ごとのプロンプト。表の順（P1〜P4）で返す。"""
     sections = macro.policy_sections(assembly.review)
-    shapes = present_shapes(assembly.review, sections.sequence)
+    shapes = present_shapes(assembly, sections.sequence)
     return tuple(
         PrinciplePrompt(
             principle=principle,

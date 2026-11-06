@@ -22,7 +22,7 @@ from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
 from jigane.commands.subcommands.run import failure_reason_lines, group_defaults
 from jigane.groups.definitions import MACRO, MICRO
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.cost import Measured
 from jigane.llm_runs.launch_failure import Disposition
 from jigane.reviews.lifecycle import Review, create_feature_review
@@ -47,7 +47,7 @@ def shard_costs(review: Review) -> list[float]:
     shard_list = shards.assign_shards(shards.build_units(review), shards.FullTextShard)
     total = len(shard_list)
     return [
-        claude.estimate_input_tokens(
+        pricing.estimate_input_tokens(
             len(
                 shard_prompt(MICRO, AssemblyInput.load(review), shard, i + 1, total).encode(
                     "utf-8"
@@ -70,7 +70,7 @@ def test_cli_budget_subtracts_one_more_round_of_input() -> None:
 def test_invocation_passes_reduced_budget_to_cli() -> None:
     settings = settings_for(FakeInvoke(), max_budget_usd=0.5)
     prompt = "a" * 30_000
-    tokens = claude.estimate_input_tokens(len(prompt.encode("utf-8")))
+    tokens = pricing.estimate_input_tokens(len(prompt.encode("utf-8")))
     invocation = settings.invocation(prompt=prompt, json_schema={}, working_directory=Path())
     assert invocation.budget.cli_usd == pytest.approx(0.5 - tokens * PRICE_PER_TOKEN)
     command = claude.build_command(invocation)

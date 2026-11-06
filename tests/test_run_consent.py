@@ -1,13 +1,15 @@
+import dataclasses
 import io
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from fakes import MicroFake
+from fakes import MacroFake, MicroFake
 
 from jigane.commands import build_parser, context, main
-from jigane.commands.consent import GroupBreakdown, LaunchPlan, consent_text
+from jigane.commands.consent import GroupBreakdown, LaunchPlan, consent_text, launch_plan
 from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK
 from jigane.commands.public_urls import terms_urls
 from jigane.commands.subcommands import run as run_command
@@ -21,6 +23,7 @@ from jigane.findings.records import HISTORY_FILE
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, SECURITY, Effort, GroupId
 from jigane.llm_runs import claude
 from jigane.reviews.lifecycle import create_feature_review, load_review, resolve_review
+from jigane.skills import macro, macro_principles_run, policy_principles
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.mcp import McpSelection, McpServer
 
@@ -277,15 +280,13 @@ def test_effort_option_takes_the_enum_values_and_argparse_rejects_others(
 
 def test_consent_text_shows_the_mcp_line() -> None:
     plan = LaunchPlan(
-        SECURITY,
-        (GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),),
+        GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),
         can_increase=True,
         effort=None,
     )
     assert "MCP は使いません" in consent_text(plan)
     selected = LaunchPlan(
-        SECURITY,
-        plan.groups,
+        plan.breakdown,
         can_increase=True,
         effort=None,
         mcp=McpSelection((McpServer("mobile-sec", {}, None), McpServer("server-sec", {}, None))),
@@ -299,8 +300,7 @@ def test_consent_text_shows_the_mcp_line() -> None:
 
 def test_consent_text_links_the_input_list_before_asking_to_continue() -> None:
     plan = LaunchPlan(
-        SECURITY,
-        (GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),),
+        GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),
         can_increase=True,
         effort=None,
     )
@@ -329,7 +329,7 @@ def _consent_err(review_name: str, group: str, capsys: pytest.CaptureFixture[str
 
 
 @pytest.mark.usefixtures("all_principle_shapes")
-def test_consent_text_breaks_the_estimate_down_by_role_and_group(
+def test_consent_text_breaks_the_selected_group_down_by_role(
     review_name: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     err = _consent_err(review_name, "micro", capsys)
@@ -337,15 +337,11 @@ def test_consent_text_breaks_the_estimate_down_by_role_and_group(
     assert "  発見役: 1 回 × 1 回の目安 0.5 USD = 0.5 USD" in err
     assert "検証役: 回数は見つかった指摘の数で決まり、事前には分かりません" in err
     assert "事前に分かる" not in err
-    assert "同じレビューの群ごとの内訳:" in err
-    # 方針は図の形で、図の起動と原則の起動の和を出す。他の群は発見役の回数だけ
-    assert (
-        "  方針: 図の起動 1 回 × 1 回の目安 0.36 USD + 原則の起動 4 回 × 1 回の目安 0.02 USD"
-        " = 0.44 USD、検証役なし"
-    ) in err
-    for label in ("実装", "セキュリティ"):
-        assert f"  {label}: 発見役" in err
-    assert "発見役の回数 × 1 回の目安の和（検証役の分を含まない）:" in err
+    assert "検証役なし" not in err
+    assert "同じレビューの群ごとの内訳" not in err
+    assert "発見役の回数 × 1 回の目安の和" not in err
+    assert "  方針:" not in err
+    assert "  セキュリティ:" not in err
     assert (
         err.count(
             "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"
@@ -355,24 +351,15 @@ def test_consent_text_breaks_the_estimate_down_by_role_and_group(
     assert "前回の実績" not in err
 
 
-def test_consent_text_shows_past_cost_and_avoids_cap_words_in_the_totals() -> None:
+def test_consent_text_shows_past_cost_once_and_avoids_cap_words_in_the_totals() -> None:
     plan = LaunchPlan(
-        SECURITY,
-        (
-            GroupBreakdown(MACRO, 1, 0.5, has_verifier=False, past_cost_usd=0.1234),
-            GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),
-        ),
-        can_increase=True,
+        GroupBreakdown(MACRO, 1, 0.5, has_verifier=False, past_cost_usd=0.1234),
+        can_increase=False,
         effort=None,
     )
     lines = consent_text(plan)
-    assert (
-        "  方針: 発見役 1 回 × 1 回の目安 0.5 USD = 0.5 USD、検証役なし、前回の実績 0.1234 USD"
-    ) in lines
-    assert (
-        "  セキュリティ: 発見役 2 回 × 1 回の目安 0.5 USD = 1 USD、検証役は回数が未定"
-    ) in lines
-    assert "  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: 1.5 USD" in lines
+    assert "  前回の実績 0.1234 USD" in lines
+    assert "  検証役なし" in lines
     for line in lines:
         if "合計" in line or "内訳" in line or "実際の額" in line:
             assert not any(word in line for word in ("上限", "目安", "以内")), line
@@ -410,18 +397,15 @@ def test_eof_at_the_question_is_a_refusal(
     assert "Traceback" not in capsys.readouterr().err
 
 
-def test_consent_text_for_policy_shows_diagram_and_principle_runs_and_their_sum() -> None:
+def test_consent_text_for_policy_shows_diagram_and_principle_runs() -> None:
     plan = LaunchPlan(
-        MACRO,
-        (
-            GroupBreakdown(
-                MACRO,
-                6,
-                0.4,
-                has_verifier=False,
-                past_cost_usd=None,
-                principle_limits_usd=(0.02,) * 5,
-            ),
+        GroupBreakdown(
+            MACRO,
+            6,
+            0.4,
+            has_verifier=False,
+            past_cost_usd=None,
+            principle_limits_usd=(0.02,) * 5,
         ),
         can_increase=False,
         effort=None,
@@ -431,8 +415,7 @@ def test_consent_text_for_policy_shows_diagram_and_principle_runs_and_their_sum(
         "図の起動 1 回 × 1 回の目安 0.4 USD + 原則の起動 5 回 × 1 回の目安 0.02 USD = 0.5 USD"
     )
     assert f"  発見役: {expression}" in lines
-    assert f"  方針: {expression}、検証役なし" in lines
-    assert "  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: 0.5 USD" in lines
+    assert "  検証役なし" in lines
 
 
 def test_consent_sum_with_a_per_call_override_covers_all_six_runs() -> None:
@@ -472,7 +455,6 @@ def test_consent_expression_sums_only_the_assembled_principle_runs() -> None:
     )
     assert none.known_usd == 0.36
     assert none.calls_text() == "1 回 × 1 回の目安 0.36 USD = 0.36 USD"
-    assert none.row_calls_text().startswith("発見役 ")
     two = GroupBreakdown(
         MACRO, 3, 0.36, has_verifier=False, past_cost_usd=None, principle_limits_usd=(0.02, 0.06)
     )
@@ -483,9 +465,149 @@ def test_consent_expression_sums_only_the_assembled_principle_runs() -> None:
     )
 
 
-@pytest.mark.usefixtures("all_principle_shapes")
-def test_consent_other_groups_rows_use_the_policy_sum_when_the_run_group_is_not_policy(
-    review_name: str, capsys: pytest.CaptureFixture[str]
+_ESTIMATES_NOT_MADE = "他の群の額は見積もっていません。"
+
+
+def _plan_for(group: GroupId, *, past_cost_usd: float | None) -> LaunchPlan:
+    return LaunchPlan(
+        GroupBreakdown(
+            group,
+            2,
+            0.5,
+            has_verifier=group != MACRO,
+            past_cost_usd=past_cost_usd,
+        ),
+        can_increase=group != MACRO,
+        effort=None,
+    )
+
+
+@pytest.mark.parametrize("group", [MACRO, MICRO, SECURITY])
+def test_consent_text_covers_only_the_selected_group(group: GroupId) -> None:
+    label = GROUP_BY_ID[group].label
+    lines = consent_text(_plan_for(group, past_cost_usd=0.1234))
+    text = "\n".join(lines)
+    assert f"この群の内訳（{label}）:" in lines
+    assert "  発見役: 2 回 × 1 回の目安 0.5 USD = 1 USD" in lines
+    assert ("  検証役なし" in lines) == (group == MACRO)
+    assert ("  検証役: 回数は見つかった指摘の数で決まり、事前には分かりません" in lines) == (
+        group != MACRO
+    )
+    assert "  前回の実績 0.1234 USD" in lines
+    assert any(line.startswith(_ESTIMATES_NOT_MADE) for line in lines)
+    assert (
+        "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"
+        in lines
+    )
+    assert "1 回の目安は往復の合間にしか確かめられないので、超えることがあります。" in lines
+    assert "同じレビューの群ごとの内訳" not in text
+    assert "発見役の回数 × 1 回の目安の和" not in text
+    assert "前回の実績" not in "\n".join(consent_text(_plan_for(group, past_cost_usd=None)))
+
+
+@pytest.mark.parametrize("group", ["macro", "micro", "security"])
+def test_consent_text_estimate_command_is_accepted_by_the_parser(group: str) -> None:
+    lines = consent_text(_plan_for(GroupId(group), past_cost_usd=None))
+    notice = next(line for line in lines if line.startswith(_ESTIMATES_NOT_MADE))
+    command = re.search(r"`(jigane estimate [^`]+)`", notice)
+    assert command is not None
+    assert "<レビュー>" in command.group(1)
+    assert "<群>" in command.group(1)
+    argv = command.group(1).replace("<レビュー>", "some-review").replace("<群>", group).split()
+    assert argv[0] == "jigane"
+    parsed = build_parser().parse_args(argv[1:])
+    assert (parsed.command, parsed.review, parsed.group) == ("estimate", "some-review", group)
+
+
+@pytest.mark.parametrize("group", ["macro", "micro", "security"])
+def test_run_consent_shows_the_selected_group_only(
+    group: str, review_name: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    err = _consent_err(review_name, "security", capsys)
-    assert "原則の起動 4 回 × 1 回の目安 0.02 USD = 0.44 USD、検証役なし" in err
+    err = _consent_err(review_name, group, capsys)
+    assert f"この群の内訳（{GROUP_BY_ID[GroupId(group)].label}）:" in err
+    assert _ESTIMATES_NOT_MADE in err
+    assert "同じレビューの群ごとの内訳" not in err
+    assert "発見役の回数 × 1 回の目安の和" not in err
+
+
+def test_launch_plan_of_a_non_policy_group_does_not_estimate_the_policy(
+    review_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review = load_review(resolve_review(review_name))
+    assembly = AssemblyInput.load(review)
+    settings = _micro_settings(MicroFake({1: []}))
+
+    def fail(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("方針の見積もりを呼んだ")
+
+    monkeypatch.setattr(macro_principles_run, "estimate_policy", fail)
+    # 差し替えが estimator の読む名前に効くことを、方針の見積もりの呼び出しで確かめる
+    with pytest.raises(AssertionError, match="方針の見積もりを呼んだ"):
+        launch_plan(assembly, MACRO, settings)
+    for group in (MICRO, SECURITY):
+        assert launch_plan(assembly, group, settings).group == group
+
+
+def _count_calls(
+    monkeypatch: pytest.MonkeyPatch, counts: dict[str, int], module: object, name: str
+) -> None:
+    counts[name] = 0
+    original = getattr(module, name)
+
+    def counted(*args: object, **kwargs: object) -> object:
+        counts[name] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, counted)
+
+
+def test_policy_run_assembles_plan_prompt_and_principles_once_for_consent_and_run(
+    review_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    counts: dict[str, int] = {}
+    for module, name in (
+        (macro, "macro_plan"),
+        (macro, "build_diagram_prompt"),
+        (policy_principles, "principle_prompts"),
+    ):
+        _count_calls(monkeypatch, counts, module, name)
+    fake = MacroFake([])
+    code = main(
+        ["run", review_name, "macro"],
+        invoke=fake,
+        is_terminal=lambda: True,
+        read_answer=_ask(["y"], []),
+    )
+    assert code == EXIT_OK
+    assert fake.diagram_calls != []
+    assert counts == {"macro_plan": 1, "build_diagram_prompt": 1, "principle_prompts": 1}
+
+
+def test_run_sends_the_prompts_a_fresh_assembly_builds(review_name: str) -> None:
+    fake = MacroFake([])
+    # 同意の見積もりが先に組み立てを覚え、実行が同じものを使う
+    code = main(
+        ["run", review_name, "macro"],
+        invoke=fake,
+        is_terminal=lambda: True,
+        read_answer=_ask(["y"], []),
+    )
+    assert code == EXIT_OK
+    fresh = AssemblyInput.load(load_review(resolve_review(review_name)))
+    assert [call.prompt for call in fake.diagram_calls] == [macro.macro_plan(fresh).build_prompt()]
+    fresh_principles = [launch.prompt for launch in macro_principles_run.principle_launches(fresh)]
+    assert sorted(call.prompt for call in fake.principle_calls) == sorted(fresh_principles)
+
+
+def test_remembered_results_stay_out_of_equality_hash_and_repr(review_name: str) -> None:
+    review = load_review(resolve_review(review_name))
+    remembering = AssemblyInput.load(review)
+    plain = AssemblyInput.from_loaded(review, remembering.source.own)
+    macro.remembered_prompt(remembering)
+    assert remembering == plain
+    assert repr(remembering) == repr(plain)
+    # compare=False の欄はハッシュからも外れる。Review が不変でなく、ハッシュ自体は元から無い
+    (memo,) = [f for f in dataclasses.fields(AssemblyInput) if f.name == "_remembered"]
+    assert memo.compare is False
+    assert memo.repr is False
+    assert memo.hash is None

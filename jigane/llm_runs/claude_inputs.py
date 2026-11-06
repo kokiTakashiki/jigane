@@ -376,12 +376,21 @@ class ClaudeInput(Enum):
     )
     ADDED_ENVIRONMENT = InputSpec(
         Channel.ENVIRONMENT,
-        "ENABLE_CLAUDEAI_MCP_SERVERS=false と CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1。"
-        "jigane が自分のプロセスに設定し、子が受け継ぐ文法の置き場のパス"
-        "（TREE_SITTER_LANGUAGE_PACK_CACHE_DIR）。"
+        "ENABLE_CLAUDEAI_MCP_SERVERS=false と CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+        ("jigane/llm_runs/claude.py:reviewer_environment",),
+        _ALL,
+        user_can_provide=False,
+        user_can_provide_reason="jigane が足す",
+    )
+    GRAMMAR_CACHE_PATH = InputSpec(
+        Channel.ENVIRONMENT,
+        "jigane がその実行の中で文法を読んだときだけ、自分のプロセスに設定して子が受け継ぐ"
+        "文法の置き場のパス（TREE_SITTER_LANGUAGE_PACK_CACHE_DIR）。"
+        "文法を読むのは、ソースのファイルの構文木が要る資料を組むときで、"
+        "macro は図と原則の資料、micro と security は正規表現の札の資料である。"
+        "変更に対象の言語のソースのファイルが無ければ読まず、渡らない。"
         "このパスの値は利用者名を含む絶対パスで、jigane の仮想環境の中の文法の置き場を指す",
         (
-            "jigane/llm_runs/claude.py:reviewer_environment",
             "jigane/languages/grammars.py:CACHE_ENV",
             "jigane/languages/grammars.py:_prepare",
         ),
@@ -593,9 +602,8 @@ ARGV_INPUTS: Mapping[str, ClaudeInput] = {
 
 # 子の環境へ足された変数と、親から除かれた変数の名前
 ENVIRONMENT_INPUTS: Mapping[str, ClaudeInput] = {
-    **dict.fromkeys(
-        (CLAUDEAI_MCP_SWITCH, NONESSENTIAL_TRAFFIC_SWITCH, CACHE_ENV), _C.ADDED_ENVIRONMENT
-    ),
+    **dict.fromkeys((CLAUDEAI_MCP_SWITCH, NONESSENTIAL_TRAFFIC_SWITCH), _C.ADDED_ENVIRONMENT),
+    CACHE_ENV: _C.GRAMMAR_CACHE_PATH,
     **dict.fromkeys(sorted(REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES), _C.REMOVED_ENVIRONMENT),
 }
 

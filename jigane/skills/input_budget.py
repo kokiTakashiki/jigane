@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 
 LARGEST_SECTION_COUNT = 3
 SECTION_HEADING_PREFIX = "### "
@@ -144,7 +144,7 @@ def check_input_budget(
     tokens = budget.prompt_tokens(len(prompt.encode("utf-8")))
     estimated = budget.launch_cost(tokens)
     notice = (
-        claude.assumed_price_notice(budget.model, estimated) if estimated.assumed_price else None
+        pricing.assumed_price_notice(budget.model, estimated) if estimated.assumed_price else None
     )
     if not budget.input_stops_run(tokens):
         return BudgetCheck(None, notice)

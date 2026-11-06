@@ -8,12 +8,11 @@ from pathlib import PurePosixPath
 
 from jigane.commands.public_urls import installed_version, terms_urls
 from jigane.git.process import CONSENT_PROMPT_END
-from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, SECURITY, Effort, GroupId
+from jigane.groups.definitions import GROUP_BY_ID, MACRO, Effort, GroupId
 from jigane.judgment_map.map_kind import CodeMap
 from jigane.languages import registry
 from jigane.llm_runs import claude
-from jigane.llm_runs.defaults import resolve_run_defaults
-from jigane.reviews.lifecycle import Review, ReviewError
+from jigane.reviews.lifecycle import Review
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import DiagramPolicyEstimate, Estimate
 from jigane.skills.estimator import estimate_of
@@ -60,10 +59,6 @@ class GroupBreakdown:
             6,
         )
 
-    def row_calls_text(self) -> str:
-        """群ごとの内訳の行の式。原則の組を持たなければ先頭に「発見役」を付ける。"""
-        return self.calls_text() if self.principle_calls else f"発見役 {self.calls_text()}"
-
     def calls_text(self) -> str:
         """起動の本数と目安の式。原則の組を持たなければ発見役の回数だけで表す。"""
         if self.principle_calls == 0:
@@ -86,25 +81,19 @@ class GroupBreakdown:
 class LaunchPlan:
     """この実行が最初に分かる範囲で起動する回数と、1 回あたりの上限の目安。
 
-    回数と目安の出所は groups だけで、他の値はそこから導く。
+    回数と目安の出所は breakdown だけで、他の値はそこから導く。
     """
 
-    group: GroupId
-    # 同じレビューの群の内訳。この実行の群を必ず含む
-    groups: tuple[GroupBreakdown, ...]
+    breakdown: GroupBreakdown
     can_increase: bool
     effort: Effort | None
     # 出力と推論の分を含めた見込み。見込みを持つのは設計書の形の方針だけで、他は None
     expected_total_usd: float | None = None
     mcp: McpSelection = NO_MCP
 
-    def __post_init__(self) -> None:
-        if sum(item.group == self.group for item in self.groups) != 1:
-            raise ValueError(f"groups に {self.group} の内訳がちょうど 1 つ無い")
-
     @property
-    def breakdown(self) -> GroupBreakdown:
-        return next(item for item in self.groups if item.group == self.group)
+    def group(self) -> GroupId:
+        return self.breakdown.group
 
     @property
     def minimum_calls(self) -> int:
@@ -113,10 +102,6 @@ class LaunchPlan:
     @property
     def max_budget_usd_per_call(self) -> float:
         return self.breakdown.per_call_usd
-
-    @property
-    def known_usd(self) -> float:
-        return sum(item.known_usd for item in self.groups)
 
 
 def _breakdown_of(group: GroupId, estimate: Estimate, budget: claude.RunBudget) -> GroupBreakdown:
@@ -146,47 +131,19 @@ def launch_plan(
     mcp: McpSelection = NO_MCP,
 ) -> LaunchPlan:
     """見積もりと同じ関数から、確実に起動する回数を求める。"""
-    estimates = {group: estimate_of(assembly, group, mcp, settings.budget)}
-    for each in (MACRO, MICRO, SECURITY):
-        if each in estimates:
-            continue
-        try:
-            estimates[each] = estimate_of(
-                assembly, each, budget=resolve_run_defaults(each, None, None).budget
-            )
-        except ReviewError:
-            # 他の群の材料が欠けていても、この群の実行は止めない。その群は表から外す
-            continue
-    breakdowns = tuple(
-        _breakdown_of(
-            each,
-            estimates[each],
-            settings.budget
-            if each == group
-            else resolve_run_defaults(each, estimates[each].policy_shape(), None).budget,
-        )
-        for each in (MACRO, MICRO, SECURITY)
-        if each in estimates
-    )
+    estimate = estimate_of(assembly, group, mcp, settings.budget)
     # 方針は発見役の 1 回だけで検証役を持たない。他は発見役がシャードごとに 1 回で、
     # 検証役は指摘の数で決まり、数にも分割にも上限が無い
     # （finding_model.py の発見役の出力のモデルは findings の件数に上限を持たず、
     # split_candidates は 10 件ずつ割る）。
     # 検証役は最小の回数には入らない
     return LaunchPlan(
-        group,
-        breakdowns,
+        _breakdown_of(group, estimate, settings.budget),
         group != MACRO,
         settings.effort,
-        estimates[group].expected_total_usd(),
+        estimate.expected_total_usd(),
         mcp=NO_MCP if group == MACRO else mcp,
     )
-
-
-def _group_row(item: GroupBreakdown) -> str:
-    verifier = "検証役は回数が未定" if item.has_verifier else "検証役なし"
-    past = "" if item.past_cost_usd is None else f"、前回の実績 {item.past_cost_usd:.4f} USD"
-    return f"  {GROUP_BY_ID[item.group].label}: {item.row_calls_text()}、{verifier}{past}"
 
 
 def consent_text(
@@ -213,8 +170,12 @@ def consent_text(
         f"この群の内訳（{label}）:",
         f"  発見役: {plan.breakdown.calls_text()}",
     ]
-    if plan.can_increase:
+    if plan.breakdown.has_verifier:
         lines.append("  検証役: 回数は見つかった指摘の数で決まり、事前には分かりません")
+    else:
+        lines.append("  検証役なし")
+    if plan.breakdown.past_cost_usd is not None:
+        lines.append(f"  前回の実績 {plan.breakdown.past_cost_usd:.4f} USD")
     if plan.expected_total_usd is not None:
         lines.append(
             f"出力と推論の分を含めた見込み: {plan.expected_total_usd:.2f} USD"
@@ -224,10 +185,8 @@ def consent_text(
                 else ""
             )
         )
-    lines.append("同じレビューの群ごとの内訳:")
-    lines.extend(_group_row(item) for item in plan.groups)
     lines.append(
-        f"  発見役の回数 × 1 回の目安の和（検証役の分を含まない）: {plan.known_usd:g} USD"
+        "他の群の額は見積もっていません。`jigane estimate <レビュー> <群>` で確かめられます。"
     )
     lines.append(
         "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"

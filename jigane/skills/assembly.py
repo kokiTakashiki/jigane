@@ -1,6 +1,8 @@
 """資料の組み立てへ渡す入力。レビューと、そのレビューから一度だけ読んだ入力を一つにまとめる。"""
 
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Hashable
+from dataclasses import dataclass, field, replace
+from typing import Any, cast
 
 from jigane.findings.records import (
     HistoryLoad,
@@ -53,6 +55,19 @@ class AssemblyInput:
 
     review: Review
     source: HistorySource
+    # このインスタンスの中だけで覚える作った結果。比較にも表示にも入れない
+    _remembered: dict[Hashable, Any] = field(
+        init=False, default_factory=dict, compare=False, repr=False
+    )
+
+    def remember[T](self, key: Hashable, make: Callable[[], T]) -> T:
+        """鍵ごとに make を一度だけ呼び、同じインスタンスの中では同じ結果を返す。
+
+        スレッドを使う前に主の流れで呼んでおくこと。
+        """
+        if key not in self._remembered:
+            self._remembered[key] = make()
+        return cast("T", self._remembered[key])
 
     @classmethod
     def load(cls, review: Review) -> "AssemblyInput":

@@ -24,7 +24,7 @@ from jigane.findings.records import triaged_dicts
 from jigane.groups.definitions import DIAGRAM_SHAPE, GROUP_BY_ID, MACRO
 from jigane.groups.policy_runs import PolicyRole
 from jigane.judgment_map.declaration import demote_headings
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.policy_materials import changed_files
 from jigane.reviews.lifecycle import (
     DeclaredInputs,
@@ -178,7 +178,7 @@ def test_estimate(project: Path) -> None:
     assert estimate["materials_bytes"] == prompt_bytes
     assert estimate["planned_invocations"] == 1
     assert estimate["shape"] == "diagram"
-    assert estimate["discovery_input_tokens"] == claude.billed_input_tokens(prompt_bytes)
+    assert estimate["discovery_input_tokens"] == pricing.billed_input_tokens(prompt_bytes)
     assert estimate["past_run"] is None
     assert "file_bytes" not in estimate
     assert "cached_input_multiplier" not in estimate
@@ -664,7 +664,7 @@ def test_run_stops_before_calling_when_input_exceeds_budget(project: Path) -> No
         macro.run_macro(AssemblyInput.load(review), known_model_settings(fake, 0.0001))
     assert fake.calls == []
     message = str(raised.value)
-    tokens = claude.estimate_input_tokens(
+    tokens = pricing.estimate_input_tokens(
         len(macro.build_diagram_prompt(AssemblyInput.load(review)).encode("utf-8"))
     )
     assert f"{tokens} トークン" in message
@@ -864,9 +864,9 @@ def test_run_skips_a_principle_launch_that_reaches_the_principle_limit_alone(
     review = create_feature_review(project, ["src"], "p")
     fake = MacroFake([discovered("M4")])
     prompt = "x" * 150_000
-    tokens = claude.estimate_input_tokens(len(prompt))
+    tokens = pricing.estimate_input_tokens(len(prompt))
     # 原則の起動の上限は、この入力の費用そのもの。図の起動の上限 0.5 USD には収まる
-    principle_limit = claude.input_cost_usd("claude-haiku-5-5", tokens).usd
+    principle_limit = pricing.input_cost_usd("claude-haiku-5-5", tokens).usd
     settings = known_model_settings(fake, 0.5)
     settings = replace(
         settings,

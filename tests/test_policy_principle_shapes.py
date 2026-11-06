@@ -35,7 +35,7 @@ NO_INHERITANCE = "class Base:\n    pass\n\n\nclass Child:\n    pass\n"
 
 
 def _shapes(review: Review, sequence: SequenceFigure = NO_FLOWS) -> frozenset[Shape]:
-    return present_shapes(review, sequence)
+    return present_shapes(AssemblyInput.load(review), sequence)
 
 
 def _numbers(review: Review) -> list[str]:

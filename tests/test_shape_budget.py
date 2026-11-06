@@ -25,7 +25,7 @@ from jigane.groups.definitions import (
 )
 from jigane.groups.policy_runs import PolicyRole, PolicyShape
 from jigane.groups.viewpoints import design_principles
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.usage_table import USAGE_CSV
 from jigane.reviews.lifecycle import Review, create_feature_review
@@ -384,8 +384,8 @@ def test_run_notice_carries_the_skipped_usage_rows_warning(repo: Path) -> None:
 def test_run_warns_and_continues_when_the_expected_total_reaches_the_limit(repo: Path) -> None:
     review = create_design_doc_review(repo, DOCUMENT_PATH)
     prompt = macro.macro_plan(AssemblyInput.load(review)).build_prompt()
-    tokens = claude.estimate_input_tokens(len(prompt.encode("utf-8")))
-    input_usd = claude.input_cost_usd("m", tokens).usd
+    tokens = pricing.estimate_input_tokens(len(prompt.encode("utf-8")))
+    input_usd = pricing.input_cost_usd("m", tokens).usd
     # 入力だけなら上限の内で、倍率を掛けた見込みは上限に達する
     limit = input_usd * DEFAULT_OUTPUT_MULTIPLIER / 2
     fake = MacroFake([discovered("M2", DOCUMENT_PATH)])

@@ -7,6 +7,7 @@ from jigane.figures.models import TableFigure
 from jigane.languages import python_stores
 from jigane.reviews.lifecycle import Review
 from jigane.skills import policy_stores
+from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import FigureSlot, section_texts
 from jigane.storage.store import ReviewKind
 
@@ -131,7 +132,9 @@ def test_unsupported_language_note_appears_with_the_table(tmp_path: Path) -> Non
         "s.py": 'import json\n\n\ndef save(path):\n    json.dump({"k": 1}, open("t.json", "w"))\n',
         "A.swift": "struct A {}\n",
     }
-    texts = section_texts(project_review(tmp_path, files), FigureSlot.AFTER_TREE)
+    texts = section_texts(
+        AssemblyInput.load(project_review(tmp_path, files)), FigureSlot.AFTER_TREE
+    )
     store = next(t for t in texts if t.startswith("### 保存物の書く側と読む側"))
     assert "t.json" in store
     assert (

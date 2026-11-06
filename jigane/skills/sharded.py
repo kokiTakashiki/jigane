@@ -28,7 +28,7 @@ from jigane.findings.records import (
     triaged,
 )
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, GroupId
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import (
     DISCOVERY_ROLE,
@@ -468,7 +468,7 @@ def estimate_sharded[E: ShardedEstimate](
     prompts = planned.prompts
     sizes = [shard.size for shard in plan.shards]
     return estimate_type(
-        discovery_input_tokens=claude.estimate_input_tokens(sum(sizes)),
+        discovery_input_tokens=pricing.estimate_input_tokens(sum(sizes)),
         past_run=pipeline.past_run(review, group),
         note=note,
         policy_notice=order.policy_notice(review),

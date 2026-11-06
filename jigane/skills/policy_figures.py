@@ -44,6 +44,7 @@ from jigane.skills import (
     policy_stores,
     policy_value_sets,
 )
+from jigane.skills.assembly import AssemblyInput
 
 
 class FigureSlot(StrEnum):
@@ -111,6 +112,9 @@ class PolicyFigure:
     # 引くので、口は SequenceAdapter になる。ツリーとシグネチャは言語の口に依らないので
     # LANGUAGE_AGNOSTIC。既定値は持たず、図ごとに必ず書く
     interface: type | LanguageAgnostic
+    # 同じ読み込みを組み立ての中で共有したい図だけが持つ。
+    # プロンプトの資料の組み立てが build の代わりに使う
+    build_of: Callable[[AssemblyInput], Figure | None] | None = None
 
 
 REGISTRY: tuple[PolicyFigure, ...] = (
@@ -211,6 +215,7 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_value_sets.value_set_table,
         FigureSlot.AFTER_REGIONS,
         interface=ValueSetReader,
+        build_of=policy_value_sets.value_set_table_of,
     ),
     PolicyFigure(
         "field_copies",
@@ -273,8 +278,15 @@ def unsupported_note(languages: Sequence[UnsupportedLanguage]) -> str:
     return " ".join(sentences)
 
 
+def build_figure(figure: PolicyFigure, assembly: AssemblyInput) -> Figure | None:
+    """図を作る。図が共有の組み立てを持つときはそちらで、持たなければ build で作る。"""
+    if figure.build_of is not None:
+        return figure.build_of(assembly)
+    return figure.build(assembly.review)
+
+
 def section_texts(
-    review: Review, slot: FigureSlot, keys: Collection[FigureKey] | None = None
+    assembly: AssemblyInput, slot: FigureSlot, keys: Collection[FigureKey] | None = None
 ) -> list[str]:
     """資料に載せる、その置き場の図の節。描くものが無い図の節は載せない。
 
@@ -286,7 +298,8 @@ def section_texts(
             continue
         if keys is not None and figure.key not in keys:
             continue
-        built = figure.build(review)
+        built = build_figure(figure, assembly)
+        review = assembly.review
         languages = unsupported_languages(review, figure)
         # 表が空でも、対応外の言語があれば節を残す。表が出ない理由が口の無さだと読み手に伝えるため
         parts = [built.text()] if built is not None else []
@@ -311,7 +324,7 @@ def _with_unsupported_note(review: Review, place: PrebuiltSection, section: str)
 
 
 def prompt_figure_texts(
-    review: Review,
+    assembly: AssemblyInput,
     prebuilt: Mapping[PrebuiltSection, str],
     keys: Collection[FigureKey] | None = None,
 ) -> list[str]:
@@ -333,9 +346,9 @@ def prompt_figure_texts(
                 figure.slot == place and figure.key in keys for figure in REGISTRY
             ):
                 continue
-            texts.append(_with_unsupported_note(review, place, prebuilt[place]))
+            texts.append(_with_unsupported_note(assembly.review, place, prebuilt[place]))
         else:
-            texts.extend(section_texts(review, place, keys))
+            texts.extend(section_texts(assembly, place, keys))
     return texts
 
 

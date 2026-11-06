@@ -6,7 +6,7 @@ import pytest
 from fakes import FakeInvoke, settings_for
 
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, SECURITY, GroupId
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, pricing
 from jigane.skills import input_budget
 
 SONNET = "claude-sonnet-5-5"
@@ -54,7 +54,7 @@ def budget_of(group_id: GroupId) -> claude.RunBudget:
 def test_price_table_reproduces_measured_cost(
     fresh: int, written: int, read: int, output: int, cost: float
 ) -> None:
-    prices = claude.MODEL_PRICES[SONNET]
+    prices = pricing.MODEL_PRICES[SONNET]
     tier = prices.tiers[0]
     computed = (
         fresh * prices.input
@@ -67,7 +67,7 @@ def test_price_table_reproduces_measured_cost(
 
 def test_cold_measurement_matches_the_bytes_per_token() -> None:
     assert sum(COLD_MEASUREMENT[:3]) == COLD_INPUT_TOKENS
-    assert claude.billed_input_tokens(COLD_PROMPT_BYTES) == pytest.approx(
+    assert pricing.billed_input_tokens(COLD_PROMPT_BYTES) == pytest.approx(
         COLD_INPUT_TOKENS, rel=0.01
     )
 
@@ -114,7 +114,7 @@ def test_cold_completed_shard_passes_and_its_first_round_trip_stays_under_the_cl
     assert cli is not None
     assert cli == pytest.approx(0.4498, abs=1e-3)
     fresh, written, read, output = COLD_COMPLETED_FIRST_ROUND_TRIP
-    prices = claude.MODEL_PRICES[SONNET]
+    prices = pricing.MODEL_PRICES[SONNET]
     tier = prices.tiers[0]
     first_round_trip = (
         fresh * prices.input

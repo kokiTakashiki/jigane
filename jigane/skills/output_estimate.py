@@ -13,7 +13,7 @@ from typing import Any
 
 from jigane.groups.definitions import GROUP_BY_ID, MACRO
 from jigane.groups.policy_runs import PolicyRole
-from jigane.llm_runs import claude
+from jigane.llm_runs import pricing
 from jigane.llm_runs.usage_table import INPUT_SIDE_TOKEN_FIELDS, USAGE_CSV, UsageField
 
 # 過去の実額がどこにも無いときの倍率の仮置き。測定の結果が出たら置き換える
@@ -89,7 +89,7 @@ class OutputEstimate:
 
 def _ratio(model: str, cost_usd: float, input_tokens: int) -> float | None:
     """実額と、同じ入力を入力の単価で数えた費用の比。0 で割る行は数えない。"""
-    input_usd = claude.input_cost_usd(model, input_tokens).usd
+    input_usd = pricing.input_cost_usd(model, input_tokens).usd
     if cost_usd <= 0 or input_usd <= 0:
         return None
     return cost_usd / input_usd

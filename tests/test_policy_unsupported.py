@@ -110,7 +110,7 @@ def test_mixed_change_names_only_the_unsupported_languages(
     assert _unsupported(review)["commands"] == ("C#", "Swift")
     assert _unsupported(review)["stores"] == ("C#", "Swift")
     assert _unsupported(review)["file_paths"] == ("C#",)
-    sections = section_texts(review, FigureSlot.AFTER_TREE)
+    sections = section_texts(AssemblyInput.load(review), FigureSlot.AFTER_TREE)
     assert any(BUILTIN_NOTE_CSHARP_SWIFT in s for s in sections)
     assert not any("Python" in s for s in sections if "対応外" in s)
 
@@ -168,8 +168,8 @@ def test_prompt_names_the_language_without_an_interface_in_the_new_figures(
     review = _review(tmp_path, monkeypatch, {"src/a.nosq": "class A { }\n"})
     register_no_sequence_adapter(monkeypatch)
     note = NOSEQ_BUILTIN_NOTE
-    after_tree = section_texts(review, FigureSlot.AFTER_TREE)
-    after_regions = section_texts(review, FigureSlot.AFTER_REGIONS)
+    after_tree = section_texts(AssemblyInput.load(review), FigureSlot.AFTER_TREE)
+    after_regions = section_texts(AssemblyInput.load(review), FigureSlot.AFTER_REGIONS)
 
     # 期待値は登録簿から導く。口を持つ図が、置き場ごとに一節ずつ一文を載せる。
     # シーケンス図は事前に組む節なので、置き場の図には数えない
