@@ -17,7 +17,7 @@ from jigane.reviews.lifecycle import (
     create_pull_request_review,
 )
 from jigane.static_analysis.intake import SarifRequest, read_static_findings, sarif_request
-from jigane.storage.store import ReviewId
+from jigane.storage.store import CheckedReviewId
 
 MESSAGE = "UNIQUE-REFRESH-MESSAGE-5512"
 WARNING = "--sarif で渡し直"
@@ -40,12 +40,12 @@ def _request(scratch: Path, root: Path, commit: str) -> SarifRequest | None:
     return sarif_request([write(scratch, "a.sarif", document)], None, root)
 
 
-def _static_ids(review_id: ReviewId) -> set[str]:
+def _static_ids(review_id: CheckedReviewId) -> set[str]:
     stored = json.loads((review_id.directory() / "map.json").read_text(encoding="utf-8"))
     return {finding for segment in stored["segments"] for finding in segment["static_finding_ids"]}
 
 
-def _forget_static_in_map(review_id: ReviewId) -> None:
+def _forget_static_in_map(review_id: CheckedReviewId) -> None:
     # 分類の規則が変わる前に保存した地図を真似る。同じコミットでも地図が作り直される
     path = review_id.directory() / "map.json"
     stored = json.loads(path.read_text(encoding="utf-8"))

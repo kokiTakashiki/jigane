@@ -1,7 +1,10 @@
 from pathlib import Path
 
+import pytest
+from fakes import run_command_stub
 from pr_support import commit_all, git
 
+from jigane.git import process
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context import background
 from jigane.pull_request_context.background import (
@@ -75,3 +78,25 @@ def test_background_reads_old_record_with_past_pull_requests() -> None:
         "owners": [],
     }
     assert parse_background(old).past_changes == (PastPullRequest(5, "Tune", ("x.py",)),)
+
+
+@pytest.mark.parametrize("finder", ["find_past_changes", "find_past_pull_requests"])
+def test_merge_base_is_resolved_then_guarded(finder: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+    sha = "c" * 40
+
+    def fake_run(args: list[str]) -> str:
+        seen.append(args)
+        return f"{sha}\n" if "rev-parse" in args else ""
+
+    monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
+    evil = "--upload-pack=touch /tmp/x"
+    pairs = [FilePair("a.py", "a.py")]
+    if finder == "find_past_changes":
+        background.find_past_changes(Path(), evil, pairs)
+    else:
+        background.find_past_pull_requests(Path(), evil, pairs, 0)
+    rev_parse, log = seen
+    assert rev_parse.index("--end-of-options") < rev_parse.index(f"{evil}^{{commit}}")
+    assert evil not in log
+    assert log[-4:] == ["--end-of-options", sha, "--", "a.py"]

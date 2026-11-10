@@ -30,6 +30,7 @@ def test_run_tool_turns_a_missing_executable_into_command_error() -> None:
 
 
 def _fake_run_raising(monkeypatch: pytest.MonkeyPatch, error: OSError) -> None:
+    # Windows は起動の前に先頭を which で解くため、偽の run へ届くよう実在する python を起動する
     def run(*_args: object, **_kwargs: object) -> None:
         raise error
 
@@ -42,7 +43,7 @@ def test_run_tool_reports_a_missing_working_directory_as_file_not_found(
     missing = tmp_path / "no-such-directory"
     _fake_run_raising(monkeypatch, NotADirectoryError(267, "The directory name is invalid"))
     with pytest.raises(FileNotFoundError) as raised:
-        run_tool(["jigane-fake-tool"], cwd=missing)
+        run_tool([sys.executable], cwd=missing)
     assert raised.value.filename == str(missing)
 
 
@@ -52,5 +53,5 @@ def test_run_tool_keeps_not_a_directory_when_the_working_directory_exists(
     error = NotADirectoryError(267, "The directory name is invalid")
     _fake_run_raising(monkeypatch, error)
     with pytest.raises(NotADirectoryError) as raised:
-        run_tool(["jigane-fake-tool"], cwd=tmp_path)
+        run_tool([sys.executable], cwd=tmp_path)
     assert raised.value is error

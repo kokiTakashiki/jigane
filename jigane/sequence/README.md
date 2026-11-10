@@ -13,8 +13,17 @@
 | `resolve.extract_calls` | メンバの本体の呼び出しを評価の順に取り出し、受け手の型を解決します |
 | `roots.changed_members` | 判断の地図の変更から、変更した宣言の集合を求めます |
 | `roots.select_roots` | 変更した宣言のうち、他から呼ばれないものと、アダプタが入口と見なす名前（`main` など）のものを入口として選びます。テストのファイルからの呼び出しは、呼ばれる側を入口から外しません |
-| `diagram.build_diagrams` | 根ごとに、参加者と矢印の図のモデルを作ります |
-| `diagram.to_mermaid` | 図のモデルを Mermaid の `sequenceDiagram` に変換します |
+| `diagram.construct_diagrams` | 構築の入力（`DiagramInputs`）から、根ごとに、参加者と矢印の図と、図以外の項目（`DiagramSetNotes`）を持つ `DiagramSet` を作ります。逆引きと、どの図にも当たらない判断の箇所は、`ArrowHit`、`ParticipantHit`、`UnreachableRegion` の型で持ち、辞書にしません。識別子は知りません |
+| `diagram_json.diagrams_to_dict` | 識別子付きの図の並び（`IdentifiedDiagram` の並び）と、図以外の項目（`DiagramSetNotes`）、図を作った木の側を受けて、識別子を載せた JSON の辞書にします。逆引きと判断の箇所の辞書への変換はここだけが持ちます。識別子は導かず、構築も呼びません |
+| `review_diagrams.build_diagrams` | `DiagramInputs` から `construct_diagrams` で図を作り、`identities_of` で識別子を導いて `diagrams_to_dict` へ渡す、組み立ての入口です。変更前の木の図は関係の矢印を足しません |
+| `before_tree.load_before_tree` | 変更前（基点）の木を読み、索引と変更した宣言、修飾名から引く本体を持つ宣言（`BeforeTree`）を作ります。基点の木が無いレビューでは `None` を返します。`before_diagrams` と `review_diagrams` を読みません |
+| `before_diagrams.before_diagrams` | `BeforeTree` から、変更後の各図に対応する変更前の図か、無い理由（`BeforeResult`）を返します。`attach_before` が結果を図のモデルに持たせます。`before_tree`、`diagram`、`diagram_diff`、`diagram_json`、`identifiers`、`index`、`roots`、`side` を読み、`review_diagrams` は読みません。組み立ての根は `review_diagrams` が持ちます |
+| `diagram_mermaid.to_mermaid` | 図のモデルを Mermaid の `sequenceDiagram` に変換します。`diagram_diff` を読みます |
+| `diagram_select.select_diagrams` | 図のモデルから、根や判断の箇所で図を選びます。`region_ids` が図に載る判断の箇所の番号を引きます。描画（`diagram_mermaid`）と `diagram_diff` を読みません |
+| `diagram_diff.mark_differences` | 変更前と変更後の矢印の列を突き合わせ、対比の印（`PlainMark`、`Retargeted`）を付けます。図のモデルの構築（`diagram`）を読みません |
+| `side.Side` | 図や変更の集合をどちらの木から取るかを表します。一つの木を指す型（`TreeSide`）も持ちます |
+| `identifiers.identities_of` | `DiagramSet` と木の側（`side.TreeSide`）から、図ごとに図と識別子（`DiagramIdentities`）を対にした `IdentifiedDiagram` の並びを返します。図の本体は `IdentifiedDiagram.diagram` の一か所だけが持ち、図以外の項目（`DiagramSetNotes`）は運びません。導出はここだけが持ちます。依存は `review_diagrams` → `diagram_json`、`identifiers`、`before_tree` と `before_diagrams`、`before_diagrams` → `before_tree`、`before_diagrams` → `diagram_json`、`before_diagrams` → `identifiers`、`diagram_json` → `identifiers` → `diagram` の一方向で、`diagram` は識別子を知りません |
+| `model_json.model_to_json` | 図のモデルを JSON の辞書にします。対比の印の書き出しはここだけが持ちます |
 | `review_diagrams.build_model` | レビューから図のモデルまでを通します。CLI の `jigane sequence` が使います |
 
 ## 他のモジュールとの関係
@@ -46,6 +55,12 @@
 ### なぜ `jigane sequence` と `jigane diagrams` は図の組み立てを共有するのですか
 
 `jigane sequence` は一つの入口や判断の箇所に絞った図を出し、`jigane diagrams` は概要の画面に出す全体をまとめて出します。どちらも図の組み立ては `review_diagrams` を共有します。二つの副コマンドが同じ図を出すことを、組み立てを一つにすることで保つためです。
+
+### なぜ図と矢印に識別子の欄があり、並びの位置から作らないのですか
+
+図のモデルの JSON は、図に `id`、その矢印それぞれに `id` を持ちます。呼び出す側が SVG の矢印とモデルの矢印を並びの順で対応付けると、矢印の増減や並べ替えで対応がずれるため、中身から決まる値を欄にしました。値は SHA-256 の先頭 12 桁の 16 進数に接頭辞を付けた文字列です。図は `d_`、矢印は `a_` で始まります。
+
+根の識別子 `root_id`（接頭辞 `r_`）は、図の直下の欄で、根の修飾名と、根の宣言の種類と仮引数のラベルと型の並び（同名で引数の違う多重定義を区別するシグネチャ）から決まり、側を含めません。変更前と変更後の図で同じ値になり、多重定義の根では別の値になります。図の `id` は、この `root_id` と、図を作った木の側（`before` か `after`）から決まります。矢印の `id` は、図の `id`、送り手と受け手の修飾名、呼び出しの名前、呼び出しの式のパスと行、同じ図の中で中身の同じ矢印の出現の順（0 始まり）から決まります。深さと状態は含めません。同じ入力から作り直すと同じ値になり、矢印の並びを入れ替えても各矢印の値は変わりません。矢印の識別子は呼び出しの行を材料に含めるので、呼び出しの行が動けばその矢印の値は変わります（作り直しで同じ値になる約束と並ぶ契約です）。変更前の図は同じ根の変更後の図と別の `id` を持ち、`before` の欄の下に入ります。
 
 ### なぜ差分のレビューとファイルのレビューで、索引にするファイルが違うのですか
 

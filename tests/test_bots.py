@@ -266,3 +266,39 @@ def test_v2_comments_drop_the_recountable_unavailable_count() -> None:
     assert "unavailable" not in bots.dump_bot_comments(stored.analysis())
     # 入力は書き換えない
     assert old["unavailable"] == 5
+
+
+def test_analyze_never_passes_a_dash_value_to_git(
+    repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> str:
+        seen.append(args)
+        return ""
+
+    monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
+    evil = "--upload-pack=touch /tmp/x"
+    analysis = bots.analyze(
+        repo["cache"], repo["head"], [comment_for(repo, original_commit_id=evil)]
+    )
+    assert [j.judged for j in analysis.judgments] == [False]
+    assert seen == []
+
+
+def test_analyze_puts_the_sha_after_end_of_options(
+    repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str]) -> str:
+        seen.append(args)
+        return "x = 1\n"
+
+    monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
+    bots.analyze(repo["cache"], repo["head"], [comment_for(repo)])
+    sha = repo["sha"]
+    assert seen == [
+        ["git", "fetch", "--end-of-options", "origin", sha],
+        ["git", "show", "--end-of-options", f"{sha}:a.py"],
+    ]

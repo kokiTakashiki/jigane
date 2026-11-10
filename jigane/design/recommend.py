@@ -2,7 +2,7 @@
 
 LLM は呼ばない。同じ設計書と同じ作業ディレクトリからは、同じ候補と同じ照合の表が出る。
 言語アダプタの無いファイルは索引に入らないので、型と呼び出しの引き当てには現れない。
-パスの名指しだけは、試験を除く全てのファイルを引き当てる。
+パスの名指しだけは、試験を含む全てのファイルを引き当てる。試験のパスは候補に入れない。
 """
 
 import ast
@@ -14,19 +14,25 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import ClassVar, assert_never
 
+from jigane.design.constants import (
+    names_holding_stored_file,
+    stored_file_names,
+)
 from jigane.design.mentions import (
     PROSE_VIAS,
-    STORED_FILE_SUFFIXES,
     Mention,
     MentionKind,
     extract_mentions,
     section_key,
 )
 from jigane.design.parse import DesignDocument
+from jigane.design.submodule_status import SubmoduleNote, submodule_notes
 from jigane.git.tree_files import read_tree_bytes, work_files
 from jigane.judgment_map.classification import matches_any
 from jigane.judgment_map.configuration import load_config
 from jigane.languages import registry
+from jigane.languages.base import StringConstant, StringConstantReader
+from jigane.languages.python_ast import read_python
 from jigane.sequence.index import Member, TypeInfo, TypeKey
 from jigane.sequence.indexes import Indexes
 from jigane.sequence.resolve import Resolved, extract_calls
@@ -273,11 +279,11 @@ class Recommendation:
     # 上限で切った候補の数
     omitted: int
     matches: tuple[Match, ...]
+    # 照合の読み先に穴や食い違いがあるサブモジュール。無ければ空
+    submodules: tuple[SubmoduleNote, ...] = ()
 
 
-_ADD_PARSER = re.compile(r"""add_parser\(\s*["']([^"']+)["']""")
-_CONSTANT_DECLARATION = re.compile(r"""^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=\s*["']""")
-_CONSTANT_VALUE = re.compile(r"""^\s*[A-Za-z_]\w*\s*(?::[^=]+)?=\s*["']([^"']+)["']""")
+_ADD_PARSER = re.compile(r"""add_parser\(\s*(?:["']([^"']+)["']|([A-Za-z_]\w*)\s*[,)])""")
 _TEXT_LIMIT_BYTES = 1_000_000
 # 設計書に付属する検証用の一時スクリプトなど、製品ではないソースの置き場
 _NON_PRODUCT_DIRECTORY = "docs"
@@ -322,10 +328,13 @@ class _World:
         self.root = root
         adapters = registry.adapters()
         excluded = load_config(root).exclude
-        # 試験のファイルは、設計書が名指す先にも、呼び手の一段のたどりにも入れない
+        # 試験のファイルは、索引、型や関数などの引き当て、たどり、候補に入れない
         work = work_files(root, include_untracked=True)
         files, self._untracked = work.files, work.untracked
-        self.paths = tuple(p for p in sorted(files) if not registry.is_test_path(p, adapters))
+        # パスの名指しだけは試験も含めた all_paths から引き当て、候補にはしない
+        self.all_paths = tuple(sorted(files))
+        self.test_paths = frozenset(p for p in files if registry.is_test_path(p, adapters))
+        self.paths = tuple(p for p in self.all_paths if p not in self.test_paths)
         # 索引と引き当ての対象にするソース。設定の除外と、docs の下のソースは製品ではない
         self.source_paths = tuple(
             p
@@ -337,6 +346,7 @@ class _World:
         self._indexes: Indexes | None = None
         self._edges: _Edges | None = None
         self._texts: dict[str, str] = {}
+        self._constants: dict[str, tuple[StringConstant, ...]] = {}
 
     def is_untracked(self, path: str) -> bool:
         return path in self._untracked
@@ -346,6 +356,17 @@ class _World:
         if self._indexes is None:
             self._indexes = Indexes(self.root, self.source_paths)
         return self._indexes
+
+    def constants(self, path: str) -> tuple[StringConstant, ...]:
+        """ファイル直下の文字列定数。読む口を持たない言語のファイルは空。"""
+        if path not in self._constants:
+            adapter = registry.adapter_for(path)
+            self._constants[path] = (
+                tuple(adapter.string_constants(self.text(path)))
+                if isinstance(adapter, StringConstantReader)
+                else ()
+            )
+        return self._constants[path]
 
     def text(self, path: str) -> str:
         if path not in self._texts:
@@ -421,7 +442,12 @@ def recommend(root: Path, document: DesignDocument, limit: int = DEFAULT_LIMIT) 
         _credit(world, mention, locations, declarations, tallies)
 
     candidates = _ranked(world, tallies)
-    return Recommendation(candidates[:limit], max(0, len(candidates) - limit), tuple(matches))
+    return Recommendation(
+        candidates[:limit],
+        max(0, len(candidates) - limit),
+        tuple(matches),
+        submodule_notes(world.root),
+    )
 
 
 def _locate(
@@ -453,7 +479,7 @@ def _locate(
         case MentionKind.OPTION:
             scoped = commands_by_section.get(section_key(mention), [])
             locations = _quoted_in(
-                world, mention.name, scoped or _cli_paths(world), LocationKind.OPTION
+                world, mention.name, scoped or _parser_paths(world), LocationKind.OPTION
             )
         case MentionKind.STORED_FILE:
             locations = _quoted_in(
@@ -475,7 +501,13 @@ def _credit(
 ) -> None:
     """引き当てた名指しの理由を、ファイルごとの集計に足す。"""
     reason = NamedReason(mention)
-    for path in sorted({loc.path for loc in locations if not loc.path.endswith("/")}):
+    # 試験のパスは「ある」と示すだけで、突き合わせる候補にはしない
+    credited = {
+        loc.path
+        for loc in locations
+        if not loc.path.endswith("/") and loc.path not in world.test_paths
+    }
+    for path in sorted(credited):
         tallies[path].add(reason)
     if mention.kind is MentionKind.STORED_FILE:
         accessors = _stored_accessors(world, mention.name, locations)
@@ -498,9 +530,18 @@ def _ranked(world: _World, tallies: dict[str, _Tally]) -> tuple[Candidate, ...]:
         Candidate(path, tally.reasons(), world.is_untracked(path))
         for path, tally in tallies.items()
     ]
-    # 名指した節の数の多い順、そのうえで直接の引き当て、一段、二段のたどりの順、同点はパスの順
+    # 直接引き当たったソース（言語アダプタのあるファイル）を先に置く。残りの枠は、名指した節の数の
+    # 多い順、同数なら直接、一段、二段のたどりの順、さらに同じならパスの順。言語アダプタの無い
+    # ファイルは、パスの名指しだけで引き当たるため、節の数で上限の枠を埋めやすい
     rank = {CandidateKind.DIRECT: 0, CandidateKind.ONE_STEP: 1, CandidateKind.TWO_STEP: 2}
-    built.sort(key=lambda c: (-c.section_count, rank[c.kind], c.path))
+    built.sort(
+        key=lambda c: (
+            not (c.kind is CandidateKind.DIRECT and registry.adapter_for(c.path) is not None),
+            -c.section_count,
+            rank[c.kind],
+            c.path,
+        )
+    )
     return tuple(built)
 
 
@@ -514,7 +555,8 @@ def _class_like_types(world: _World, name: str) -> list[TypeInfo]:
         info
         for index in world.indexes.indexes
         for info in index.types.values()
-        if _suffix_match(info.qualified_name, name) and info.kind != "module"
+        if _suffix_match(info.qualified_name, name)
+        and LocationKind(info.kind) is not LocationKind.MODULE
     ]
 
 
@@ -573,7 +615,7 @@ def _bare_members(
                 m
                 for index in world.indexes.indexes
                 for info in index.types.values()
-                if info.kind == "module"
+                if LocationKind(info.kind) is LocationKind.MODULE
                 for m in info.members.get(name, [])
             ]
     found.sort(key=lambda m: (m.path, m.line, m.qualified_name))
@@ -681,10 +723,10 @@ def _match_bare_members(
 
 
 def _member_key(owner: TypeInfo | None, member: Member) -> _LocationKey:
-    at_module_level = owner is not None and owner.kind == "module"
+    at_module_level = owner is not None and LocationKind(owner.kind) is LocationKind.MODULE
     member_kind = (
         LocationKind.FUNCTION
-        if at_module_level and member.kind == "method"
+        if at_module_level and LocationKind(member.kind) is LocationKind.METHOD
         else LocationKind(member.kind)
     )
     return (member.path, member.line, member.qualified_name, member_kind)
@@ -698,49 +740,59 @@ def _existing_paths(world: _World, name: str) -> list[Location]:
     if "/" not in normalized:
         return [
             Location(p, None, "ファイル", LocationKind.FILE, world.is_untracked(p))
-            for p in world.paths
+            for p in world.all_paths
             if PurePosixPath(p).name == normalized
         ]
-    if normalized in world.paths:
+    if normalized in world.all_paths:
         return [
             Location(
                 normalized, None, "ファイル", LocationKind.FILE, world.is_untracked(normalized)
             )
         ]
     # 設計書は、パッケージの根からの相対で書くことがある。末尾が一致するファイルを拾う
-    tails = [p for p in world.paths if p.endswith("/" + normalized)]
+    tails = [p for p in world.all_paths if p.endswith("/" + normalized)]
     if tails:
         return [
             Location(p, None, "ファイル", LocationKind.FILE, world.is_untracked(p)) for p in tails
         ]
     prefix = normalized.rstrip("/") + "/"
-    if any(p.startswith(prefix) for p in world.paths):
+    if any(p.startswith(prefix) for p in world.all_paths):
         # ディレクトリは引き当たったと数えるが、中のファイルを全て候補にはしない
         return [Location(prefix, None, "ディレクトリ", LocationKind.DIRECTORY)]
     return []
 
 
-def _cli_paths(world: _World) -> list[str]:
-    return [
-        p for p in world.source_paths if "cli" in PurePosixPath(p).parts[:-1] and p.endswith(".py")
-    ]
+def _parser_paths(world: _World) -> list[str]:
+    """副コマンドの登録（add_parser）を持つソース。置き場の名前には頼らない。"""
+    return [p for p in world.source_paths if p.endswith(".py") and "add_parser" in world.text(p)]
 
 
 def _commands(world: _World) -> dict[str, list[Location]]:
-    """CLI の副コマンドの名前から、その登録（add_parser）の位置。"""
+    """CLI の副コマンドの名前から、その登録（add_parser）の位置。
+
+    名前は文字列で渡すほか、同じファイルの最上位の定数でも渡せる。位置は名前を書いた行にする。
+    """
     found: dict[str, list[Location]] = defaultdict(list)
-    for path in _cli_paths(world):
-        for number, text in enumerate(world.text(path).split("\n"), start=1):
-            for match in _ADD_PARSER.finditer(text):
-                found[match[1]].append(
-                    Location(
-                        path,
-                        number,
-                        f"副コマンド {match[1]}",
-                        LocationKind.SUBCOMMAND,
-                        world.is_untracked(path),
-                    )
-                )
+    for path in _parser_paths(world):
+        text = world.text(path)
+        constants = {c.name: c for c in world.constants(path)}
+        for match in _ADD_PARSER.finditer(text):
+            if match[1] is not None:
+                name, line = match[1], text.count("\n", 0, match.start(1)) + 1
+            elif match[2] in constants:
+                name, line = constants[match[2]].value, constants[match[2]].line
+            else:
+                # 別のファイルの定数や組み立てた文字列は、このファイルだけでは名前が決まらない
+                continue
+            location = Location(
+                path,
+                line,
+                f"副コマンド {name}",
+                LocationKind.SUBCOMMAND,
+                world.is_untracked(path),
+            )
+            if location not in found[name]:
+                found[name].append(location)
     return found
 
 
@@ -779,17 +831,12 @@ def _quoted_in(
 
 
 def _constant_names(world: _World, name: str, paths: Iterable[str]) -> dict[str, set[str]]:
-    """保存物の名前を持つ全ての行から、`NAME = "..."` の形の定数の宣言を探す。パスごとの定数名。"""
-    pattern = _quoted_pattern(name, prefixed=True)
-    found: dict[str, set[str]] = defaultdict(set)
+    """保存物の名前を値に持つ定数の宣言を探す。パスごとの定数名。"""
+    found: dict[str, set[str]] = {}
     for path in sorted(set(paths)):
-        if not path.endswith(".py"):
-            # 参照の判定が Python の import に依るので、他の言語の定数は追わない
-            continue
-        for text in world.text(path).split("\n"):
-            declared = _CONSTANT_DECLARATION.match(text)
-            if declared and pattern.search(text):
-                found[path].add(declared[1])
+        names = names_holding_stored_file(world.constants(path), name)
+        if names:
+            found[path] = names
     return found
 
 
@@ -797,15 +844,7 @@ def _stored_constant_values(world: _World) -> frozenset[str]:
     """ソースが `NAME = "x.json"` の形の定数として持つ保存物の名前（ディレクトリを除く）。"""
     values: set[str] = set()
     for path in world.source_paths:
-        if not path.endswith(".py"):
-            # 定数の宣言を読めるのは Python だけ（_constant_names と同じ）
-            continue
-        for text in world.text(path).split("\n"):
-            declared = _CONSTANT_VALUE.match(text)
-            if declared:
-                name = declared[1].rsplit("/", 1)[-1]
-                if name.rsplit(".", 1)[-1] in STORED_FILE_SUFFIXES:
-                    values.add(name)
+        values |= stored_file_names(world.constants(path))
     return frozenset(values)
 
 
@@ -932,32 +971,33 @@ def _writes(function: ast.AST) -> bool:
 
 def _file_accessors(path: str, text: str, constants: Mapping[str, set[str]]) -> list[_Accessor]:
     """一つのファイルの、定数を参照する関数。読めないファイルは空で、途中までの結果も返さない。"""
-    try:
-        tree = ast.parse(text)
-        found: list[_Accessor] = []
-        functions = [
-            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-        ]
-        for defining, names in constants.items():
-            module = _module_name(defining)
-            for constant in sorted(names):
-                direct_names, modules = _import_forms(tree, path, module, constant)
-                for function in functions:
-                    if _references(function, constant, direct_names, modules):
-                        # 呼び出しの辺の鍵は、デコレータの有無で宣言の行が変わりうるので両方を引く
-                        lines = {function.lineno, *(d.lineno for d in function.decorator_list)}
-                        writes = _writes(function)
-                        found += [
-                            _Accessor(path, function.name, line, writes) for line in sorted(lines)
-                        ]
-    except (SyntaxError, RecursionError, MemoryError, ValueError):
-        # 構文の解けないファイルは、参照の有無を言えない。
-        # 入れ子の深い式は、parse でも、後で式を文字列に戻す ast.unparse（_references と
-        # _writes）でも RecursionError、巨大な入力は MemoryError、
-        # NUL 文字は ValueError で落ちる
+    found = read_python(text, lambda tree: _accessors_in(path, tree, constants))
+    if found is None:
+        # 構文の解けないファイルは、参照の有無を言えない
         return []
-    else:
-        return found
+    return found
+
+
+def _accessors_in(
+    path: str, tree: ast.Module, constants: Mapping[str, set[str]]
+) -> list[_Accessor]:
+    found: list[_Accessor] = []
+    functions = [
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    for defining, names in constants.items():
+        module = _module_name(defining)
+        for constant in sorted(names):
+            direct_names, modules = _import_forms(tree, path, module, constant)
+            for function in functions:
+                if _references(function, constant, direct_names, modules):
+                    # 呼び出しの辺の鍵は、デコレータの有無で宣言の行が変わりうるので両方を引く
+                    lines = {function.lineno, *(d.lineno for d in function.decorator_list)}
+                    writes = _writes(function)
+                    found += [
+                        _Accessor(path, function.name, line, writes) for line in sorted(lines)
+                    ]
+    return found
 
 
 def _stored_accessors(world: _World, name: str, locations: list[Location]) -> list[_Accessor]:

@@ -4,9 +4,10 @@ from typing import Any
 from review_fakes import changed_segment
 
 from jigane.languages.python import PythonAdapter
-from jigane.sequence.diagram import UNRESOLVED_TARGET_LIMIT, build_diagrams, to_mermaid
+from jigane.sequence.diagram import UNRESOLVED_TARGET_LIMIT, DiagramInputs
+from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.index import build_index
-from jigane.sequence.review_diagrams import sequences_of
+from jigane.sequence.review_diagrams import build_diagrams, sequences_of
 from jigane.sequence.roots import changed_members, select_roots
 
 LIB = """
@@ -72,7 +73,7 @@ def _model(tmp_path: Path, names: list[str]) -> dict[str, Any]:
             )
         )
     changed = changed_members(index, segments, adapter, include_tests=False)
-    return build_diagrams(index, select_roots(index, changed, adapter), [])
+    return build_diagrams(DiagramInputs(index, select_roots(index, changed, adapter), []))
 
 
 def _by_root(model: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from fnmatch import fnmatchcase
@@ -15,6 +16,7 @@ from jigane.languages.data_places import (
     PLUGIN_QUERIES_PARTS,
     descend,
 )
+from jigane.languages.enabled import ENABLED_FILE, EnabledFileError, load_enabled
 from jigane.languages.java import JavaAdapter
 from jigane.languages.plugin import (
     PLUGIN_API_VERSION,
@@ -23,18 +25,15 @@ from jigane.languages.plugin import (
     GrammarSpec,
     LanguagePlugin,
 )
-from jigane.languages.plugins import (
-    ENABLED_FILE,
-    ENTRY_POINT_GROUP,
-    EnabledFileError,
+from jigane.languages.plugins import ENTRY_POINT_GROUP, discover
+from jigane.languages.python import PythonAdapter
+from jigane.languages.states import (
+    LanguageGrammarAbsent,
     LanguageReady,
     LanguageState,
     LanguageUnavailable,
     ReasonKind,
-    discover,
-    load_enabled,
 )
-from jigane.languages.python import PythonAdapter
 from jigane.languages.swift import SwiftAdapter
 from jigane.storage.store import data_home
 from jigane.text.terminal import sanitize_text
@@ -110,29 +109,40 @@ def discovered_plugins() -> list[LanguagePlugin]:
 def _check_grammars(states: tuple[LanguageState, ...]) -> tuple[LanguageState, ...]:
     """追加の言語の文法を、その言語の宣言と照合する。誤りは言語の状態に載せる。"""
     external = {id(plugin): plugin for plugin in _external_plugins(states)}
+    builtin_ids = {id(plugin) for plugin in _plugins}
     root = grammars.cache_root()
     checked: list[LanguageState] = []
     for state in states:
         plugin = external.get(id(state.plugin)) if isinstance(state, LanguageReady) else None
         if plugin is None:
-            # 組み込みの言語は、読み込みのときに組み込みの記録で照合される
+            if isinstance(state, LanguageReady) and id(state.plugin) in builtin_ids:
+                # sha256 の照合は読み込みのときに行う。ここは文法が置き場に在るかだけを見る
+                detail = grammars.builtin_absence(root, state.plugin.adapter.grammar)
+                if detail is not None:
+                    checked.append(LanguageGrammarAbsent(state.plugin, detail))
+                    continue
             checked.append(state)
             continue
         target = grammars.external_target(plugin)
         try:
             target.verify(root)
         except grammars.GrammarError as error:
-            origin = plugin.origin
-            owner = origin if isinstance(origin, Distribution) else None
-            checked.append(
-                LanguageUnavailable(
-                    plugin.adapter.name,
-                    ReasonKind.GRAMMAR_ERROR,
-                    str(error),
-                    None if owner is None else owner.name,
-                    None if owner is None else owner.version,
+            if grammars.is_absent(root, target):
+                checked.append(LanguageGrammarAbsent(plugin, str(error)))
+            else:
+                origin = plugin.origin
+                owner = origin if isinstance(origin, Distribution) else None
+                distribution = None if owner is None else owner.name
+                version = None if owner is None else owner.version
+                checked.append(
+                    LanguageUnavailable(
+                        plugin.adapter.name,
+                        ReasonKind.GRAMMAR_ERROR,
+                        str(error),
+                        distribution,
+                        version,
+                    )
                 )
-            )
         else:
             bound = replace(plugin, adapter=_GrammarBound(plugin.adapter, target))  # type: ignore[arg-type]
             checked.append(LanguageReady(bound))
@@ -154,27 +164,61 @@ def set_states(value: tuple[LanguageState, ...] | None) -> None:
 
 
 def require_ready() -> None:
-    """組み込みの文法が無い、または有効にした追加の言語に使えないものがあれば止める。起動のときに副コマンドの前で呼ぶ。"""
+    """どの言語の文法も無い、文法が合わない、または有効にした追加の言語に使えないものがあれば止める。
+
+    一部の言語の文法が無いだけなら止めず、無い言語の名前を標準エラーに知らせる。
+    起動のときに副コマンドの前で呼ぶ。
+    """
     root = grammars.cache_root()
-    for plugin in _plugins:
-        grammars.require_present(root, plugin.adapter.grammar)
-    failed = [state for state in states() if isinstance(state, LanguageUnavailable)]
-    if not failed:
-        return
-    lines = [
-        f"言語 {state.name} を使えません（{state.reason_kind}）: {state.detail}\n"
-        f"外す手順: jigane languages disable {state.name}"
-        for state in failed
+    current = states()
+    builtin_ids = {id(plugin) for plugin in _plugins}
+    has_external_ready = any(
+        isinstance(state, LanguageReady) and id(state.plugin) not in builtin_ids
+        for state in current
+    )
+    present = [
+        plugin
+        for plugin in _plugins
+        if not grammars.is_absent(root, grammars.BuiltinGrammar(plugin.adapter.grammar))
     ]
-    # 名前も詳細もプラグインのコードが決めた文字列で、端末へ出る前に制御文字を除く
-    raise LanguagePluginUnavailableError(sanitize_text("\n".join(lines)))
+    for plugin in present:
+        # 共有ライブラリが複数あるなど、無い以外の誤りはここで止まる
+        grammars.require_present(root, plugin.adapter.grammar)
+    if not present and not has_external_ready:
+        # 選べる言語のどれにも文法が無い。案内は組み込みの先頭の言語のものを出す
+        grammars.require_present(root, _plugins[0].adapter.grammar)
+    failed = [state for state in current if isinstance(state, LanguageUnavailable)]
+    if failed:
+        lines = [
+            f"言語 {state.name} を使えません（{state.reason_kind}）: {state.detail}\n"
+            f"外す手順: jigane languages disable {state.name}"
+            for state in failed
+        ]
+        # 名前も詳細もプラグインのコードが決めた文字列で、端末へ出る前に制御文字を除く
+        raise LanguagePluginUnavailableError(sanitize_text("\n".join(lines)))
+    missing = [state.name for state in current if isinstance(state, LanguageGrammarAbsent)]
+    if missing:
+        names = sanitize_text(", ".join(missing))
+        sys.stderr.write(
+            f"jigane: 文法を取得していない言語: {names}"
+            "（そのファイルは対応外の言語として扱います）\n"
+        )
 
 
 def _all_plugins() -> list[LanguagePlugin]:
-    # 組み込みが先頭に並ぶ。拡張子の重なりは先に並んだ組み込みが勝つ
-    ready = [state.plugin for state in states() if isinstance(state, LanguageReady)]
+    # 組み込みが先頭に並ぶ。拡張子の重なりは先に並んだ組み込みが勝つ。文法の無い言語は外す
+    current = states()
+    absent = {
+        state.name
+        for state in current
+        if isinstance(state, (LanguageGrammarAbsent, LanguageUnavailable))
+    }
+    ready = [state.plugin for state in current if isinstance(state, LanguageReady)]
     builtin_ids = {id(plugin) for plugin in _plugins}
-    return [*_plugins, *(plugin for plugin in ready if id(plugin) not in builtin_ids)]
+    return [
+        *(plugin for plugin in _plugins if plugin.adapter.name not in absent),
+        *(plugin for plugin in ready if id(plugin) not in builtin_ids),
+    ]
 
 
 def builtin_plugins() -> list[LanguagePlugin]:
@@ -183,6 +227,19 @@ def builtin_plugins() -> list[LanguagePlugin]:
 
 def adapters() -> list[LanguageAdapter]:
     return [plugin.adapter for plugin in _all_plugins()]
+
+
+def selectable_names() -> frozenset[str]:
+    """選べる言語（組み込みと有効にした追加の言語）のうち、使える言語と文法が無い言語の名前。
+
+    文法が無い言語は `adapters()` に無いが、目録や queries の置き場は持つ。
+    本体の内側の口で、プラグインには出さない。
+    """
+    return frozenset(
+        state.plugin.adapter.name if isinstance(state, LanguageReady) else state.name
+        for state in states()
+        if isinstance(state, (LanguageReady, LanguageGrammarAbsent))
+    )
 
 
 def label_for(adapter_name: str) -> str:
@@ -232,11 +289,32 @@ def grammar_target_named(grammar: str) -> grammars.GrammarTarget:
     return grammars.BuiltinGrammar(grammar)
 
 
+def _suffix_of(path: str) -> str:
+    return PurePosixPath(path.replace("\\", "/")).suffix.lower()
+
+
 def adapter_for(path: str) -> LanguageAdapter | None:
-    suffix = PurePosixPath(path.replace("\\", "/")).suffix.lower()
+    suffix = _suffix_of(path)
     for plugin in _all_plugins():
         if suffix in plugin.adapter.suffixes:
             return plugin.adapter
+    return None
+
+
+def language_for_suffix(path: str) -> LanguageReady | LanguageGrammarAbsent | None:
+    """拡張子から選べる言語（組み込みと有効にした追加の言語）の状態を引く。
+
+    当たらない、有効でない、または使えない言語（`LanguageUnavailable`）なら None。
+    `states()` を読むだけで、文法の確認は呼び直さない。本体の内側の口で、プラグインには出さない。
+    """
+    suffix = _suffix_of(path)
+    for state in states():
+        if isinstance(state, (LanguageReady, LanguageGrammarAbsent)):
+            if suffix in state.plugin.adapter.suffixes:
+                return state
+        else:
+            # 使えない言語は起動が先に止めるので拡張子を引かない。有効にしていない言語は選べない
+            continue
     return None
 
 

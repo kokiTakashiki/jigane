@@ -10,7 +10,7 @@ from jigane.groups.viewpoints import (
     Viewpoint,
     design_principles,
 )
-from jigane.reviews.lifecycle import scope_files
+from jigane.reviews.catalog import scope_files
 from jigane.skills import adversarial, macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.macro import PolicySections

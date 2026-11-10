@@ -4,6 +4,7 @@ import ast
 from collections.abc import Iterator
 
 from jigane.languages.base import ComparisonKind, StringComparison
+from jigane.languages.python_ast import read_python
 
 _SEQUENCE_NODES = (ast.Tuple, ast.Set, ast.List)
 _SET_CONSTRUCTORS = frozenset({"frozenset", "set", "tuple", "list"})
@@ -116,11 +117,8 @@ def _walk_comparisons(tree: ast.Module, path: str) -> list[StringComparison]:
 
 def string_comparisons(source: str, path: str) -> list[StringComparison]:
     """ファイルの文字列との比較を、行の順に返す。構文として読めないファイルは空。"""
-    try:
-        return _walk_comparisons(ast.parse(source), path)
-    except (SyntaxError, RecursionError, MemoryError, ValueError):
-        # 読めないファイルの比較は拾えない。表は他のファイルで成り立つので、止めない。
-        # 入れ子の深い式は、parse でも、後で式を文字列に戻す ast.unparse でも RecursionError、
-        # 巨大な入力は MemoryError、NUL 文字は ValueError で落ちる。
+    found = read_python(source, lambda tree: _walk_comparisons(tree, path))
+    if found is None:
         # 途中まで拾った比較は返さず、そのファイルを丸ごと飛ばす
         return []
+    return found

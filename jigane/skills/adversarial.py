@@ -9,7 +9,7 @@ from functools import cache
 from importlib import resources
 from pathlib import Path
 from string import Template
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -17,6 +17,7 @@ from jigane.findings.records import Adjudication, Verdict
 from jigane.groups import viewpoints
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
+from jigane.llm_runs.claude_inputs import Role
 from jigane.llm_runs.claude_schema import json_schema_of
 from jigane.llm_runs.finding_model import KEY_DISCLOSED_AT
 from jigane.llm_runs.launch_failure import (
@@ -117,8 +118,8 @@ class VerificationOutcome:
     findings: tuple[VerifiedCandidate, ...]
     invocations: tuple[RoleInvocationRecord, ...] = ()
     failed_splits: int = 0
-    # 入力の見積もりで起動しなかった役の記録（BudgetStop.as_record）
-    budget_stops: tuple[dict[str, Any], ...] = ()
+    # 入力の見積もりで起動しなかった役の記録（StoredBudgetStop）
+    budget_stops: tuple[input_budget.StoredBudgetStop, ...] = ()
     # 失敗の記録。run_state の launch_failures へそのまま入る
     failures: tuple[StoredFailure, ...] = ()
     # 判定の付かなかった候補。失敗した分割の全候補と、欠けたまま残った候補。
@@ -142,16 +143,23 @@ class SplitVerification:
     unverified: tuple[UnverifiedCandidate, ...] = ()
 
 
+# 裁定役の名前。起動の記録の role に書く値で、プロンプトの名前は形ごとに別（Role.JUDGE_*）
+_JUDGE_ROLE = "judge"
+
+# 検証の形。反証の形か代案の形のどちらか
+type Form = Literal[Role.REBUTTAL, Role.ALTERNATIVE]
+
+
 def role_schemas() -> dict[str, dict[str, Any]]:
     return {role: json_schema_of(role_output_model(item)) for role, item in _ROLE_ITEMS.items()}
 
 
 _ROLE_ITEMS: dict[str, type[RoleItem]] = {
-    "rebuttal": RebuttalItem,
-    "alternative": AlternativeItem,
-    "defense": DefenseItem,
-    "judge_rebuttal": JudgeRebuttalItem,
-    "judge_alternative": JudgeAlternativeItem,
+    Role.REBUTTAL: RebuttalItem,
+    Role.ALTERNATIVE: AlternativeItem,
+    Role.DEFENSE: DefenseItem,
+    Role.JUDGE_REBUTTAL: JudgeRebuttalItem,
+    Role.JUDGE_ALTERNATIVE: JudgeAlternativeItem,
 }
 
 
@@ -161,12 +169,13 @@ def uses_alternative_form(candidate: dict[str, Any]) -> bool:
 
 def split_candidates(
     candidates: list[dict[str, Any]],
-) -> list[tuple[str, list[dict[str, Any]]]]:
-    splits: list[tuple[str, list[dict[str, Any]]]] = []
-    for form, selected in (
-        ("rebuttal", [c for c in candidates if not uses_alternative_form(c)]),
-        ("alternative", [c for c in candidates if uses_alternative_form(c)]),
-    ):
+) -> list[tuple[Form, list[dict[str, Any]]]]:
+    splits: list[tuple[Form, list[dict[str, Any]]]] = []
+    by_form: list[tuple[Form, list[dict[str, Any]]]] = [
+        (Role.REBUTTAL, [c for c in candidates if not uses_alternative_form(c)]),
+        (Role.ALTERNATIVE, [c for c in candidates if uses_alternative_form(c)]),
+    ]
+    for form, selected in by_form:
         splits.extend(
             (form, selected[start : start + MAX_CANDIDATES_PER_INVOCATION])
             for start in range(0, len(selected), MAX_CANDIDATES_PER_INVOCATION)
@@ -233,18 +242,22 @@ class _SplitStoppedError(Exception):
     """入力の見積もりで起動しなかった分割。起動の失敗ではないので failures には残さない。"""
 
 
-def _roles_for(form: str) -> list[tuple[str, str, tuple[str, ...]]]:
+def _roles_for(form: Form) -> list[tuple[str, str, tuple[str, ...]]]:
     # (役の名前, プロンプトの名前, 渡す前の役の出力)。出力の名前は
     # プロンプトの置換名と同じにしてある。
-    if form == "rebuttal":
+    if form is Role.REBUTTAL:
         return [
-            ("rebuttal", "rebuttal", ()),
-            ("judge", "judge_rebuttal", ("rebuttal",)),
+            (Role.REBUTTAL, Role.REBUTTAL, ()),
+            (_JUDGE_ROLE, Role.JUDGE_REBUTTAL, (Role.REBUTTAL,)),
         ]
     return [
-        ("alternative", "alternative", ()),
-        ("defense", "defense", ("alternative",)),
-        ("judge", "judge_alternative", ("alternative", "defense")),
+        (Role.ALTERNATIVE, Role.ALTERNATIVE, ()),
+        (Role.DEFENSE, Role.DEFENSE, (Role.ALTERNATIVE,)),
+        (
+            _JUDGE_ROLE,
+            Role.JUDGE_ALTERNATIVE,
+            (Role.ALTERNATIVE, Role.DEFENSE),
+        ),
     ]
 
 
@@ -255,10 +268,10 @@ EXCERPT_MAX_LINES = 40
 EXCERPT_MAX_LOCATIONS = 3
 EXCERPT_MAX_CHARS = 6000
 
-_PLACEHOLDER_NAMES = {
-    "rebuttal": "challenges_json",
-    "alternative": "alternatives_json",
-    "defense": "defenses_json",
+_PLACEHOLDER_NAMES: dict[str, str] = {
+    Role.REBUTTAL: "challenges_json",
+    Role.ALTERNATIVE: "alternatives_json",
+    Role.DEFENSE: "defenses_json",
 }
 
 
@@ -372,7 +385,7 @@ class _Split:
     """検証の分割 1 件。index は分割の並びの中の位置。"""
 
     index: int
-    form: str
+    form: Form
     candidates: tuple[dict[str, Any], ...]
     group: GroupId
 
@@ -384,7 +397,7 @@ def _verify_split(
     working_directory: Path,
     settings: claude.RunSettings,
     invocations: list[RoleInvocationRecord],
-    budget_stops: list[dict[str, Any]],
+    budget_stops: list[input_budget.StoredBudgetStop],
     attempt: int = 1,
 ) -> SplitVerification:
     """分割を検証し、確定した結果を返す。
@@ -420,19 +433,19 @@ def _verify_split(
         }
         for name in previous:
             values[_PLACEHOLDER_NAMES[name]] = list(shown[name].values())
-        if prompt_name == "judge_rebuttal":
+        if prompt_name == Role.JUDGE_REBUTTAL:
             # 位置と抜粋は excerpts_json に移し、challenges_json からは外す。
             values["challenges_json"] = [
                 {k: v for k, v in item.items() if k != "checked"}
-                for item in shown["rebuttal"].values()
+                for item in shown[Role.REBUTTAL].values()
             ]
-            values["excerpts_json"] = _checked_excerpts(shown["rebuttal"], working_directory)
+            values["excerpts_json"] = _checked_excerpts(shown[Role.REBUTTAL], working_directory)
         rendered = render_prompt(prompt_name, changes, **values)
         check = input_budget.check_input_budget(
             rendered.text, settings, role=role, index=split_index
         )
         if check.stop is not None:
-            budget_stops.append(check.stop.as_record())
+            budget_stops.append(check.stop.stored())
             raise _SplitStoppedError
         invocation = settings.invocation(
             prompt=rendered.text,
@@ -507,7 +520,7 @@ def _verify_split(
 
 
 def _adjudicate_active(
-    form: str,
+    form: Form,
     outputs: dict[str, dict[int, RoleItem]],
     active: list[int],
     candidates: tuple[dict[str, Any], ...],
@@ -530,11 +543,13 @@ def _adjudicate_active(
             raise _SplitFailedError(
                 f"裁定が裁定の型に合いません: {location}: {first['msg']}",
                 claude.FailureKind.BAD_OUTPUT,
-                role="judge",
+                role=_JUDGE_ROLE,
             ) from error
         findings.append(
             VerifiedCandidate(
-                _as_nit_if_disclosed(candidates[number], adjudication, outputs["judge"][number]),
+                _as_nit_if_disclosed(
+                    candidates[number], adjudication, outputs[_JUDGE_ROLE][number]
+                ),
                 adjudication,
             )
         )
@@ -556,12 +571,12 @@ def _as_nit_if_disclosed(
     return disclosed.disclosed_as_nit({**candidate, KEY_DISCLOSED_AT: place})
 
 
-def _debate_output(form: str, outputs: dict[str, dict[int, RoleItem]], i: int) -> dict[str, Any]:
-    if form == "rebuttal":
-        rebuttal = cast("RebuttalItem", outputs["rebuttal"][i])
-        judged = cast("JudgeRebuttalItem", outputs["judge"][i])
+def _debate_output(form: Form, outputs: dict[str, dict[int, RoleItem]], i: int) -> dict[str, Any]:
+    if form is Role.REBUTTAL:
+        rebuttal = cast("RebuttalItem", outputs[Role.REBUTTAL][i])
+        judged = cast("JudgeRebuttalItem", outputs[_JUDGE_ROLE][i])
         return {
-            "kind": "rebuttal",
+            "kind": Role.REBUTTAL,
             "challenge": rebuttal.challenge,
             "recheck": [place.model_dump() for place in judged.recheck],
             "verdict": judged.verdict,
@@ -569,11 +584,11 @@ def _debate_output(form: str, outputs: dict[str, dict[int, RoleItem]], i: int) -
             "verified": judged.verified,
             "tool_claim": judged.tool_claim.model_dump(mode="json"),
         }
-    alternative = cast("AlternativeItem", outputs["alternative"][i])
-    defense = cast("DefenseItem", outputs["defense"][i])
-    judged_alternative = cast("JudgeAlternativeItem", outputs["judge"][i])
+    alternative = cast("AlternativeItem", outputs[Role.ALTERNATIVE][i])
+    defense = cast("DefenseItem", outputs[Role.DEFENSE][i])
+    judged_alternative = cast("JudgeAlternativeItem", outputs[_JUDGE_ROLE][i])
     return {
-        "kind": "alternative",
+        "kind": Role.ALTERNATIVE,
         "alternative": alternative.alternative,
         "defense": defense.defense,
         "verdict": judged_alternative.verdict,
@@ -593,7 +608,7 @@ def verify(
     invocations: list[RoleInvocationRecord] = []
     failed_splits = 0
     unverified: list[UnverifiedCandidate] = []
-    budget_stops: list[dict[str, Any]] = []
+    budget_stops: list[input_budget.StoredBudgetStop] = []
     failures: list[StoredFailure] = []
     for split_index, (form, split) in enumerate(split_candidates(candidates)):
         # 走らせ直しの契機になった失敗。次の実行の結果で扱いが決まるまで確定しない

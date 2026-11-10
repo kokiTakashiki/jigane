@@ -15,7 +15,7 @@ from jigane.commands.subcommands.estimate import input_cost_lines
 from jigane.llm_runs.claude import RunBudget
 from jigane.llm_runs.pricing import estimate_input_tokens, input_cost_usd
 from jigane.reviews.lifecycle import create_feature_review
-from jigane.skills import pipeline, security
+from jigane.skills import discovery_errors, security
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import SecurityEstimate
 from jigane.skills.mcp import NO_MCP, McpSelection
@@ -88,7 +88,7 @@ def test_security_estimate_and_pre_run_check_stop_when_a_shard_input_exceeds_hal
 
     record = estimate.input_cost_record(basis)
     lines = input_cost_lines(estimate, basis)
-    with pytest.raises(pipeline.InputBudgetError):
+    with pytest.raises(discovery_errors.InputBudgetError):
         security.run_security(assembly, settings_for(fake, max_budget_usd=limit_usd))
 
     assert record["exceeds_budget"] is True

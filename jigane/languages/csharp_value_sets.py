@@ -24,6 +24,7 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import ValueSet
+from jigane.languages.csharp_nodes import TYPE_DECLARATIONS
 from jigane.languages.value_set_core import (
     declared_name,
     field_text,
@@ -34,9 +35,6 @@ from jigane.languages.value_set_core import (
     walk_nodes,
 )
 
-_TYPE_DECLARATIONS = frozenset(
-    {"class_declaration", "struct_declaration", "record_declaration", "interface_declaration"}
-)
 _COMMENTS = frozenset({"comment"})
 _DEFINITION_NODES = frozenset({"variable_declarator", "assignment_expression"})
 _INITIALIZER_WRAPPERS = frozenset(
@@ -92,7 +90,7 @@ def _found(root: Node) -> Iterator[tuple[frozenset[str], int, str | None, bool]]
             values = value_set_of(
                 [_string(collection_element(element)) for element in elements(node)]
             )
-        elif node.type in _TYPE_DECLARATIONS:
+        elif node.type in TYPE_DECLARATIONS:
             declarations = node.child_by_field_name("body")
             if declarations is not None:
                 values = _constant_values(declarations)

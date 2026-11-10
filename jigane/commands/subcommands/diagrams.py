@@ -14,7 +14,8 @@ from jigane.figures.models import (
     TableFigure,
     TreeFigure,
 )
-from jigane.reviews.lifecycle import load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
 from jigane.skills.policy_figures import PlacedFigure, diagrams_of
 
 

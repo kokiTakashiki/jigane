@@ -2,18 +2,22 @@
 
 import sys
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import replace
 from importlib.metadata import EntryPoint, distribution, distributions
 from pathlib import Path
 
 import pytest
 
 from jigane.languages import grammars, registry
-from jigane.languages.plugins import (
-    EnabledLanguage,
+from jigane.languages.approval import LegacyApproval, read_content
+from jigane.languages.enabled import EnabledLanguage
+from jigane.languages.plugin import Distribution, LanguagePlugin
+from jigane.languages.plugins import discover
+from jigane.languages.states import (
+    LanguageGrammarAbsent,
     LanguageReady,
+    LanguageState,
     LanguageUnavailable,
-    LegacyApproval,
-    discover,
 )
 
 _MODULE_TEMPLATE = """\
@@ -142,7 +146,8 @@ def entry_points_in(tmp_path: Path) -> list[EntryPoint]:
 
 def approved(name: str, dist: str | None = None) -> EnabledLanguage:
     """site に置いた配布の今の中身を承認した記録。配布が無ければ PackageNotFoundError。"""
-    return EnabledLanguage.approve(name, distribution(dist or f"fakelang_{name}-dist"))
+    installed = distribution(dist or f"fakelang_{name}-dist")
+    return EnabledLanguage(name, installed.name, installed.version, read_content(installed))
 
 
 def legacy_record(name: str, dist: str | None = None, version: str = "1.0") -> EnabledLanguage:
@@ -163,3 +168,50 @@ def failure_of(states: Mapping[str, object], name: str) -> LanguageUnavailable:
     state = states[name]
     assert isinstance(state, LanguageUnavailable)
     return state
+
+
+def grammar_absent_detail(grammar: str) -> str:
+    """文法が置き場に無いときの理由の文。"""
+    return f"文法 {grammar} が置き場にありません。`jigane languages fetch` を走らせてください"
+
+
+def builtin_states_ready() -> tuple[LanguageState, ...]:
+    """組み込みの言語がすべて使える状態の並び。"""
+    return tuple(LanguageReady(plugin) for plugin in registry.builtin_plugins())
+
+
+def builtin_states_without_grammar(*names: str) -> tuple[LanguageState, ...]:
+    """組み込みの言語のうち、names の言語だけ文法が無い状態の並び。"""
+    return tuple(
+        LanguageGrammarAbsent(plugin, grammar_absent_detail(plugin.adapter.grammar))
+        if plugin.adapter.name in names
+        else LanguageReady(plugin)
+        for plugin in registry.builtin_plugins()
+    )
+
+
+class FakeAdapter:
+    """名前と拡張子だけを持つ言語のアダプタの偽物。"""
+
+    grammar = "python"
+    comment_node_types: frozenset[str] = frozenset()
+    import_node_types: frozenset[str] = frozenset()
+    test_directory_names: tuple[str, ...] = ()
+    test_file_patterns: tuple[str, ...] = ()
+    build_file_patterns: tuple[str, ...] = ()
+
+    def __init__(self, name: str, suffixes: frozenset[str]) -> None:
+        self.name = name
+        self.suffixes = suffixes
+
+    def declarations(self, _root_node: object, _source: bytes) -> list[object]:
+        return []
+
+
+def external_plugin(name: str, suffix: str) -> LanguagePlugin:
+    """組み込みの python を土台に、追加の言語として name と suffix の偽物を載せた plugin。"""
+    return replace(
+        registry.builtin_plugins()[0],
+        origin=Distribution(name=f"jigane-{name}", version="1.0"),
+        adapter=FakeAdapter(name, frozenset({suffix})),  # type: ignore[arg-type]
+    )

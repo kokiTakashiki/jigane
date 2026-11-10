@@ -11,13 +11,15 @@
 | `subcommands/<名前>.py` | 副コマンド 1 つにつき 1 ファイルです（`register` と `run` を持ちます） |
 | `context.Context` | 実行の関数へ渡す依存（Claude Code CLI を起動する関数）を持ちます |
 | `output` | 標準出力へ書く部品（行、JSON、最終的な指摘）です |
-| `views/` | 表示の行を組み立てる部品です（標準出力へは書きません） |
+| `selection_inputs.past_round_reader` | 採否の入口が錠の中で呼ぶ、履歴と今の結果の実行時刻を読む関数を組み立てます |
+| `views/` | 表示の行を組み立てる部品です（標準出力へは書きません）。上限で止まった起動と見送った起動の行（`over_budget_lines`、`budget_stop_line`）は `views/findings.py` にあり、`show` と `run` が共有します |
 | `failures.describe` | 例外を、種類、見出し、理由、次の操作へ変換します |
 | `exit_codes` | 終了コードの定数を持ちます |
 | `budget_argument.add_max_budget_argument` | `--max-budget-usd-per-call` の引数を定義します。`run` と `estimate` が共有します |
 | `group_argument` | 引数の群を入口で一度だけ `GroupId` に解き、群を取る引数を足します |
 | `mcp_argument` | `--mcps` の引数の定義と検証をします。`run` と `estimate` が共有します |
 | `consent` | `jigane run` が Claude Code CLI を起動する前に、利用者の同意を取ります |
+| `unparsed_files` | 解析しない言語のファイルを分類し、案内の文面を作ります。`new` と `estimate` は案内（`print_unparsed_notice`）を標準エラーへ出し、`run` は同じ文面で同意を問います（`require_unparsed_consent`。答えの判定は `consent` の `is_yes` を使います） |
 | `terms_consent` | `jigane languages fetch` が文法を取得する前に、利用規約への同意を取ります |
 | `public_urls` | 同意の画面が示す規約、プライバシー、SECURITY.md の URL を、入れた版に合わせて作ります |
 | `run_guide.run_guide` | 見積もりの JSON の `run_guide`（未実行の群の案内の文）を、計画の種類と群ごとに返します |
@@ -46,7 +48,7 @@
 
 <!-- END GENERATED: dependencies -->
 
-- `jigane.reviews.lifecycle` でレビューを読み込み、`jigane.design.review_documents` で設計書のレビューを作成と更新し、`jigane.skills` の `macro_principles_run.run_policy`（方針）、`micro`、`security` で群を走らせます。
+- `jigane.reviews.catalog` でレビューを読み込み、`jigane.design.review_documents` で設計書のレビューを作成と更新し、`jigane.skills` の `macro_principles_run.run_policy`（方針）、`micro`、`security` で群を走らせます。
 - `jigane.__main__` が `commands.main` を呼びます。
 
 副コマンドの引数、機械が読む出力（`--json`）、失敗の JSON の鍵（`failures` の `Failure.to_dict`）、終了コード（`exit_codes`）は、外の道具との契約です。機械が読む出力を出す副コマンドは、すべて `--json` を持ちます。失敗は `--json` を付けたとき（`sequence` は `--format json` を付けたとき）だけ、標準出力に `{"error": {...}}` で出ます。`sequence` は `--json` を持たず、出力の形を `--format` で選びます。例外は、人向けの進捗だけを出す `languages fetch` です。

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jigane.storage.store import write_text_atomic
+from jigane.storage.atomic_write import write_text_atomic
 
 
 def test_permission_error_without_winerror_is_not_retried(

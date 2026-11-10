@@ -26,7 +26,15 @@ from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.cost import Measured
 from jigane.llm_runs.launch_failure import Disposition
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import adversarial, input_budget, macro, micro, pipeline, shards
+from jigane.skills import (
+    adversarial,
+    discovery_errors,
+    input_budget,
+    macro,
+    micro,
+    pipeline,
+    shards,
+)
 from jigane.skills.assembly import AssemblyInput
 
 # 単価の表に無いモデル "m" は表の最高の単価（10 USD / 100 万トークン）で見積もる
@@ -103,7 +111,7 @@ def test_all_shards_stopped_raises_with_reason(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     clear_policy(review)
     fake = MicroFake({1: [], 2: []})
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         micro.run_micro(AssemblyInput.load(review), settings_for(fake, max_budget_usd=0.001))
     assert fake.calls == []
     message = str(raised.value)
@@ -127,8 +135,8 @@ def test_verification_roles_are_stopped_and_recorded() -> None:
     assert outcome.failed_splits == 1
     assert outcome.unverified_candidates == 1
     [stop] = outcome.budget_stops
-    assert stop["role"] in {"rebuttal", "alternative"}
-    assert stop["estimated_input_tokens"] > 0
+    assert stop.role in {"rebuttal", "alternative"}
+    assert stop.tokens > 0
     # 起動していないので、起動の失敗としては残さない
     assert outcome.failures == ()
 
@@ -167,7 +175,7 @@ def test_rerun_stopped_by_input_budget_keeps_the_first_failure(
     assert failure.disposition is Disposition.RERUN_STOPPED
     assert failure.attempt == 1
     [stop] = outcome.budget_stops
-    assert stop["estimated_input_tokens"] > 0
+    assert stop.tokens > 0
     assert outcome.failed_splits == 1
     assert failure_reason_lines(
         as_run({"launch_failures": [failure.as_record()]}).launch_failures or ()
@@ -294,3 +302,23 @@ def test_check_and_invocation_follow_the_same_reserve_margin() -> None:
         assert (input_budget.check_input_budget("a" * 100_000, settings).stop is None) is (
             not reserves
         )
+
+
+def test_stored_budget_stop_round_trips_through_the_record() -> None:
+    stop = input_budget.BudgetStop(
+        role="rebuttal",
+        index=2,
+        tokens=1234,
+        estimated_usd=0.0123,
+        limit_usd=0.001,
+        sections=(input_budget.SectionSize("概要", 10),),
+        notice=None,
+        reserved=True,
+    )
+    stored = stop.stored()
+    assert stored == input_budget.StoredBudgetStop(
+        "rebuttal", 2, 1234, 0.0123, 0.001, (input_budget.SectionSize("概要", 10),)
+    )
+    record = stored.as_record()
+    assert input_budget.StoredBudgetStop.from_record(record) == stored
+    assert input_budget.StoredBudgetStop.from_record(record).as_record() == record

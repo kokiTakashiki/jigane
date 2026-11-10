@@ -1,12 +1,16 @@
-from collections.abc import Iterator
+from collections.abc import Collection, Mapping
 
 from tree_sitter import Node
 
 from jigane.languages import (
     calls_core,
     csharp_concurrency,
+    csharp_discriminators,
+    csharp_file_paths,
+    csharp_public_names,
     csharp_regex,
     csharp_string_comparisons,
+    csharp_type_fields,
     csharp_value_sets,
     csharp_xaml,
     type_names,
@@ -21,6 +25,7 @@ from jigane.languages.base import (
     DeclarationKind,
     DeclarationSpans,
     DeferredSite,
+    FilePathPattern,
     Import,
     Isolation,
     IsolationContext,
@@ -29,12 +34,14 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
+    PublicName,
     ReceiverKind,
     RegexScan,
     Sharing,
+    Step,
     StringComparison,
     TypeDecl,
-    TypeKind,
+    TypeFields,
     TypeScope,
     ValueSet,
     Visibility,
@@ -45,17 +52,19 @@ from jigane.languages.base import (
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
+from jigane.languages.csharp_nodes import (
+    LAMBDAS,
+    NAMESPACES,
+    TYPE_KINDS,
+    declared_visibility,
+    flatten,
+    modifiers,
+    namespace_container,
+)
+from jigane.languages.node_text import text_of
 from jigane.languages.queries import load_queries
 from jigane.preconditions.required import required
 
-TYPE_KINDS: dict[str, TypeKind] = {
-    "class_declaration": "class",
-    "struct_declaration": "struct",
-    "record_declaration": "record",
-    "interface_declaration": "interface",
-    "enum_declaration": "enum",
-    "delegate_declaration": "delegate",
-}
 _METHODS = frozenset(
     {
         "method_declaration",
@@ -68,66 +77,28 @@ _METHODS = frozenset(
 )
 _PROPERTIES = frozenset({"property_declaration", "event_declaration"})
 _FIELDS = frozenset({"field_declaration", "event_field_declaration"})
-NAMESPACES = frozenset({"namespace_declaration", "file_scoped_namespace_declaration"})
-# #if の腕は、その中の宣言を子として抱える
-PREPROCESSOR = frozenset({"preproc_if", "preproc_elif", "preproc_else"})
 # 入れ物の要素が修飾子を省いたときに public になる入れ物
 _MEMBERS_PUBLIC_BY_DEFAULT = frozenset({"interface_declaration", "enum_declaration"})
 
 
-_LAMBDAS = frozenset({"lambda_expression", "anonymous_method_expression"})
 # 呼び出しの式の形をしているが、メソッドの呼び出しではない
 _NOT_CALLS = frozenset({"nameof"})
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
-def _modifiers(node: Node) -> set[str]:
-    return {_text(child) for child in node.children if child.type == "modifier"}
-
-
-def _declared(modifiers: set[str], default: Visibility) -> Visibility:
-    # private protected は派生型からしか見えず、file はそのファイルの中でしか見えない
-    if "private" in modifiers or "file" in modifiers:
-        return Visibility.FILE
-    # protected internal は protected を含むので、internal より先に判定する
-    if modifiers & {"public", "protected"}:
-        return Visibility.PUBLIC
-    if "internal" in modifiers:
-        return Visibility.INTERNAL
-    return default
-
-
-def flatten(container: Node) -> Iterator[Node]:
-    for child in container.children:
-        if child.type in PREPROCESSOR:
-            yield from flatten(child)
-        else:
-            yield child
-
-
-def namespace_container(namespace: Node) -> Node:
-    # ブロック形の namespace は body の中に宣言を持ち、ファイルスコープ形は自分自身が入れ物になる
-    body = namespace.child_by_field_name("body")
-    return body if body is not None else namespace
 
 
 def _name(node: Node) -> str:
     if node.type == "indexer_declaration":
         return "this[]"
     if node.type == "destructor_declaration":
-        return f"~{_text(_identifier(node))}"
+        return f"~{text_of(_identifier(node))}"
     if node.type == "operator_declaration":
         operator = node.child_by_field_name("operator")
         operator = required(operator)
-        return f"operator {_text(operator)}"
+        return f"operator {text_of(operator)}"
     if node.type == "conversion_operator_declaration":
         target = node.child_by_field_name("type")
         target = required(target)
-        return f"operator {_text(target)}"
-    return _text(_identifier(node))
+        return f"operator {text_of(target)}"
+    return text_of(_identifier(node))
 
 
 def _identifier(node: Node) -> Node:
@@ -170,7 +141,7 @@ def _bases(node: Node) -> tuple[str, ...]:
     base_list = next((c for c in node.children if c.type == "base_list"), None)
     if base_list is None:
         return ()
-    return tuple(_text(c.child_by_field_name("type") or c) for c in base_list.named_children)
+    return tuple(text_of(c.child_by_field_name("type") or c) for c in base_list.named_children)
 
 
 def _parameters(plist: Node | None) -> tuple[ParameterDecl, ...]:
@@ -184,7 +155,7 @@ def _parameters(plist: Node | None) -> tuple[ParameterDecl, ...]:
             continue
         # 既定値は名前の後ろに、型でも名前でもない式として付く
         optional = any(c.type == "=" for c in p.children)
-        result.append(ParameterDecl(_text(name_node), _text(type_node), optional))
+        result.append(ParameterDecl(text_of(name_node), text_of(type_node), optional))
     return tuple(result)
 
 
@@ -192,7 +163,7 @@ def _annotation(type_node: Node | None) -> str | None:
     # var は型を初期化式から決めるので、注記を持たない
     if type_node is None or type_node.type == "implicit_type":
         return None
-    return _text(type_node)
+    return text_of(type_node)
 
 
 def _lambda_parameter_names(lambda_node: Node) -> list[str]:
@@ -200,12 +171,12 @@ def _lambda_parameter_names(lambda_node: Node) -> list[str]:
     if parameters is None:
         return []
     if parameters.type in ("identifier", "implicit_parameter"):
-        return [_text(parameters)]
+        return [text_of(parameters)]
     names: list[str] = []
     for p in parameters.named_children:
         name = p.child_by_field_name("name") or (p if p.type == "identifier" else None)
         if name is not None:
-            names.append(_text(name))
+            names.append(text_of(name))
     return names
 
 
@@ -222,7 +193,7 @@ def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]
         label = argument.child_by_field_name("name") or next(
             (c for c in argument.children if c.type == "name_colon"), None
         )
-        name = _text(label).rstrip(":").strip() if label is not None else None
+        name = text_of(label).rstrip(":").strip() if label is not None else None
         result.append(Argument(argument.named_children[-1], name))
     return tuple(result)
 
@@ -230,14 +201,14 @@ def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]
 def _call_parts(call: Node) -> CallParts:
     function = call.child_by_field_name("function")
     arguments = _arguments(call)
-    text = _text(call)
+    text = text_of(call)
     if function is None:
         return CallParts(None, None, arguments, text)
     if function.type == "member_access_expression":
         name = function.child_by_field_name("name")
         return CallParts(
             function.child_by_field_name("expression"),
-            _text(name) if name is not None else None,
+            text_of(name) if name is not None else None,
             arguments,
             text,
         )
@@ -248,13 +219,13 @@ def _call_parts(call: Node) -> CallParts:
         name = binding.child_by_field_name("name") if binding is not None else None
         return CallParts(
             function.child_by_field_name("condition"),
-            _text(name) if name is not None else None,
+            text_of(name) if name is not None else None,
             arguments,
             text,
         )
     if function.type == "generic_name":
-        return CallParts(None, _text(function.children[0]), arguments, text)
-    return CallParts(None, _text(function), arguments, text)
+        return CallParts(None, text_of(function.children[0]), arguments, text)
+    return CallParts(None, text_of(function), arguments, text)
 
 
 def _call_site(captures: dict[str, list[Node]]) -> CallSite | None:
@@ -264,9 +235,9 @@ def _call_site(captures: dict[str, list[Node]]) -> CallSite | None:
     arguments = _arguments(node, captures["arguments"][0] if "arguments" in captures else None)
     creation = node.type != "invocation_expression"
     if creation:
-        name = _text(callee) if callee is not None else "new"
+        name = text_of(callee) if callee is not None else "new"
     else:
-        name = _text(required(callee))
+        name = text_of(required(callee))
         if name in _NOT_CALLS and receiver is None:
             return None
     located = callee or node
@@ -278,7 +249,7 @@ def _call_site(captures: dict[str, list[Node]]) -> CallSite | None:
 class _CSharpRules(calls_core.RuleDefaults):
     """calls_core の三つの契約を満たす、C# の節点の名前の表と判定。"""
 
-    deferred_bodies = _LAMBDAS
+    deferred_bodies = LAMBDAS
     self_types = frozenset({"this_expression", "this"})
     super_types = frozenset({"base_expression", "base"})
     name_types = frozenset({"identifier"})
@@ -289,7 +260,7 @@ class _CSharpRules(calls_core.RuleDefaults):
     )
     member_type = "member_access_expression"
     member_base_field = "expression"
-    lambda_types = _LAMBDAS
+    lambda_types = LAMBDAS
 
     def call_site(self, captures: Captures) -> CallSite | None:
         return _call_site(captures)
@@ -303,7 +274,7 @@ class _CSharpRules(calls_core.RuleDefaults):
     def function_name(self, node: Node) -> str | None:
         if node.type != "local_function_statement":
             return None
-        return _text(required(node.child_by_field_name("name")))
+        return text_of(required(node.child_by_field_name("name")))
 
     def lambda_parameter_names(self, node: Node) -> list[str]:
         return _lambda_parameter_names(node)
@@ -315,14 +286,14 @@ class _CSharpRules(calls_core.RuleDefaults):
             for declarator in node.children:
                 if declarator.type != "variable_declarator":
                     continue
-                name = _text(declarator.child_by_field_name("name") or declarator.children[0])
+                name = text_of(declarator.child_by_field_name("name") or declarator.children[0])
                 init = declarator.named_children[-1] if declarator.named_child_count > 1 else None
                 variables.append(LocalVariable(name, _annotation(type_node), init))
         elif node.type in ("foreach_statement", "declaration_expression", "declaration_pattern"):
             name_node = node.child_by_field_name("name") or node.child_by_field_name("left")
             if name_node is not None:
                 annotation = _annotation(node.child_by_field_name("type"))
-                variables.append(LocalVariable(_text(name_node), annotation, None))
+                variables.append(LocalVariable(text_of(name_node), annotation, None))
         return variables
 
 
@@ -359,9 +330,6 @@ class CSharpAdapter:
 
     def composition_type_names(self, _raw: str, /) -> list[str]:
         return []
-
-    def is_external_type_name(self, name: str) -> bool:
-        return type_names.capitalized_is_external_type(name)
 
     def anonymous_class_display(self, _qualified: str, /) -> str | None:
         # 無名クラスを型の名前で持たない言語
@@ -431,6 +399,30 @@ class CSharpAdapter:
             parse(self, source.encode()).root_node, path
         )
 
+    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+        return csharp_type_fields.type_fields_of(
+            lambda: parse(self, text.encode()).root_node, path
+        )
+
+    def file_path_patterns(
+        self, root_node: Node, _source: bytes, path: str, /
+    ) -> list[FilePathPattern]:
+        return csharp_file_paths.file_path_patterns(root_node, path)
+
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        return csharp_public_names.added_public_names_of(
+            lambda source: parse(self, source.encode()).root_node, before, after, changed
+        )
+
+    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+        return csharp_discriminators.discriminator_steps(body_node)
+
     def locals_of(self, body_node: Node) -> Locals:
         return calls_core.locals_of(body_node, _RULES)
 
@@ -449,10 +441,10 @@ class CSharpAdapter:
     def _collect_type(
         self, node: Node, prefix: str, path: str, result: list[TypeDecl | MemberDecl]
     ) -> None:
-        name = _text(required(node.child_by_field_name("name")))
+        name = text_of(required(node.child_by_field_name("name")))
         qualified = f"{prefix}{name}"
         line = node.start_point.row + 1
-        scope = TypeScope.FILE if "file" in _modifiers(node) else TypeScope.MODULE
+        scope = TypeScope.FILE if "file" in modifiers(node) else TypeScope.MODULE
         result.append(
             TypeDecl(
                 qualified,
@@ -463,7 +455,7 @@ class CSharpAdapter:
                 line,
                 node,
                 scope,
-                abstract=node.type == "class_declaration" and "abstract" in _modifiers(node),
+                abstract=node.type == "class_declaration" and "abstract" in modifiers(node),
             )
         )
         # プライマリコンストラクタの引数は、型のフィールドのように参照できる
@@ -497,7 +489,7 @@ class CSharpAdapter:
             parameters: tuple[ParameterDecl, ...],
             body: Node | None,
         ) -> MemberDecl:
-            annotation = _text(type_node) if type_node is not None else None
+            annotation = text_of(type_node) if type_node is not None else None
             return MemberDecl(
                 owner,
                 name,
@@ -507,7 +499,7 @@ class CSharpAdapter:
                 line,
                 node,
                 body,
-                abstract=kind == "method" and "abstract" in _modifiers(node),
+                abstract=kind == "method" and "abstract" in modifiers(node),
             )
 
         if node.type in TYPE_KINDS:
@@ -515,7 +507,7 @@ class CSharpAdapter:
         elif node.type == "method_declaration":
             result.append(
                 make(
-                    _text(required(node.child_by_field_name("name"))),
+                    text_of(required(node.child_by_field_name("name"))),
                     "method",
                     node.child_by_field_name("returns"),
                     _parameters(node.child_by_field_name("parameters")),
@@ -535,7 +527,7 @@ class CSharpAdapter:
         elif node.type == "property_declaration":
             result.append(
                 make(
-                    _text(required(node.child_by_field_name("name"))),
+                    text_of(required(node.child_by_field_name("name"))),
                     "property",
                     node.child_by_field_name("type"),
                     (),
@@ -548,7 +540,7 @@ class CSharpAdapter:
             for declarator in declaration.children:
                 if declarator.type == "variable_declarator":
                     name_node = declarator.child_by_field_name("name") or declarator.children[0]
-                    result.append(make(_text(name_node), "field", type_node, (), None))
+                    result.append(make(text_of(name_node), "field", type_node, (), None))
         else:
             # 演算子、インデクサ、イベント、列挙子など。受け手の解決の対象にしない
             return
@@ -564,7 +556,7 @@ class CSharpAdapter:
                 and node.field_name_for_child(i) != "name"
             ]
             if targets:
-                found.append(Import(_text(targets[-1]), targets[-1].start_point.row + 1))
+                found.append(Import(text_of(targets[-1]), targets[-1].start_point.row + 1))
         return found
 
     def technology_of(self, module: str) -> str:
@@ -596,7 +588,7 @@ class CSharpAdapter:
                 )
             elif node.type in TYPE_KINDS:
                 name = _name(node)
-                visibility = _declared(_modifiers(node), default).narrower(cap)
+                visibility = declared_visibility(node, default).narrower(cap)
                 spans = _split(node)
                 qualified = f"{prefix}{name}"
                 result.append(
@@ -631,21 +623,21 @@ class CSharpAdapter:
                     Declaration(
                         f"{prefix}{_name(node)}",
                         kind,
-                        _declared(_modifiers(node), default).narrower(cap),
+                        declared_visibility(node, default).narrower(cap),
                         spans.span,
                         spans.signature,
                         spans.body,
                     )
                 )
             elif node.type in _FIELDS:
-                visibility = _declared(_modifiers(node), default).narrower(cap)
+                visibility = declared_visibility(node, default).narrower(cap)
                 declaration = next(c for c in node.children if c.type == "variable_declaration")
                 for declarator in declaration.children:
                     if declarator.type != "variable_declarator":
                         continue
                     result.append(
                         Declaration(
-                            f"{prefix}{_text(_identifier(declarator))}",
+                            f"{prefix}{text_of(_identifier(declarator))}",
                             "variable",
                             visibility,
                             span_of(node),
@@ -656,7 +648,7 @@ class CSharpAdapter:
             elif node.type == "enum_member_declaration":
                 result.append(
                     Declaration(
-                        f"{prefix}{_text(_identifier(node))}",
+                        f"{prefix}{text_of(_identifier(node))}",
                         "variable",
                         cap,
                         span_of(node),

@@ -6,8 +6,10 @@
 import re
 
 from jigane.figures.models import MermaidFigure, Panel
+from jigane.policy_materials.siblings import MAX_SIBLINGS, NotSearched, SiblingSearch
 from jigane.policy_materials.type_deltas import (
     _IDENTIFIER,
+    TypeRole,
     TypeShapeChange,
     _flat,
     members_of,
@@ -30,6 +32,9 @@ LEGEND = (
     "`<|--` は継承か実装、`-->` は項目の型、`..>` はメソッドのシグネチャに現れる型。"
     "`<<abstract>>` と項目の末尾の `*` は、言語の宣言から確かに分かるものだけに付く。"
     "印が無いことは具象であることを意味しない。"
+    "注記が「兄弟の型」の型は、変更した型と共通の基底と、その基底を継承する別の型で、"
+    "変更していないファイルからも探した。"
+    f"項目は変更した型と同じ名前のものだけを名前で出し、基底ごとに兄弟は {MAX_SIBLINGS} 型まで。"
 )
 
 
@@ -126,10 +131,18 @@ def class_panel(blocks: list[str], shown: list[TypeInfo], indexes: Indexes) -> P
     return Panel("", "\n".join(["classDiagram", *blocks, *relations(shown, indexes)]))
 
 
-def _note_of(*, added: bool, changed: bool, moved_from: TypeInfo | None) -> str:
+_ROLE_NOTES = {
+    TypeRole.CHANGED: "変更した型",
+    TypeRole.REFERENCED: "参照される型",
+    TypeRole.BASE: "兄弟の型",
+    TypeRole.SIBLING: "兄弟の型",
+}
+
+
+def _note_of(*, added: bool, role: TypeRole, moved_from: TypeInfo | None) -> str:
     if moved_from is not None:
         return f"移した型（{moved_from.path}:{moved_from.line} から）"
-    return "追加した型" if added else ("変更した型" if changed else "参照される型")
+    return "追加した型" if added else _ROLE_NOTES[role]
 
 
 def _shape_change_note(change: TypeShapeChange) -> str:
@@ -154,13 +167,29 @@ def _shape_change_entry(change: TypeShapeChange) -> str:
     return f"`{change.name}`（{'、'.join(parts)}）"
 
 
+def _sibling_notes(siblings: SiblingSearch) -> list[str]:
+    if isinstance(siblings, NotSearched):
+        return [
+            "ファイルのレビューは変更していないファイルの型を持たないため、兄弟の型は探していない。"
+        ]
+    return [
+        f"兄弟の型: ほか {group.omitted} 件（基底 `{group.base.name}`）"
+        for group in siblings.groups
+        if group.omitted
+    ]
+
+
 def _trailing_notes(
     removed: list[str],
     changed_from: list[str],
     unsupported: int,
     shape_changes: list[TypeShapeChange],
+    siblings: SiblingSearch,
 ) -> list[str]:
-    """図の後ろに添える注記。削除した項目、`~` の項目の前の形、継承か種類の差、対象外の件数。"""
+    """図の後ろに添える注記。削除した項目、`~` の項目の前の形、継承か種類の差、兄弟、対象外の件数。
+
+    siblings が NotSearched なら兄弟を探さなかった（ファイルのレビュー）。
+    """
     trailing: list[str] = []
     if removed:
         trailing.append("変更で削除した項目: " + "、".join(f"`{r}`" for r in removed))
@@ -173,6 +202,7 @@ def _trailing_notes(
             "変更で継承か種類が変わった型: "
             + "、".join(_shape_change_entry(c) for c in shape_changes)
         )
+    trailing += _sibling_notes(siblings)
     if unsupported:
         trailing.append(f"対象外にしたもの: 型を読めない言語のファイル {unsupported} 件。")
     return trailing
@@ -200,15 +230,16 @@ def class_diagram(review: Review) -> MermaidFigure:
             indexes.display(delta.info),
             delta.member_marks,
             list(delta.value_marks),
-            _note_of(added=delta.added, changed=delta.changed, moved_from=delta.moved_from)
-            + shape_note,
-            compared=result.before_indexes is not None,
+            _note_of(added=delta.added, role=delta.role, moved_from=delta.moved_from) + shape_note,
+            compared=result.before_indexes is not None
+            or delta.role in (TypeRole.BASE, TypeRole.SIBLING),
         )
     trailing = _trailing_notes(
         [r for d in result.deltas for r in d.removed_members],
         [c for d in result.deltas for c in d.previous_forms],
         len(result.unsupported),
         [d.shape for d in result.deltas if d.shape is not None],
+        result.siblings,
     )
     shown = [d.info for d in result.deltas]
     return MermaidFigure(

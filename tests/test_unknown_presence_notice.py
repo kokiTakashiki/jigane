@@ -7,7 +7,9 @@ import pytest
 
 from jigane.commands import main
 from jigane.findings.records import IN_PROGRESS_FILE
-from jigane.reviews.lifecycle import create_feature_review, load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.resolution import resolve_review
 from jigane.skills import run_record
 from jigane.skills.run_record import PRESENCE_UNKNOWN_NOTE
 

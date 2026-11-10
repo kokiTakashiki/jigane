@@ -1,3 +1,5 @@
+import pytest
+
 from jigane.languages.base import FilePathAdapter, FilePathPattern, FileUsage, parse
 from jigane.languages.swift import SwiftAdapter
 
@@ -131,3 +133,15 @@ def test_unrelated_calls_are_ignored() -> None:
         "}\n"
     )
     assert patterns(code) == []
+
+
+def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    swift = SwiftAdapter()
+    source = b"func f(u: URL) { try? FileManager.default.removeItem(at: u) }"
+    root = parse(swift, source).root_node
+
+    def explode(_self: object, _rules: object) -> list[FilePathPattern]:
+        raise RecursionError
+
+    monkeypatch.setattr("jigane.languages.file_paths_core._Reader.read", explode)
+    assert swift.file_path_patterns(root, source, "r.swift") == []

@@ -1,11 +1,12 @@
 """`python -m jigane.languages.fetch_main fetch`。依存の導入のあとに文法を取得する入口。"""
 
 import sys
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import assert_never
 
 from jigane.languages import registry
-from jigane.languages.grammars import GrammarError, fetch
+from jigane.languages.grammars import GRAMMARS, GrammarError, fetch
 from jigane.text.terminal import sanitize_text
 
 
@@ -20,16 +21,37 @@ class Fetched:
 
     fetched_external: tuple[str, ...]
     failed_languages: tuple[str, ...]
+    fetched_builtin: tuple[str, ...] = field(default=GRAMMARS)
 
 
 FetchOutcome = FetchAborted | Fetched
 
 
-def fetch_and_report() -> FetchOutcome:
-    """文法を取得し、失敗を `jigane: …` の行にして stderr へ出す。入口はこれを呼ぶだけにする。"""
+def selectable_names() -> tuple[str, ...]:
+    """取得する言語として名前で選べるもの。組み込みと、有効にした追加の言語。"""
+    return (*GRAMMARS, *(plugin.adapter.name for plugin in registry.discovered_plugins()))
+
+
+def validated_names(names: Sequence[str]) -> tuple[str, ...]:
+    """並べた名前の重複を除く。選べない名前があれば ValueError にする。"""
+    accepted = selectable_names()
+    unknown = [name for name in dict.fromkeys(names) if name not in accepted]
+    if unknown:
+        # 打った名前も、プラグインが決めた言語の名前も端末へ出る
+        shown = sanitize_text(", ".join(map(repr, unknown)))
+        allowed = sanitize_text(", ".join(accepted))
+        raise ValueError(f"取得できない言語の名前: {shown}（受けられる名前: {allowed}）")
+    return tuple(dict.fromkeys(names))
+
+
+def fetch_and_report(names: tuple[str, ...] | None = None) -> FetchOutcome:
+    """文法を取得し、失敗を `jigane: …` の行にして stderr へ出す。入口はこれを呼ぶだけにする。
+
+    `names` は `validated_names` を通した名前の並び。None ならすべてを取得する。
+    """
     try:
         external = registry.discovered_plugins()
-        failures = fetch(external)
+        failures = fetch(external) if names is None else fetch(external, names)
     except (GrammarError, registry.LanguagePluginUnavailableError) as error:
         sys.stderr.write(f"jigane: {sanitize_text(str(error))}\n")
         return FetchAborted()
@@ -45,8 +67,10 @@ def fetch_and_report() -> FetchOutcome:
             sanitize_text(plugin.adapter.name)
             for plugin in external
             if plugin.adapter.name not in failed_languages
+            and (names is None or plugin.adapter.name in names)
         ),
         failed_languages=tuple(sanitize_text(name) for name in sorted(failed_languages)),
+        fetched_builtin=tuple(name for name in GRAMMARS if names is None or name in names),
     )
 
 

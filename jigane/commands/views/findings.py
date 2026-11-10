@@ -1,6 +1,6 @@
 """指摘の行。"""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, assert_never
 
 from jigane.findings.discard import (
@@ -26,14 +26,101 @@ from jigane.findings.records import (
     group_by_display_category,
     group_by_triage,
 )
+from jigane.groups.policy_runs import PolicyShape
 from jigane.judgment_map.region_table import CodeRegion, SectionRegion
+from jigane.llm_runs.cost import BudgetOutcome
+from jigane.llm_runs.failure_views import failure_view_of
 from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review
+from jigane.skills import macro, pipeline
+from jigane.skills.input_budget import StoredBudgetStop, describe_invocation
+from jigane.skills.policy_launch import DiagramLaunch, PrincipleLaunch, Stopped
+from jigane.skills.policy_reason import DiagramNotRun
 from jigane.skills.received_concerns import NoneReceived, NotRecorded, Received, ReceivedConcerns
 from jigane.skills.run_record import StoppedView
+from jigane.text.document_files import all_documents
 from jigane.text.terminal import one_line_text
 
 WHOLE_CHANGE = "変更全体"
+
+NO_DOCUMENT_BODY_LINE = "入力に文書の本文を含んでいません"
+
+
+def no_document_body_lines(review: Review, finding_count: int) -> list[str]:
+    """指摘が 0 件の結果が、文書の本文を読んだうえでの合格でないと分かる一行。
+
+    指摘が 1 件以上なら読んだ根拠があるので出さない。
+    """
+    unread = (
+        finding_count == 0
+        and macro.policy_shape(review) is PolicyShape.DIAGRAM
+        and all_documents(review.paths)
+    )
+    return [NO_DOCUMENT_BODY_LINE] if unread else []
+
+
+_KEPT_REASON = {
+    DiagramNotRun.FAILED: "失敗した",
+    DiagramNotRun.STOPPED_FOR_INPUT: "入力の上限のために見送られた",
+}
+
+
+def stopped_notice(stopped: Stopped) -> str:
+    """入力の見積もりで見送った起動の知らせ。文面の元は BudgetStop.message が持つ。"""
+    match stopped.launch:
+        case PrincipleLaunch() as principle:
+            label = f"原則 {principle.extra.viewpoint} の起動"
+        case DiagramLaunch():
+            label = "図の起動"
+    return f"{label}を上限のために見送りました。{stopped.error.stop.message()}"
+
+
+def budget_stop_lines(stops: Sequence[StoredBudgetStop]) -> list[str]:
+    """入力の見積もりで起動しなかった役を、一行ずつの文にする。"""
+    return [budget_stop_line(stop) for stop in stops]
+
+
+def over_budget_lines(totals: Mapping[str, Any]) -> list[str]:
+    """上限で止まった起動、上限を超えた起動と、入力の見積もりで起動しなかった役を、一行ずつの文にする。"""
+    lines = [
+        f"{'上限で停止' if item['outcome'] == BudgetOutcome.STOPPED_AT_LIMIT else '上限超過'}: "
+        f"{describe_invocation(item['role'], item['split_index'])}が {item['cost_usd']:.4f} USD"
+        + ("" if item["max_budget_usd"] is None else f"（上限 {item['max_budget_usd']:g} USD）")
+        for item in totals["over_budget"]
+    ]
+    lines += budget_stop_lines(totals["budget_stops"])
+    return lines
+
+
+def budget_stop_line(stop: StoredBudgetStop) -> str:
+    """入力の見積もりで起動しなかった役の一行。show と run の誤りの行が共有する。"""
+    return (
+        f"起動せず: {describe_invocation(stop.role, stop.index)}、"
+        f"入力の見積もり {stop.tokens} トークン"
+        f"（{stop.estimated_usd:.4f} USD）、上限 {stop.limit_usd:g} USD"
+    )
+
+
+def gap_text(gap: pipeline.RunGap) -> str:
+    """欠けの一件を誤りの文にする。欠けの文はここだけが作る。"""
+    match gap:
+        case pipeline.LaunchGap():
+            return failure_view_of(gap.failure).text
+        case pipeline.BudgetStopGap():
+            return budget_stop_line(gap.stop)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def kept_previous_lines(reason: DiagramNotRun | None) -> list[str]:
+    """図の起動が走らず、方針の指摘を置き換えなかったことの知らせ。run と show の唯一の入口。"""
+    if reason is None:
+        return []
+    text = (
+        f"図の起動が{_KEPT_REASON[reason]}ため、方針の指摘は置き換えず、前の回の結果を残しました。"
+        "この回の原則の起動の結果は保存していません"
+    )
+    return [text]
 
 
 def location(location: dict[str, Any]) -> str:

@@ -7,7 +7,7 @@ from test_design_materials import DOCUMENT
 
 from jigane.policy_materials.design_doc import design_materials
 from jigane.reviews.lifecycle import create_feature_review
-from jigane.skills import adversarial, macro, macro_shared, pipeline
+from jigane.skills import adversarial, discovery_errors, macro, macro_shared
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.macro_design import (
     build_design_prompt,
@@ -117,7 +117,7 @@ def test_version_changes_with_the_shared_parts(
 def test_input_budget_check_is_the_same(tmp_path: Path) -> None:
     prompt = _prompt(tmp_path)
     settings = with_budget(settings_for(MacroFake([]), max_budget_usd=0.0000001), model="m")
-    with pytest.raises(pipeline.InputBudgetError):
+    with pytest.raises(discovery_errors.InputBudgetError):
         macro.check_input_budget(prompt, settings)
     roomy = with_budget(settings_for(MacroFake([]), max_budget_usd=50), model="claude-sonnet-5-5")
     assert macro.check_input_budget(prompt, roomy) is None

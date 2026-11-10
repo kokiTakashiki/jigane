@@ -62,7 +62,7 @@ def still_used_elsewhere(
     """変更したファイルから消えた技術を、変更後の木の他のファイルが使い続けている場所。
 
     keys は (言語の名前, 技術の名前)。使われていない技術は結果に入れない。
-    モデル（JSON に出す形）には載せず、資料が必要なときにだけ木を読む。
+    build_model が、消えた技術があるときだけ一度呼ぶ。
     """
     if not keys:
         return {}
@@ -165,6 +165,12 @@ def build_model(review: Review) -> dict[str, Any]:
             None if before_manifests is None else before_manifests.platforms,
             after_manifests.platforms,
         ),
+    }
+    removed = {(t["language"], t["name"]) for t in technologies if t["change"] == REMOVED}
+    # 消えた技術が無ければ木を歩かない
+    model["still_used_elsewhere"] = {
+        tables.still_used_key(language, name): paths
+        for (language, name), paths in still_used_elsewhere(review, removed).items()
     }
     model["sections"] = [section.to_dict() for section in tables.sections(model)]
     return model

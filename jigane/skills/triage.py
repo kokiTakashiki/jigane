@@ -4,7 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import ValidationError
 
@@ -21,13 +21,14 @@ from jigane.findings.records import (
 from jigane.groups.definitions import MICRO
 from jigane.llm_runs import claude
 from jigane.llm_runs.claude_schema import json_schema_of
+from jigane.llm_runs.finding_model import FindingSeverity
 from jigane.llm_runs.launch_failure import StoredInvocation
 from jigane.skills import adversarial, pipeline
 from jigane.skills.output_models import ThemesOutput
 
 NIT_THEME_TITLE = "nit"
 THEME_TOOLS = ("Read",)
-SEVERITY_RANK = {"critical": 0, "warning": 1, "nit": 2}
+SEVERITY_RANK = {name: rank for rank, name in enumerate(get_args(FindingSeverity))}
 
 
 def themes_schema() -> dict[str, Any]:

@@ -75,16 +75,25 @@ class PrincipleRun:
 
 
 # 図の形の原則の起動のモデルと、1 本の上限。鍵は原則の番号で、図の起動とは別の値で走らせる。
-# 出力の見込み 12000 は、Haiku の測りの段 33 の出力の最大 11,589 トークンに合わせる
+# 1 本の上限 0.04 USD と出力の見込み 30000 は、0.1.6 の公開前のレビューで
+# 出力が最大 27,728 トークンだったことに合わせる
 PRINCIPLE_RUNS: dict[str, PrincipleRun] = {
-    "P1": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
-    "P2": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
-    "P3": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
-    "P4": PrincipleRun("claude-haiku-5-5", 0.02, 12000),
+    "P1": PrincipleRun("claude-haiku-5-5", 0.04, 30000),
+    "P2": PrincipleRun("claude-haiku-5-5", 0.04, 30000),
+    "P3": PrincipleRun("claude-haiku-5-5", 0.04, 30000),
+    "P4": PrincipleRun("claude-haiku-5-5", 0.04, 30000),
 }
 # 設計書の形は道具を渡さない一回の起動で、往復と余裕の扱いは図の形と同じ。
 # 上限と effort は形ごとに持つため、別の値として並べる
-DESIGN_SHAPE = RunShape(effort=Effort.HIGH, max_budget_usd=0.5, max_turns=2, reserve_margin=False)
+# 出力の見込み 20000 は、完走した設計書の形の起動 33 本で、最大の入力 62,493 トークンに足しても
+# 上限 0.5 USD を下回り、どれも見送りにならない値
+DESIGN_SHAPE = RunShape(
+    effort=Effort.HIGH,
+    max_budget_usd=0.5,
+    max_turns=2,
+    reserve_margin=False,
+    output_allowance_tokens=20000,
+)
 
 
 @dataclass(frozen=True)

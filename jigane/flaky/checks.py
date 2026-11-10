@@ -8,6 +8,12 @@ from tree_sitter import Node
 
 from jigane.flaky.setup import TIME_FIXATIONS, FileContext, in_autouse_fixture
 from jigane.flaky.target import Shape, Target, Verdict, resolve
+from jigane.languages.csharp_nodes import COMPUTED_EXPRESSIONS as CSHARP_COMPUTED_EXPRESSIONS
+from jigane.languages.csharp_nodes import INVOCATION, PREPROCESSOR, STRING_LITERALS
+from jigane.languages.java_nodes import COMPUTED_EXPRESSIONS as JAVA_COMPUTED_EXPRESSIONS
+from jigane.languages.java_nodes import METHOD_INVOCATION
+from jigane.languages.node_text import text_of
+from jigane.languages.swift_nodes import STRING_LITERALS as SWIFT_STRING_LITERALS
 from jigane.preconditions.required import required
 
 _COMPARISON_OPERAND_COUNT = 2
@@ -42,10 +48,6 @@ def network_result(target: Target) -> bool | Finding:
 _MUTATORS = "^(append|extend|update|add|clear|pop|setdefault|insert|remove)$"
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def _ancestor(node: Node, types: frozenset[str]) -> Node | None:
     current = node.parent
     while current is not None:
@@ -58,7 +60,7 @@ def _ancestor(node: Node, types: frozenset[str]) -> Node | None:
 def _in_test_function(node: Node) -> bool:
     function = _ancestor(node, frozenset({"function_definition"}))
     name = function.child_by_field_name("name") if function is not None else None
-    return name is not None and _text(name).startswith("test")
+    return name is not None and text_of(name).startswith("test")
 
 
 def not_in_with(node: Node, _source: bytes, /) -> bool:
@@ -79,14 +81,14 @@ def unordered_list_equality(node: Node, _source: bytes, /) -> bool:
             continue
         function = operand.child_by_field_name("function")
         arguments = operand.child_by_field_name("arguments")
-        if function is None or arguments is None or _text(function) != "list":
+        if function is None or arguments is None or text_of(function) != "list":
             continue
         for argument in arguments.named_children:
             if argument.type in ("set", "set_comprehension"):
                 return True
             if argument.type == "call":
                 callee = required(argument.child_by_field_name("function"))
-                if _text(callee) == "set" or re.search(r"[.](keys|values)$", _text(callee)):
+                if text_of(callee) == "set" or re.search(r"[.](keys|values)$", text_of(callee)):
                     return True
     return False
 
@@ -95,7 +97,7 @@ def _is_computed(node: Node) -> bool:
     # 算術の式と呼び出しの結果が、計算した値。属性や名前をそのまま読んだ値は含めない
     if node.type == "binary_operator":
         return True
-    return node.type == "call" and "approx" not in _text(node)
+    return node.type == "call" and "approx" not in text_of(node)
 
 
 def float_equality(node: Node, _source: bytes, /) -> bool:
@@ -116,7 +118,7 @@ def module_global_mutation(node: Node, _source: bytes, /) -> bool:
     if target is None or target.type != "identifier" or not _in_test_function(node):
         return False
     method = required(required(function).child_by_field_name("attribute"))
-    if re.match(_MUTATORS, _text(method)) is None:
+    if re.match(_MUTATORS, text_of(method)) is None:
         return False
     root = node
     while root.parent is not None:
@@ -130,7 +132,7 @@ def module_global_mutation(node: Node, _source: bytes, /) -> bool:
         if (
             left is not None
             and right is not None
-            and _text(left) == _text(target)
+            and text_of(left) == text_of(target)
             and right.type in ("list", "dictionary", "set")
         ):
             return True
@@ -142,7 +144,7 @@ def python_network_target(node: Node, _source: bytes, /) -> bool | Finding:
     positional = [a for a in arguments if a.type != "keyword_argument"]
     if positional:
         return network_result(resolve(positional[0], _PYTHON_SHAPE))
-    urls = [a for a in arguments if _text(required(a.child_by_field_name("name"))) == "url"]
+    urls = [a for a in arguments if text_of(required(a.child_by_field_name("name"))) == "url"]
     if urls:
         return network_result(
             resolve(required(urls[0].child_by_field_name("value")), _PYTHON_SHAPE)
@@ -161,7 +163,7 @@ def thread_start_in_test(node: Node, source: bytes) -> bool:
     target = required(function.child_by_field_name("object"))
     if target.type == "call":
         return True
-    pattern = rf"\b{re.escape(_text(target))}\s*=\s*(threading\.)?Thread\("
+    pattern = rf"\b{re.escape(text_of(target))}\s*=\s*(threading\.)?Thread\("
     return re.search(pattern.encode(), source) is not None
 
 
@@ -182,7 +184,7 @@ def _swift_arguments(node: Node) -> list[Node]:
 
 def _swift_label(argument: Node) -> str | None:
     label = next((c for c in argument.children if c.type == "value_argument_label"), None)
-    return _text(label) if label is not None else None
+    return text_of(label) if label is not None else None
 
 
 def _swift_value(argument: Node) -> Node:
@@ -202,8 +204,8 @@ def _swift_in_test_function(node: Node) -> bool:
         return False
     name = next((c for c in function.children if c.type == "simple_identifier"), None)
     modifiers = next((c for c in function.children if c.type == "modifiers"), None)
-    return (name is not None and _text(name).startswith("test")) or (
-        modifiers is not None and "@Test" in _text(modifiers)
+    return (name is not None and text_of(name).startswith("test")) or (
+        modifiers is not None and "@Test" in text_of(modifiers)
     )
 
 
@@ -223,7 +225,7 @@ def _swift_is_computed(node: Node) -> bool:
         return True
     if node.type != "call_expression":
         return False
-    return _text(node.named_children[0]) not in _SWIFT_CONVERSIONS
+    return text_of(node.named_children[0]) not in _SWIFT_CONVERSIONS
 
 
 def swift_float_equality(node: Node, _source: bytes, /) -> bool:
@@ -236,12 +238,12 @@ def swift_float_equality(node: Node, _source: bytes, /) -> bool:
 
 
 def _swift_unordered_array(value: Node, source: bytes) -> bool:
-    if value.type != "call_expression" or _text(value.named_children[0]) != "Array":
+    if value.type != "call_expression" or text_of(value.named_children[0]) != "Array":
         return False
     arguments = _swift_arguments(value)
     if len(arguments) != 1:
         return False
-    inner = _text(_swift_value(arguments[0]))
+    inner = text_of(_swift_value(arguments[0]))
     if inner.startswith("Set") or re.search(r"[.](keys|values)$", inner):
         return True
     declared = rf"\b{re.escape(inner)}\s*(:\s*Set<|=\s*Set[(<])"
@@ -267,7 +269,7 @@ def _swift_last_segment(text: str) -> str:
 def swift_static_var_assignment(node: Node, source: bytes) -> bool:
     target = node.child_by_field_name("target") or node.named_children[0]
     return _swift_in_test_function(node) and (
-        _swift_last_segment(_text(target)) in _swift_static_vars(source)
+        _swift_last_segment(text_of(target)) in _swift_static_vars(source)
     )
 
 
@@ -275,7 +277,7 @@ def swift_static_var_mutation_call(node: Node, source: bytes) -> bool:
     callee = node.named_children[0]
     if callee.type != "navigation_expression" or not _swift_in_test_function(node):
         return False
-    owner, _, method = _text(callee).rpartition(".")
+    owner, _, method = text_of(callee).rpartition(".")
     return re.match(_SWIFT_MUTATORS, method) is not None and _swift_last_segment(
         owner
     ) in _swift_static_vars(source)
@@ -283,11 +285,11 @@ def swift_static_var_mutation_call(node: Node, source: bytes) -> bool:
 
 def swift_filehandle_not_closed(node: Node, _source: bytes, /) -> bool:
     function = _ancestor(node, _SWIFT_FUNCTIONS)
-    if function is not None and _SWIFT_CLOSE.search(_text(function)):
+    if function is not None and _SWIFT_CLOSE.search(text_of(function)):
         return False
     owner = _ancestor(node, frozenset({"class_declaration"})) or node
     # 持ち主のクラスの tearDown が閉じる設計は、関数の内側からは見えない
-    return not ("tearDown" in _text(owner) and _SWIFT_CLOSE.search(_text(owner)))
+    return not ("tearDown" in text_of(owner) and _SWIFT_CLOSE.search(text_of(owner)))
 
 
 def swift_in_test_function(node: Node, _source: bytes, /) -> bool:
@@ -298,7 +300,7 @@ def _is_scoping_call(node: Node) -> bool:
     if node.type == "as_pattern":
         node = node.named_children[0]
     function = node.child_by_field_name("function") if node.type == "call" else None
-    return function is not None and _text(function) in TIME_FIXATIONS
+    return function is not None and text_of(function) in TIME_FIXATIONS
 
 
 def _inside_scoped_fixation(node: Node) -> bool:
@@ -348,7 +350,7 @@ def _has_plain_seed(node: Node) -> bool:
             function = current.child_by_field_name("function")
             if (
                 function is not None
-                and _text(function) == "random.seed"
+                and text_of(function) == "random.seed"
                 and not in_autouse_fixture(current)
             ):
                 return True
@@ -378,9 +380,9 @@ def _calls_clock(node: Node, clock_names: set[str]) -> bool:
     """式が時計の呼び出しか、時計から導いた名前を含むか。"""
     if node.type == "call":
         function = node.child_by_field_name("function")
-        if function is not None and _CLOCK_CALL.match(_text(function)):
+        if function is not None and _CLOCK_CALL.match(text_of(function)):
             return True
-    if node.type == "identifier" and _text(node) in clock_names:
+    if node.type == "identifier" and text_of(node) in clock_names:
         return True
     return any(_calls_clock(child, clock_names) for child in node.children)
 
@@ -399,7 +401,7 @@ def _clock_names(scope: Node) -> set[str]:
     while changed:
         changed = False
         for left, right in assignments:
-            name = _text(left)
+            name = text_of(left)
             if name not in names and _calls_clock(right, names):
                 names.add(name)
                 changed = True
@@ -486,7 +488,7 @@ def _java_enclosing_test_method(node: Node) -> Node | None:
             if (
                 annotation.type in ("marker_annotation", "annotation")
                 and name is not None
-                and _text(name) in _JAVA_TEST_ANNOTATIONS
+                and text_of(name) in _JAVA_TEST_ANNOTATIONS
             ):
                 return method
     return None
@@ -525,7 +527,7 @@ def java_unordered_list_equality(node: Node, _source: bytes, /) -> bool:
     arguments = _java_arguments(node)
     if arguments is None:
         return False
-    texts = [_text(argument) for argument in arguments.named_children[:2]]
+    texts = [text_of(argument) for argument in arguments.named_children[:2]]
     if len(texts) < _ASSERT_EQUALS_ARGUMENT_COUNT:
         return False
     # 順序の無い源と List への変換が同じ引数に同居する形（new ArrayList<>(map.keySet())）
@@ -539,7 +541,7 @@ def java_unordered_list_equality(node: Node, _source: bytes, /) -> bool:
 
 
 def _java_is_computed(node: Node) -> bool:
-    return node.type in ("binary_expression", "method_invocation", "parenthesized_expression")
+    return node.type in JAVA_COMPUTED_EXPRESSIONS
 
 
 def java_float_assert_equals(node: Node, _source: bytes, /) -> bool:
@@ -569,7 +571,7 @@ def _java_static_fields(class_node: Node) -> dict[str, tuple[bool, bool]]:
         for declarator in (c for c in field.children if c.type == "variable_declarator"):
             value = declarator.child_by_field_name("value")
             created = value is not None and value.type == "object_creation_expression"
-            name = _text(required(declarator.child_by_field_name("name")))
+            name = text_of(required(declarator.child_by_field_name("name")))
             fields[name] = ("final" in modifiers, created)
     return fields
 
@@ -580,7 +582,7 @@ def java_static_field_mutation(node: Node, _source: bytes, /) -> bool:
     class_node = _ancestor(node, frozenset({"class_declaration"}))
     if class_node is None:
         return False
-    mutating_call = node.type == "method_invocation"
+    mutating_call = node.type == METHOD_INVOCATION
     if node.type == "assignment_expression":
         target = node.child_by_field_name("left")
         if target is not None and target.type == "array_access":
@@ -590,11 +592,11 @@ def java_static_field_mutation(node: Node, _source: bytes, /) -> bool:
     else:
         target = node.child_by_field_name("object")
         method = required(node.child_by_field_name("name"))
-        if _JAVA_COLLECTION_MUTATORS.match(_text(method)) is None:
+        if _JAVA_COLLECTION_MUTATORS.match(text_of(method)) is None:
             return False
     if target is None:
         return False
-    field = _java_static_fields(class_node).get(_text(target).rsplit(".", 1)[-1])
+    field = _java_static_fields(class_node).get(text_of(target).rsplit(".", 1)[-1])
     if field is None:
         return False
     is_final, created = field
@@ -616,7 +618,7 @@ def java_thread_variable_start(node: Node, source: bytes) -> bool:
     if _java_enclosing_test_method(node) is None:
         return False
     target = required(node.child_by_field_name("object"))
-    pattern = rf"\bThread\s+{re.escape(_text(target))}\s*=\s*new\s+Thread\("
+    pattern = rf"\bThread\s+{re.escape(text_of(target))}\s*=\s*new\s+Thread\("
     return re.search(pattern.encode(), source) is not None
 
 
@@ -654,7 +656,7 @@ def _csharp_in_test_method(node: Node) -> bool:
             continue
         for attribute in attribute_list.named_children:
             first = attribute.named_children[0] if attribute.named_children else None
-            if first is not None and _CSHARP_TEST_ATTRIBUTE.match(_text(first)):
+            if first is not None and _CSHARP_TEST_ATTRIBUTE.match(text_of(first)):
                 return True
     return False
 
@@ -687,9 +689,9 @@ def csharp_http_call_to_remote(node: Node, source: bytes) -> bool | Finding:
         return False
     # モックのリポジトリの GetAsync を拾わないよう、受け手が HttpClient と分かるものに絞る
     if receiver.type == "object_creation_expression":
-        is_http_client = "HttpClient" in _text(receiver)
+        is_http_client = "HttpClient" in text_of(receiver)
     else:
-        name = re.escape(_text(receiver))
+        name = re.escape(text_of(receiver))
         is_http_client = (
             re.search(rf"HttpClient\s+{name}\b|\b{name}\s*=\s*new\s+HttpClient\b".encode(), source)
             is not None
@@ -710,12 +712,12 @@ def csharp_fixed_absolute_path(node: Node, _source: bytes, /) -> bool:
     value = _csharp_argument_value(arguments[0])
     if value.type not in ("string_literal", "verbatim_string_literal"):
         return False
-    return _CSHARP_ABSOLUTE_PATH.match(_text(value)) is not None
+    return _CSHARP_ABSOLUTE_PATH.match(text_of(value)) is not None
 
 
 def csharp_unordered_equality(node: Node, source: bytes) -> bool:
     for argument in _csharp_arguments(node):
-        text = _text(argument)
+        text = text_of(argument)
         if _CSHARP_UNORDERED.search(text):
             return True
         identifier = re.fullmatch(r"(\w+)\.To(?:List|Array)\(\)", text)
@@ -734,9 +736,8 @@ def csharp_float_equality(node: Node, _source: bytes, /) -> bool:
     # 精度や許容誤差の引数が付いていれば、3 つ以上になる
     if len(values) != _EXPECTED_ACTUAL_COUNT:
         return False
-    computed = ("binary_expression", "invocation_expression", "parenthesized_expression")
     literals = [v for v in values if v.type == "real_literal"]
-    return len(literals) == 1 and any(v.type in computed for v in values)
+    return len(literals) == 1 and any(v.type in CSHARP_COMPUTED_EXPRESSIONS for v in values)
 
 
 def _descendants(node: Node, type_name: str) -> list[Node]:
@@ -752,18 +753,18 @@ def _descendants(node: Node, type_name: str) -> list[Node]:
 
 def _is_conditional_skip_argument(argument: Node) -> bool:
     # 文字列の中の ? を三項演算子と取り違えないよう、Skip の値の節点の型で見る
-    if re.match(r"Skip\s*=", _text(argument)) is None:
+    if re.match(r"Skip\s*=", text_of(argument)) is None:
         return False
     return argument.named_children[-1].type == "conditional_expression"
 
 
 def csharp_conditional_skip_attribute(node: Node, _source: bytes, /) -> bool:
-    text = _text(node)
+    text = text_of(node)
     if re.search(r"Skip\s*=", text) is None:
         return False
     if any(_is_conditional_skip_argument(n) for n in _descendants(node, "attribute_argument")):
         return True
-    return _ancestor(node, frozenset({"preproc_if", "preproc_elif", "preproc_else"})) is not None
+    return _ancestor(node, PREPROCESSOR) is not None
 
 
 def _csharp_static_fields(node: Node) -> tuple[set[str], set[str]]:
@@ -777,7 +778,7 @@ def _csharp_static_fields(node: Node) -> tuple[set[str], set[str]]:
     for field in body.children:
         if field.type != "field_declaration":
             continue
-        modifiers = {_text(c) for c in field.children if c.type == "modifier"}
+        modifiers = {text_of(c) for c in field.children if c.type == "modifier"}
         if "static" not in modifiers or "const" in modifiers:
             continue
         names = readonly if "readonly" in modifiers else writable
@@ -785,7 +786,7 @@ def _csharp_static_fields(node: Node) -> tuple[set[str], set[str]]:
             if variable.type != "variable_declaration":
                 continue
             names.update(
-                _text(required(d.named_children[0]))
+                text_of(required(d.named_children[0]))
                 for d in variable.named_children
                 if d.type == "variable_declarator"
             )
@@ -804,12 +805,12 @@ def csharp_static_field_mutation(node: Node, _source: bytes, /) -> bool:
         if target is not None and target.type == "element_access_expression":
             target = target.named_children[0]
             changes_contents = True
-    elif node.type == "invocation_expression":
+    elif node.type == INVOCATION:
         function = node.child_by_field_name("function")
         if function is None or function.type != "member_access_expression":
             return False
         name = function.child_by_field_name("name")
-        if name is None or _CSHARP_MUTATORS.match(_text(name)) is None:
+        if name is None or _CSHARP_MUTATORS.match(text_of(name)) is None:
             return False
         target = function.child_by_field_name("expression")
         changes_contents = True
@@ -824,7 +825,7 @@ def csharp_static_field_mutation(node: Node, _source: bytes, /) -> bool:
     if target is None or target.type != "identifier":
         return False
     writable, readonly = _csharp_static_fields(node)
-    return _text(target) in writable or (changes_contents and _text(target) in readonly)
+    return text_of(target) in writable or (changes_contents and text_of(target) in readonly)
 
 
 def csharp_not_disposed(node: Node, _source: bytes, /) -> bool:
@@ -844,14 +845,14 @@ def csharp_unjoined_concurrency(node: Node, source: bytes) -> bool:
     if not _csharp_in_test_method(node):
         return False
     function = required(node.child_by_field_name("function"))
-    if not _text(function).endswith(".Start"):
+    if not text_of(function).endswith(".Start"):
         # Task.Run の結果が await も代入もされず、文として捨てられている
         parent = node.parent
         return parent is not None and parent.type == "expression_statement"
     receiver = required(function.child_by_field_name("expression"))
     if receiver.type == "object_creation_expression":
-        return "Thread" in _text(receiver)
-    name = re.escape(_text(receiver))
+        return "Thread" in text_of(receiver)
+    name = re.escape(text_of(receiver))
     pattern = rf"\b{name}\s*=\s*new\s+(System\.Threading\.)?Thread\(|Thread\s+{name}\b"
     return re.search(pattern.encode(), source) is not None
 
@@ -892,7 +893,7 @@ def _single_return(body: Node | None) -> Node | None:
 
 
 def _name_of(node: Node) -> str:
-    return _text(required(node.child_by_field_name("name")))
+    return text_of(required(node.child_by_field_name("name")))
 
 
 def _python_bindings(root: Node) -> Iterator[tuple[str, Node]]:
@@ -900,7 +901,7 @@ def _python_bindings(root: Node) -> Iterator[tuple[str, Node]]:
         left = node.child_by_field_name("left")
         right = node.child_by_field_name("right")
         if node.type == "assignment" and left is not None and left.type == "identifier" and right:
-            yield _text(left), right
+            yield text_of(left), right
 
 
 def _python_methods(root: Node) -> Iterator[tuple[str, Node]]:
@@ -914,7 +915,7 @@ def _python_methods(root: Node) -> Iterator[tuple[str, Node]]:
 def _python_call_name(node: Node) -> str | None:
     function = node.child_by_field_name("function")
     if node.type == "call" and function is not None and function.type == "identifier":
-        return _text(function)
+        return text_of(function)
     return None
 
 
@@ -935,7 +936,7 @@ def _java_methods(root: Node) -> Iterator[tuple[str, Node]]:
 
 def _java_call_name(node: Node) -> str | None:
     owner = node.child_by_field_name("object")
-    if node.type != "method_invocation" or (owner is not None and owner.type != "this"):
+    if node.type != METHOD_INVOCATION or (owner is not None and owner.type != "this"):
         return None
     return _name_of(node)
 
@@ -968,14 +969,14 @@ def _csharp_methods(root: Node) -> Iterator[tuple[str, Node]]:
 
 def _csharp_call_name(node: Node) -> str | None:
     function = node.child_by_field_name("function")
-    if node.type != "invocation_expression" or function is None:
+    if node.type != INVOCATION or function is None:
         return None
     if function.type == "identifier":
-        return _text(function)
+        return text_of(function)
     if function.type == "member_access_expression":
         owner = required(function.child_by_field_name("expression"))
         if owner.type == "this_expression":
-            return _text(required(function.child_by_field_name("name")))
+            return text_of(required(function.child_by_field_name("name")))
     return None
 
 
@@ -984,7 +985,7 @@ def _swift_bindings(root: Node) -> Iterator[tuple[str, Node]]:
         name = node.child_by_field_name("name")
         value = node.child_by_field_name("value")
         if node.type == "property_declaration" and name is not None and value is not None:
-            yield _text(name), value
+            yield text_of(name), value
 
 
 def _swift_methods(root: Node) -> Iterator[tuple[str, Node]]:
@@ -1005,7 +1006,7 @@ def _swift_methods(root: Node) -> Iterator[tuple[str, Node]]:
             continue
         if only is not None:
             yield (
-                _text(required(next(c for c in node.children if c.type == "simple_identifier"))),
+                text_of(required(next(c for c in node.children if c.type == "simple_identifier"))),
                 only,
             )
 
@@ -1013,7 +1014,7 @@ def _swift_methods(root: Node) -> Iterator[tuple[str, Node]]:
 def _swift_call_name(node: Node) -> str | None:
     first = node.named_children[0] if node.named_children else None
     if node.type == "call_expression" and first is not None and first.type == "simple_identifier":
-        return _text(first)
+        return text_of(first)
     return None
 
 
@@ -1022,9 +1023,9 @@ def _swift_member_name(node: Node) -> str | None:
     suffix = node.child_by_field_name("suffix")
     if node.type != "navigation_expression" or target is None or suffix is None:
         return None
-    if _text(target) not in ("self", "Self"):
+    if text_of(target) not in ("self", "Self"):
         return None
-    return _text(required(suffix.child_by_field_name("suffix")))
+    return text_of(required(suffix.child_by_field_name("suffix")))
 
 
 def _walk_nodes(root: Node) -> Iterator[Node]:
@@ -1054,14 +1055,7 @@ _JAVA_SHAPE = Shape(
     _java_call_name,
 )
 _CSHARP_SHAPE = Shape(
-    frozenset(
-        {
-            "string_literal",
-            "verbatim_string_literal",
-            "raw_string_literal",
-            "interpolated_string_expression",
-        }
-    ),
+    STRING_LITERALS | {"interpolated_string_expression"},
     frozenset({"interpolation"}),
     frozenset({"identifier"}),
     frozenset(),
@@ -1070,7 +1064,7 @@ _CSHARP_SHAPE = Shape(
     _csharp_call_name,
 )
 _SWIFT_SHAPE = Shape(
-    frozenset({"line_string_literal", "multi_line_string_literal", "raw_string_literal"}),
+    SWIFT_STRING_LITERALS,
     frozenset({"interpolated_expression"}),
     frozenset({"simple_identifier"}),
     frozenset(),

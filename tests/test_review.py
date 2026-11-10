@@ -17,23 +17,33 @@ from jigane.flaky.gates import update_gates
 from jigane.gates.entry import Gates
 from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.declaration import NO_DECLARATION_WARNING
+from jigane.reviews import catalog as catalog_module
 from jigane.reviews import lifecycle as review_module
-from jigane.reviews.lifecycle import (
-    REVIEW_FILE,
+from jigane.reviews import resolution as resolution_module
+from jigane.reviews.catalog import (
     TRASH_DIRECTORY,
+    list_reviews,
+    load_review,
+    load_review_at,
+    set_archived,
+)
+from jigane.reviews.lifecycle import (
     DeclaredInputs,
     FeatureOrigin,
     RangeOrigin,
     ReviewError,
     ReviewKindMismatchError,
     create_feature_review,
-    list_reviews,
-    load_review,
-    load_review_at,
-    resolve_review,
-    set_archived,
 )
-from jigane.storage.store import ReviewId, ReviewKind, data_home
+from jigane.reviews.resolution import resolve_review
+from jigane.storage.store import (
+    REVIEW_FILE,
+    ReviewId,
+    ReviewKind,
+    check_new_review_id,
+    check_review_id,
+    data_home,
+)
 
 PUBLIC_SOURCE = "def build_widget():\n    return 1\n"
 
@@ -93,9 +103,11 @@ def test_short_identifier_resolution(project: Path) -> None:
     assert resolve_review("local/shop:payment").key == "payment"
     with pytest.raises(ReviewError):
         resolve_review("shop:missing")
-    other = ReviewId("acme", "shop", "payment", ReviewKind.FEATURE).directory()
+    other = check_new_review_id(
+        ReviewId("acme", "shop", "payment", ReviewKind.FEATURE)
+    ).directory()
     other.mkdir(parents=True)
-    source = ReviewId("local", "shop", "payment", ReviewKind.FEATURE).directory()
+    source = check_review_id(ReviewId("local", "shop", "payment", ReviewKind.FEATURE)).directory()
     meta = json.loads((source / "review.json").read_text(encoding="utf-8"))
     meta["id"] = "acme/shop:payment"
     (other / "review.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -132,9 +144,11 @@ def test_name_only_identifier_error_shows_every_repository(
 ) -> None:
     create_feature_review(project, ["src"], "payment")
     _chdir_elsewhere(tmp_path, monkeypatch)
-    other = ReviewId("acme", "cart", "payment", ReviewKind.FEATURE).directory()
+    other = check_new_review_id(
+        ReviewId("acme", "cart", "payment", ReviewKind.FEATURE)
+    ).directory()
     other.mkdir(parents=True)
-    source = ReviewId("local", "shop", "payment", ReviewKind.FEATURE).directory()
+    source = check_review_id(ReviewId("local", "shop", "payment", ReviewKind.FEATURE)).directory()
     meta = json.loads((source / "review.json").read_text(encoding="utf-8"))
     meta["id"] = "acme/cart:payment"
     (other / "review.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -156,8 +170,8 @@ def test_name_only_identifier_does_not_load_every_review(
     def forbidden(*_: object) -> None:
         raise AssertionError("名前だけの入力で置き場の全件を読んだ")
 
-    monkeypatch.setattr(review_module, "list_reviews", forbidden)
-    monkeypatch.setattr(review_module, "load_review_at", forbidden)
+    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
+    monkeypatch.setattr(catalog_module, "load_review_at", forbidden)
     with pytest.raises(ReviewError, match="候補: local/shop:payment"):
         resolve_review("payment")
 
@@ -166,7 +180,9 @@ def test_name_only_identifier_resolves_in_the_repository_of_the_working_director
     project: Path, tmp_path: Path
 ) -> None:
     review = create_feature_review(project, ["src"], "payment")
-    other = ReviewId("local", "cart", "payment", ReviewKind.FEATURE).directory()
+    other = check_new_review_id(
+        ReviewId("local", "cart", "payment", ReviewKind.FEATURE)
+    ).directory()
     shutil.copytree(review.id.directory(), other)
     meta = json.loads((other / "review.json").read_text(encoding="utf-8"))
     meta["id"] = "local/cart:payment"
@@ -223,16 +239,16 @@ def test_name_only_identifier_reads_neither_every_review_nor_review_contents(
     def forbidden(*_: object) -> None:
         raise AssertionError("名前だけの入力でレビューの中身か全件を読んだ")
 
-    monkeypatch.setattr(review_module, "list_reviews", forbidden)
-    monkeypatch.setattr(review_module, "load_review_at", forbidden)
-    monkeypatch.setattr(review_module, "load_review", forbidden)
+    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
+    monkeypatch.setattr(catalog_module, "load_review_at", forbidden)
+    monkeypatch.setattr(catalog_module, "load_review", forbidden)
     assert resolve_review("payment") == review.id
 
 
 def test_stored_ids_named_includes_archived_reviews(project: Path) -> None:
     review_id = save_review_of_kind(project, "payment", ReviewKind.FEATURE)
     assert set_archived(review_id, archived=True)
-    assert review_module._stored_ids_named("payment") == [review_id]
+    assert resolution_module._stored_ids_named("payment") == [review_id]
 
 
 def test_stored_ids_named_skips_the_trash(project: Path) -> None:
@@ -240,14 +256,14 @@ def test_stored_ids_named_skips_the_trash(project: Path) -> None:
     trashed = data_home() / TRASH_DIRECTORY / "local" / "shop" / "payment"
     trashed.parent.mkdir(parents=True)
     shutil.move(review_id.directory(), trashed)
-    assert review_module._stored_ids_named("payment") == []
+    assert resolution_module._stored_ids_named("payment") == []
 
 
 def test_stored_ids_named_skips_a_broken_review_file(project: Path) -> None:
     broken = save_review_of_kind(project, "payment", ReviewKind.FEATURE)
     intact = save_review_of_kind(project, "payment", ReviewKind.RANGE)
     (broken.directory() / REVIEW_FILE).write_text("{not json", encoding="utf-8")
-    assert review_module._stored_ids_named("payment") == [intact]
+    assert resolution_module._stored_ids_named("payment") == [intact]
 
 
 def test_stored_ids_named_follows_the_prefix_of_each_kind(project: Path) -> None:
@@ -261,7 +277,7 @@ def test_stored_ids_named_follows_the_prefix_of_each_kind(project: Path) -> None
         "@payment",
         "+payment",
     }
-    assert sorted(review_module._stored_ids_named("payment"), key=str) == sorted(ids, key=str)
+    assert sorted(resolution_module._stored_ids_named("payment"), key=str) == sorted(ids, key=str)
 
 
 @pytest.mark.usefixtures("project")
@@ -467,7 +483,7 @@ def test_resolve_full_identifier_does_not_list_reviews(
     def forbidden() -> None:
         raise AssertionError("list_reviews は呼ばない")
 
-    monkeypatch.setattr(review_module, "list_reviews", forbidden)
+    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
     assert resolve_review(str(created.id)) == created.id
     with pytest.raises(ReviewError):
         resolve_review("local/shop:missing")
@@ -508,7 +524,9 @@ def test_save_review_stores_a_diff_without_pull_request(project: Path) -> None:
     assert isinstance(diff_content.origin, RangeOrigin)
     source = diff_content.origin.diff
     base = project.parent / "base"
-    review_id = ReviewId(feature.id.owner, feature.id.repo, "range", ReviewKind.RANGE)
+    review_id = check_review_id(
+        ReviewId(feature.id.owner, feature.id.repo, "range", ReviewKind.RANGE)
+    )
     saved, _ = review_module.save_review(review_id, diff_content, "t", None, str(project))
     assert saved.mode == "diff"
     stored = json.loads((review_id.directory() / "review.json").read_text(encoding="utf-8"))
@@ -566,11 +584,11 @@ def test_legacy_digits_only_feature_record_does_not_break_list_or_resolve(
     assert {review.id for review in listed} == {kept.id, legacy.id, digits_id}
     assert resolve_review(f"{legacy.id.owner}/{legacy.id.repo}:7") == digits_id
     assert resolve_review(f"{legacy.id.repo}:7") == digits_id
-    assert load_review(digits_id).kind is ReviewKind.FEATURE
+    assert load_review(check_review_id(digits_id)).kind is ReviewKind.FEATURE
     # 同じ保存先を指す PR の識別子では読めない。種類は保存した記録の id が決める
     pull_request_id = ReviewId(legacy.id.owner, legacy.id.repo, "7", ReviewKind.PULL_REQUEST)
     with pytest.raises(ReviewKindMismatchError):
-        load_review(pull_request_id)
+        load_review(check_review_id(pull_request_id))
 
 
 def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(project: Path) -> None:
@@ -622,7 +640,7 @@ def test_save_review_refuses_an_id_whose_kind_differs_from_the_content(
 ) -> None:
     range_content = build_content(project, ReviewKind.RANGE)
     key = "7" if wrong_kind is ReviewKind.PULL_REQUEST else "name"
-    review_id = ReviewId("local", "shop", key, wrong_kind)
+    review_id = check_review_id(ReviewId("local", "shop", key, wrong_kind))
     with pytest.raises(ReviewKindMismatchError):
         review_module.save_review(review_id, range_content, "t", None, str(project))
     assert not review_id.directory().exists()
@@ -630,7 +648,7 @@ def test_save_review_refuses_an_id_whose_kind_differs_from_the_content(
 
 def test_save_review_refuses_a_range_id_for_feature_content(project: Path) -> None:
     content = review_module._build_feature_content(project, [project / "src"], None)
-    review_id = ReviewId("local", "shop", "name", ReviewKind.RANGE)
+    review_id = check_review_id(ReviewId("local", "shop", "name", ReviewKind.RANGE))
     with pytest.raises(ReviewKindMismatchError):
         review_module.save_review(review_id, content, "t", None, str(project))
     assert not review_id.directory().exists()
@@ -680,7 +698,7 @@ def test_full_id_of_another_kind_does_not_resolve_to_a_digits_only_feature(
     with pytest.raises(ReviewKindMismatchError):
         resolve_review("local/shop#7")
     with pytest.raises(ReviewKindMismatchError):
-        load_review(ReviewId("local", "shop", "7", ReviewKind.PULL_REQUEST))
+        load_review(check_review_id(ReviewId("local", "shop", "7", ReviewKind.PULL_REQUEST)))
     assert resolve_review(str(feature_id)) == feature_id
 
 
@@ -810,7 +828,7 @@ def test_new_files_roots_at_the_repository_of_the_given_path(
     data = json.loads(capsys.readouterr().out)
     assert data["id"] == "local/mall:p"
     assert data["paths"] == ["lib/b.py"]
-    saved = load_review(ReviewId("local", "mall", "p", ReviewKind.FEATURE))
+    saved = load_review(check_review_id(ReviewId("local", "mall", "p", ReviewKind.FEATURE)))
     assert saved.repository_root == str(other.resolve())
 
 

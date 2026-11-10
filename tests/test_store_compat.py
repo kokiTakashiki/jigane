@@ -11,7 +11,7 @@ from jigane.commands.exit_codes import EXIT_OK
 from jigane.findings.records import load_findings_state, load_history_checked
 from jigane.flaky.gates import load_gates
 from jigane.groups.definitions import GroupId
-from jigane.reviews.lifecycle import read_review_at
+from jigane.reviews.catalog import read_review_at
 from jigane.reviews.selection import load_selection
 from jigane.skills import pipeline
 from jigane.skills.mcp import McpSelection

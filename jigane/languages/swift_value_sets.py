@@ -22,23 +22,17 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import ValueSet
+from jigane.languages.swift_nodes import string_literal
 from jigane.languages.value_set_core import (
     field_text,
     inside_node_types,
     ordered_value_sets,
-    plain_string,
     value_set_of,
     walk_nodes,
 )
 
 _COMMENTS = frozenset({"comment", "multiline_comment"})
 _DEFINITION_NODES = frozenset({"property_declaration", "assignment"})
-
-
-def _string(node: Node) -> str | None:
-    if node.type != "line_string_literal":
-        return None
-    return plain_string(node, {"line_str_text"})
 
 
 def _is_string_enum(node: Node) -> bool:
@@ -62,7 +56,7 @@ def _enum_values(node: Node) -> frozenset[str] | None:
             following = entry.children[index + 1 : index + 3]
             # 値を書かない case の生の値は名前そのものだが、静的には書かれていないので外す
             has_value = len(following) > 1 and following[0].type == "="
-            values.append(_string(following[1]) if has_value else None)
+            values.append(string_literal(following[1]) if has_value else None)
     return value_set_of(values)
 
 
@@ -82,7 +76,7 @@ def _found(root: Node) -> Iterator[tuple[frozenset[str], int, str | None, bool]]
         if node.type == "array_literal":
             name = _declared_name(node)
             elements = [child for child in node.named_children if child.type not in _COMMENTS]
-            values = value_set_of([_string(element) for element in elements])
+            values = value_set_of([string_literal(element) for element in elements])
         elif node.type == "class_declaration" and _is_string_enum(node):
             values = _enum_values(node)
             name = field_text(node, "name")

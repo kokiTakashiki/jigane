@@ -18,6 +18,15 @@ from jigane.skills.group_result import (
     group_outcome,
 )
 
+STOP_RECORD = {
+    "role": "discovery",
+    "index": 0,
+    "estimated_input_tokens": 1,
+    "estimated_input_usd": 0.1,
+    "max_budget_usd": 0.01,
+    "largest_sections": [],
+}
+
 
 @pytest.fixture
 def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
@@ -48,7 +57,7 @@ def test_outcome_is_decided_from_run_state_and_finding_count() -> None:
     partial = group_outcome(as_run({"shards": 2, "succeeded_shards": 1}), 0)
     assert partial == Failed("2 シャードのうち 1 個の発見役が失敗しました")
     assert isinstance(group_outcome(as_run({"failed_splits": 2}), 0), Failed)
-    assert isinstance(group_outcome(as_run({"budget_stops": [{}]}), 0), Failed)
+    assert isinstance(group_outcome(as_run({"budget_stops": [STOP_RECORD]}), 0), Failed)
     # 指摘が残った実行の一部の失敗は、指摘の一覧が状態を言う
     assert group_outcome(as_run({"shards": 2, "succeeded_shards": 1}), 3) == HasFindings()
 

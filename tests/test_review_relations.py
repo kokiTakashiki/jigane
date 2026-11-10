@@ -7,16 +7,16 @@ from typing import Any
 import pytest
 from review_fakes import build_content
 
-from jigane.commands import consent
 from jigane.findings.records import FINDINGS_FILE, load_history_checked
 from jigane.groups.definitions import MACRO, MICRO
 from jigane.reviews import lifecycle as review_module
-from jigane.reviews.lifecycle import LocalRange, RangeOrigin, Review, load_review_at
+from jigane.reviews.catalog import load_review_at
+from jigane.reviews.lifecycle import LocalRange, RangeOrigin, Review
 from jigane.reviews.relations import related_reviews, series_of
-from jigane.reviews.selection import Objected, Selection, save_selection
+from jigane.reviews.selection import Held, Objected, Selection, save_selection
 from jigane.skills import history, macro, micro, security, sharded
 from jigane.skills.assembly import AssemblyInput
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.store import ReviewId, ReviewKind, check_review_id
 
 
 @pytest.fixture
@@ -43,7 +43,9 @@ def save(
             content, origin=RangeOrigin(LocalRange(range_text, str(project)), content.origin.diff)
         )
     review_id = ReviewId(owner, "shop", key, kind)
-    saved, _ = review_module.save_review(review_id, content, created_at, None, str(project))
+    saved, _ = review_module.save_review(
+        check_review_id(review_id), content, created_at, None, str(project)
+    )
     return saved
 
 
@@ -131,11 +133,12 @@ def test_pull_requests_are_never_related(project: Path) -> None:
 def test_related_findings_appear_in_history_with_the_review_name(project: Path) -> None:
     older = save(project, "equiv1", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00", "a..b")
     write_findings(older, [finding(2, "old claim")])
+    save_selection(older.id.directory(), Selection({"F2": Held()}))
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     write_findings(current, [finding(5, "own claim")])
     assert macro.history_text(AssemblyInput.load(current)).splitlines() == [
         "- 前の回 F5 M2 warning in_scope=true 区分=必読 own claim（src/a.py:1）",
-        "- @equiv1 前の回 F2 M2 warning in_scope=true 区分=必読 old claim（src/a.py:1）",
+        "- @equiv1 前の回 F2 hold old claim",
     ]
     assert macro.history_text(AssemblyInput.load(current)) in macro.build_diagram_prompt(
         AssemblyInput.load(current)
@@ -157,18 +160,16 @@ def test_objections_are_appended_for_own_and_related_findings(project: Path) -> 
             "（利用者の異議: 誤り）"
         ),
         "- 前の回 F6 M2 warning in_scope=true 区分=必読 plain（src/a.py:1）",
-        (
-            "- @equiv1 前の回 F2 M2 warning in_scope=true 区分=必読 old claim（src/a.py:1）"
-            "（利用者の異議: 決着済み なので）"
-        ),
+        "- @equiv1 前の回 F2 object old claim",
     ]
 
 
 def test_related_findings_alone_replace_the_empty_history_text(project: Path) -> None:
     older = save(project, "equiv1", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00", "a..b")
     write_findings(older, [finding(2, "old claim")])
+    save_selection(older.id.directory(), Selection({"F2": Held()}))
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
-    expected = "- @equiv1 前の回 F2 M2 warning in_scope=true 区分=必読 old claim（src/a.py:1）"
+    expected = "- @equiv1 前の回 F2 hold old claim"
     assert macro.history_text(AssemblyInput.load(current)) == expected
 
 
@@ -221,9 +222,10 @@ def test_micro_history_carries_triage_and_verdict_for_the_shard_files_only(proje
         },
     }
     (older.id.directory() / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    save_selection(older.id.directory(), Selection({"F1": Held(), "F2": Held()}))
     current = save(project, "retry-2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     assert history.history_text(AssemblyInput.load(current), MICRO, ["src/a.py"]).splitlines() == [
-        "- @retry 前の回 F1 D1 warning 区分=必読 反証=weakened claim 1（src/a.py:3）",
+        "- @retry 前の回 F1 hold claim 1",
     ]
     assert (
         history.history_text(AssemblyInput.load(current), MICRO, ["src/c.py"])
@@ -236,6 +238,7 @@ def test_micro_history_carries_triage_and_verdict_for_the_shard_files_only(proje
 def test_macro_lines_carry_triage_and_deepens_for_own_and_related_rounds(project: Path) -> None:
     older = save(project, "equiv1", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00", "a..b")
     write_findings(older, [{**finding(1, "old deep"), "deepens": "F3", "triage": "remaining"}])
+    save_selection(older.id.directory(), Selection({"F1": Held()}))
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     write_findings(current, [{**finding(5, "own deep"), "deepens": "F2", "triage": "remaining"}])
     assert macro.history_text(AssemblyInput.load(current)).splitlines() == [
@@ -243,10 +246,7 @@ def test_macro_lines_carry_triage_and_deepens_for_own_and_related_rounds(project
             "- 前の回 F5 M2 warning in_scope=true 区分=残り deepens=F2 深掘り（必読に数えない） "
             "own deep（src/a.py:1）"
         ),
-        (
-            "- @equiv1 前の回 F1 M2 warning in_scope=true 区分=残り deepens=F3 "
-            "深掘り（必読に数えない） old deep（src/a.py:1）"
-        ),
+        "- @equiv1 前の回 F1 hold old deep",
     ]
 
 
@@ -272,7 +272,6 @@ def test_the_history_input_is_required_by_every_material_builder() -> None:
         macro.macro_plan,
         macro.run_macro,
         macro.estimate_macro,
-        consent.launch_plan,
     ):
         parameter = inspect.signature(function).parameters["assembly"]
         assert parameter.default is inspect.Parameter.empty, function.__qualname__

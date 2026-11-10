@@ -4,6 +4,7 @@ import argparse
 import json
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, assert_never
 
 from jigane.commands import failures
@@ -14,11 +15,14 @@ from jigane.commands.group_argument import add_group_argument
 from jigane.commands.mcp_argument import add_mcps_argument, load_mcp_selection
 from jigane.commands.output import print_lines
 from jigane.commands.run_guide import run_guide
+from jigane.commands.unparsed_files import print_unparsed_notice
 from jigane.findings.records import HistoryWarning
 from jigane.groups.definitions import Effort, GroupId
 from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
-from jigane.reviews.lifecycle import Review, load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.resolution import resolve_review
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import (
     DesignPolicyEstimate,
@@ -28,6 +32,7 @@ from jigane.skills.estimate_result import (
     SecurityEstimate,
 )
 from jigane.skills.estimator import estimate_of
+from jigane.skills.group_expectation import GroupExpectation, read_expectation
 from jigane.skills.mcp import NO_MCP, McpSelection
 from jigane.skills.output_estimate import skipped_rows_message
 
@@ -148,7 +153,11 @@ class EstimateReport:
 
 
 def estimate_record(
-    report: EstimateReport, review: Review, group: GroupId, defaults: RunDefaults
+    report: EstimateReport,
+    review: Review,
+    group: GroupId,
+    defaults: RunDefaults,
+    expectation: GroupExpectation,
 ) -> dict[str, Any]:
     """`jigane estimate --json` の鍵と値を組む唯一の場所。
 
@@ -163,8 +172,15 @@ def estimate_record(
         "max_budget_usd_per_call": basis.max_budget_usd,
         "run_guide": run_guide(review, group).to_json(),
         "history_warnings": [warning.to_json() for warning in report.warnings],
-        **report.estimate.input_cost_record(basis),
+        **_with_group_expectation(report.estimate.input_cost_record(basis), expectation),
     }
+
+
+def _with_group_expectation(
+    record: dict[str, Any], expectation: GroupExpectation
+) -> dict[str, Any]:
+    """入力の費用の欄の `expected` に群の見込みを重ねる。設計書の形は既存の鍵を残す。"""
+    return {**record, "expected": {**record.get("expected", {}), **expectation.as_record()}}
 
 
 def print_estimate(
@@ -173,6 +189,7 @@ def print_estimate(
     group: GroupId,
     *,
     as_json: bool,
+    expectation: GroupExpectation,
     effort: Effort | None = None,
     max_budget_usd: float | None = None,
 ) -> None:
@@ -187,14 +204,16 @@ def print_estimate(
     if as_json:
         print(
             json.dumps(
-                estimate_record(report, review, group, defaults), ensure_ascii=False, indent=2
+                estimate_record(report, review, group, defaults, expectation),
+                ensure_ascii=False,
+                indent=2,
             )
         )
         return
     print_lines(
         [
             *size_lines(estimate),
-            f"入力トークンの見積もり（素朴な推定）: {estimate.discovery_input_tokens}",
+            f"入力トークンの見積もり（検査と見積もりに使う数）: {estimate.discovery_input_tokens}",
             *notice_lines(estimate),
             *input_cost_lines(estimate, basis),
             *skipped_rows_lines(estimate),
@@ -226,11 +245,13 @@ def estimate_and_print(
     # シャードの数は実行と同じ上限の組から決まる（実行の入口と同じ resolve_run_defaults）
     budget = resolve_run_defaults(group, None, effort, max_budget_usd=max_budget_usd).budget
     estimate = estimate_of(assembly, group, mcp, budget)
+    print_unparsed_notice(review)
     print_estimate(
         EstimateReport(estimate, warnings),
         review,
         group,
         as_json=as_json,
+        expectation=read_expectation(estimate, budget, Path(review.repository_root), group),
         effort=effort,
         max_budget_usd=max_budget_usd,
     )

@@ -6,7 +6,7 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 
 | 内部名 | 表示名 | 入口 | 内容 |
 | --- | --- | --- | --- |
-| `macro_principles_run` | 方針 | `macro_principles_run.run_policy` | 方針の群を走らせる唯一の入口です。図の形は図の起動に加えて、その原則を問える図の形があるときだけ原則ごとに一本ずつ、最大五本を走らせ、設計書の形は一本です。見積もりは `estimate_policy` で、図の形は実際に組み立てた起動のプロンプトの和で数えます。図の起動は claude-sonnet-5-5 で上限 0.36 USD、原則の起動は claude-haiku-5-5 で 1 本の上限 0.02 USD です。原則の起動の出力は `findings` だけで、捨てた候補（`discarded`）は持ちません。違反か nit かだけを判断させ、迷う候補は nit の指摘で出させます |
+| `macro_principles_run` | 方針 | `macro_principles_run.run_policy` | 方針の群を走らせる唯一の入口です。図の形は図の起動に加えて、その原則を問える図の形があるときだけ原則ごとに一本ずつ、最大五本を走らせ、設計書の形は一本です。見積もりは `estimate_policy` で、図の形は実際に組み立てた起動のプロンプトの和で数えます。図の起動は claude-sonnet-5-5 で上限 0.36 USD、原則の起動は claude-haiku-5-5 で 1 本の上限 0.04 USD です。原則の起動の出力は `findings` だけで、捨てた候補（`discarded`）は持ちません。違反か nit かだけを判断させ、迷う候補は nit の指摘で出させます |
 | `macro` | 方針 | `macro.run_macro` | 変更の道筋の誤りを、図と表だけから外形を問います。`extras` を受け、図の形では図の起動に、形のある原則ごとの起動（`ExtraLaunch`）を足した最大五本を並列に走らせます。どの起動にも道具は渡しません。起動は見直しと範囲の判断まで行い、最終の指摘を返します。検証は行わず、`adjudication` を持ちません |
 | `micro` | 実装 | `micro.run_micro`（実行は `sharded.run_sharded`） | 差分をシャードに分け、シャードごとの発見役を並列に起動し、敵対的検証にかけます |
 | `security` | セキュリティ | `security.run_security`（実行は `sharded.run_sharded`） | シャードごとの発見役が MCP の参照体系を引き、敵対的検証にかけます。MCP の設定が要ります |
@@ -25,15 +25,17 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 | `sharded.plan_shards` | シャードの数を決める唯一の置き場です。4 個のプロンプトが上限で止まるときだけ 8 個まで増やし、どれも止まらない最小の数を選びます。実行、見積もり、同意の回数が使います |
 | `input_budget.check_input_budget` | 起動の前に、プロンプトの大きさの下限の見積もりで、1 回の起動の上限（CLI に渡す値は最後の一往復の見込みを引く。実装とセキュリティは、書き込みと出力の見込みを足した額が上限以上なら止める）を超えそうな起動を止めます。最初の往復の超過は防げません。全ての群が共有します |
 | `pipeline.save_run` | 候補の正規化と、実行の保存を群の間で共有します |
-| `group_result.group_outcome` | 群の実行の結果の五状態を決めます |
+| `pipeline.run_gaps` | この回で通らなかった起動の失敗（`LaunchGap`）と見送り（`BudgetStopGap`）の事実の一覧を返します。`run` の終了コード 3 と誤りの行の元です |
+| `group_result.group_outcome` | 群の実行の結果の五状態を決めます。材料なしかどうかは `PolicyGroupRun.missing_materials` だけで決まり、空でない `no_material` を読み替えた `RecordedMissing`（知っている種類と知らない値の有無）をそのまま `NoMaterial` に渡します |
 | `sharded.run_sharded` | シャードに分けた群（実装、セキュリティ）の共通の実行器です。発見役の起動、並列化、失敗の集計、範囲外の除外、検証、保存を持ち、群は `ShardedGroup` で違いだけを渡します |
 | `estimator.estimate_of` | 群の識別子から、その群の見積もりの関数を選びます。群ごとの分岐はここだけに置きます |
 | `estimate_result` | 見積もりの結果の型です。群ごとの型の和で、確認の画面と `jigane estimate` の出力が読みます |
+| `group_expectation.group_expectation` | 群の見込みを、発見役の見積もりに検証役の倍率を掛けて返します。倍率は回の記録（`runs.json`）の今の版の欄、既定の値の順に引き、方針は 1 です |
 | `output_estimate.estimate_output` | 設計書の形の見込みの総額を、入力の費用に過去の実額から出した倍率を掛けて返します |
 | `run_record.tracking` | 群の実行の途中経過を記録します。割り込みで止まった実行を、止めた実行の記録へ移します |
 | `received_concerns.received_concerns` | 実装の群が方針から受け取った懸念を、シャードと指摘に対応づけます |
 | `assembly.AssemblyInput` | 資料の組み立てへ渡す唯一の入力です。レビューと、履歴（同じレビューの分と関連するレビューの分）を作る場所で一度だけ読んで束ね、組み立ての中では読み直しません |
-| `history.history_text` | 前の回の指摘を、回ごとに主張と根拠の位置の一行ずつにして返します。方針と実装が共有します。`shard_history_text` はシャードの雛形の `$history` に差し込む文を返します |
+| `history.history_text` | 前の回の指摘の資料を返します。同じレビューの直前の回は主張と根拠の位置の一行ずつ、それより前の回と別のレビューの回は hold と object の指摘だけを「番号 扱い 主張の先頭」の一行にして `OLDER_ROUND_LINE_LIMIT` 行で切ります。方針と実装が共有します。`shard_history_text` はシャードの雛形の `$history` に差し込む文を返します |
 | `scope.split_by_scope` | 役の出力に範囲外の印（`in_scope` と `scope_reason`）の項目を足し、それを読んで範囲外の記録を作ります。方針と、シャードに分ける群が共有します。範囲外かの判定は `findings.judge_scope` が持ちます |
 | `disclosed.merge_groups` | 発見役が開示済みの限界として挙げた候補を nit に直し（`disclosed_as_nit`）、検めた組（`vet_groups`）ごとに一件へまとめます |
 | `bundle_disclosed.bundle_disclosed` | 開示済みの限界の nit が 2 件以上のときだけ、同じ限界を束ねる役を道具なしで一回起動し、シャードをまたぐ同じ限界を一件にします。起動の失敗と、スキーマに合わない出力のときは、まとめずに指摘をそのまま返します |
@@ -52,13 +54,13 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 - `policy_tree.py`：方針の資料の三つの材料が共有する、読み取り専用の木を持ちます。作るときに全ファイルを一度だけ読み、言語とテストの判定を一か所で持ちます。
 - `policy_repeats.py`：同じ形の繰り返しを木から探します。
 - `policy_value_sets.py`：登録簿の「値の組の表」を持ちます。定義の欄の場所には、名前に束ねた定義なら名前を、リテラルの写しなら（リテラル）を添えます。変更したファイルが、組の定義、値を含むファイル、文字列で比べている箇所のどれかに当たる組だけを、テストでない定義の数、続けてコードと文書の数の合計が多い順に並べ、最後の列に、差分で足した行が組の定義、値の文字列、比較のどれに触れたかを出します。
-- `policy_field_copies.py`：登録簿の「足した型と同じ項目を持つ型」の表を持ちます。変更したファイルと変更後の木のファイルを、言語アダプタの `TypeFieldReader`（`type_fields`）で読み、変更で足した、または項目が変わったトップレベルの型について、別の型と項目の名前を二つ以上共有する行を出します（先頭が `_` の名前は除きます）。Python はクラス本体の型注記の項目と列挙の値、Swift は構造体、クラス、アクター、列挙型の格納プロパティ（計算プロパティと `static` を除く）と列挙型の case が項目です。名前と数だけを渡し、コードの文は渡しません。口を持たない言語（Java、C#）の変更には、資料と `diagrams` に対応外の一文を出します。
-- `policy_callers.py`：登録簿の「足した公開の口と呼ぶ側」を持ちます。変更で足した、または引数を足した公開の名前（先頭が `_` でない関数、メソッド、クラス、列挙の値、引数）を一行ずつ、名前、種類、定義の場所、呼ぶ側の数、呼ぶ側で出します。読み取りは言語のアダプタの口（`PublicNameReader`）に任せ、変更と木のファイルをアダプタごとに分けて、口を持つアダプタごとに呼んで行をつなぎます。Python の実装は `jigane/languages/python_public_names.py`、Swift の実装は `jigane/languages/swift_public_names.py`（tree-sitter。`private` と `fileprivate` を除き、引数はラベルで照合する）にあり、呼ぶ側は変更の後の木の中を名前で照合して数え、再帰は除きます。口を持たない言語（Java、C#）の変更には、資料に対応外の一文を出します。行が無ければ節ごと省きます。
+- `policy_field_copies.py`：登録簿の「足した型と同じ項目を持つ型」の表を持ちます。変更したファイルと変更後の木のファイルを、言語アダプタの `TypeFieldReader`（`type_fields`）で読み、変更で足した、または項目が変わったトップレベルの型について、別の型と項目の名前を二つ以上共有する行を出します（先頭が `_` の名前は除きます）。Python はクラス本体の型注記の項目と列挙の値、Swift は構造体、クラス、アクター、列挙型の格納プロパティ（計算プロパティと `static` を除く）と列挙型の case、Java は `class`、`record`、`enum` のインスタンスのフィールド、`record` の成分、列挙の定数（`static` のフィールドを除く）、C# は `class`、`struct`、`record`、`enum` のインスタンスのフィールド、自動実装プロパティ、`record` の位置引数、列挙子（`static`、`const`、本体を持つプロパティ、`event` を除く）が項目です。名前と数だけを渡し、コードの文は渡しません。口を持たない言語の変更には、資料と `diagrams` に対応外の一文を出します。
+- `policy_callers.py`：登録簿の「足した公開の口と呼ぶ側」を持ちます。変更で足した、または引数を足した公開の名前（先頭が `_` でない関数、メソッド、クラス、列挙の値、引数）を一行ずつ、名前、種類、定義の場所、呼ぶ側の数、呼ぶ側で出します。読み取りは言語のアダプタの口（`PublicNameReader`）に任せ、変更と木のファイルをアダプタごとに分けて、口を持つアダプタごとに呼んで行をつなぎます。Python の実装は `jigane/languages/python_public_names.py`、Swift の実装は `jigane/languages/swift_public_names.py`（tree-sitter。`private` と `fileprivate` を除き、引数はラベルで照合する）にあり、C# の実装は `jigane/languages/csharp_public_names.py`（`private` と `file` を除き、メソッドグループは呼ぶ側に数えない）に、Java の実装は `jigane/languages/java_public_names.py`（`private` を除く）にあります。呼ぶ側は変更の後の木の中を名前で照合して数え、再帰は除きます。口を持たない言語の変更には、資料に対応外の一文を出します。行が無ければ節ごと省きます。
 - `policy_regex.py`：変更した正規表現の選り分けと、登録簿の「正規表現の表」を持ちます。実装とセキュリティの断片には、同じ選り分けの札を `$shard_checks` で渡します。
 - `policy_tables.py`：変更したファイルから読んだ項目の表を、変更前後の差（追加、変更、削除の印）つきで組む共通の骨組み（`diff_table`）を持ちます。
 - `policy_commands.py`：登録簿の「副コマンドの引数」の表を持ちます。argparse の `add_argument` を構文木だけから読みます。
 - `policy_file_paths.py`：登録簿の「ファイルの名前の組み立て」の表を持ちます。書き出す（または読む）ファイルの名前の組み立てを、関数ごとに構文木だけから読みます。
-- `policy_stores.py`：登録簿の「保存物の書く側と読む側」の表を持ちます。JSON、CSV、TSV のファイルの名前の定数、または `to_json` と `from_json` を持つ型で保存物を束ね、書く側と読む側が使う鍵の集合を並べます。鍵の抽出は言語の層（`StoreAccessReader`）が行います。
+- `policy_stores.py`：登録簿の「保存物の書く側と読む側」の表を持ちます。JSON、CSV、TSV のファイルの名前の定数、または `to_json` と `from_json` を持つ型で保存物を束ね、書く側と読む側が使う鍵の集合を並べます。鍵の抽出は言語の層（`StoreAccessReader`。Python と、Swift の `UserDefaults`、Codable の JSON、Keychain（`SecItem` の関数。鍵は問い合わせの `kSecAttrAccount`）。Codable の JSON は型の名前で束ねます）が行います。
 - `policy_concurrency.py`：登録簿の「並行処理の図」を持ちます。変更した関数ごとに、隔離の領域を列にしたシーケンス図を作り、領域をまたぐ `await` だけを矢印にします。言語アダプタの `ConcurrencyAdapter` から手順を受け取ります。
 - `policy_cochange.py`：変更したファイルと git の履歴で一緒に変わったファイルの対を、import の依存の有無（あり、なし、コード以外）と並べた登録簿の「共変更の表」を持ちます。履歴が読めないレビューでは節を省きます。
 
@@ -83,7 +85,7 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`design`、`figures`、`findings`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`markdown`、`policy_materials`、`preconditions`、`pull_request_context`、`regex`、`reviews`、`sequence`、`storage`、`technology_list`
+読むサブパッケージ：`design`、`figures`、`findings`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`markdown`、`policy_materials`、`preconditions`、`pull_request_context`、`regex`、`reviews`、`sequence`、`storage`、`technology_list`、`text`
 
 読まれるサブパッケージ：`commands`
 

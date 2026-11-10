@@ -18,11 +18,11 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import ComparisonKind, StringComparison
+from jigane.languages.swift_nodes import string_literal
 from jigane.languages.value_set_core import (
     literal_strings,
     non_empty,
     ordered_comparisons,
-    plain_string,
     walk_nodes,
 )
 
@@ -34,9 +34,7 @@ _LOGICAL = frozenset({"disjunction_expression", "conjunction_expression"})
 
 
 def _string(node: Node) -> str | None:
-    if node.type != "line_string_literal":
-        return None
-    return non_empty(plain_string(node, {"line_str_text"}))
+    return non_empty(string_literal(node))
 
 
 def _literal_strings(node: Node) -> list[str] | None:

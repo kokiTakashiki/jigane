@@ -16,6 +16,7 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import MACRO, GroupId
 from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.selection import Held, Selection, save_selection
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 
@@ -107,4 +108,5 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_history_text_lists_other_findings_beside_settled_earlier_nit(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     (review.id.directory() / HISTORY_FILE).write_text(json.dumps(_history_raw()), encoding="utf-8")
-    assert "F2" in macro.history_text(AssemblyInput.load(review))
+    save_selection(review.id.directory(), Selection({"F2": Held()}))
+    assert "F2 hold" in macro.history_text(AssemblyInput.load(review))

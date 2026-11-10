@@ -4,8 +4,8 @@ import shutil
 from pathlib import Path
 
 from jigane.groups.definitions import GroupId
+from jigane.reviews.catalog import read_review_at, set_repository_root
 from jigane.reviews.group_state import clear_group_state
-from jigane.reviews.lifecycle import read_review_at, set_repository_root
 
 
 def copy_review_directory(

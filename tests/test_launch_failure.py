@@ -4,15 +4,14 @@ from typing import Any
 import pytest
 
 from jigane.llm_runs.claude import FailureKind
+from jigane.llm_runs.failure_views import FailureView, failure_views
 from jigane.llm_runs.launch_failure import (
     CandidatesUnverified,
     DiscoveryLaunchFailed,
     Disposition,
-    FailureView,
     StoredFailure,
     VerificationLaunchFailed,
     failure_from_record,
-    failure_views,
     rerun_count,
     stopped_rerun_count,
 )

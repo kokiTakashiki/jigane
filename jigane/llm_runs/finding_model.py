@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from jigane.findings.discard import DiscardKind
-from jigane.findings.records import ToolBasis, Triage, Verdict
+from jigane.findings.records import KEY_ADJUDICATION, KEY_THEME, ToolBasis, Triage, Verdict
 from jigane.groups.definitions import GroupId
 from jigane.groups.viewpoints import of_group
 from jigane.llm_runs.claude_schema import json_schema_of
@@ -127,12 +127,15 @@ class OutOfScope(BaseModel):
 
 Adjudication = Annotated[Rebuttal | Alternative, Field(discriminator="kind")]
 
+# 並びは重い順で、この順を指摘の重さの順位として使う
+FindingSeverity = Literal["critical", "warning", "nit"]
+
 
 class Finding(BaseModel):
     model_config = STRICT_OUTPUT
 
     id: FindingId
-    severity: Literal["critical", "warning", "nit"]
+    severity: FindingSeverity
     group: Annotated[GroupId, Field(strict=False)]
     viewpoint: NonEmpty
     claim: NonEmpty
@@ -183,7 +186,7 @@ DISCOVERY_DISCLOSED_AT_DESCRIPTION = (
 )
 
 # 保存する指摘のうち、発見役が決めず後の段が付ける欄
-ASSIGNED_LATER = ("id", "group", "adjudication", "theme", "triage")
+ASSIGNED_LATER = ("id", "group", KEY_ADJUDICATION, KEY_THEME, "triage")
 
 _SOURCE_ID = re.compile(r"^S[0-9]+$")
 

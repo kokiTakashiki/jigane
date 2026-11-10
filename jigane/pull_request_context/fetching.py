@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand, build_git_command
+from jigane.git.revision import CommitSha, parse_commit_sha
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context import gh
 from jigane.storage import store
@@ -25,8 +27,8 @@ class PullRequestMetadata:
     url: str
     title: str
     body: str
-    base_sha: str
-    head_sha: str
+    base_sha: CommitSha
+    head_sha: CommitSha
     author: str
 
 
@@ -40,6 +42,12 @@ def parse_pull_request_url(url: str) -> tuple[str, str, int]:
 def fetch_metadata(owner: str, repo: str, number: int) -> PullRequestMetadata:
     output = gh.view_pull_request(owner, repo, number)
     data = json.loads(output)
+    # gh の応答の SHA の形を確かめる唯一の点。以後は型が形を保証する
+    try:
+        base_sha = parse_commit_sha("baseRefOid", str(data["baseRefOid"]))
+        head_sha = parse_commit_sha("headRefOid", str(data["headRefOid"]))
+    except ValueError as error:
+        raise store.ReviewError(str(error)) from None
     return PullRequestMetadata(
         owner=owner,
         repo=repo,
@@ -47,8 +55,8 @@ def fetch_metadata(owner: str, repo: str, number: int) -> PullRequestMetadata:
         url=data["url"],
         title=data["title"],
         body=data["body"],
-        base_sha=data["baseRefOid"],
-        head_sha=data["headRefOid"],
+        base_sha=base_sha,
+        head_sha=head_sha,
         author=data["author"]["login"],
     )
 
@@ -90,25 +98,41 @@ def ensure_repository_cache(owner: str, repo: str) -> Path:
     return cache_dir
 
 
-def fetch_pull_request(git_dir: Path, metadata: PullRequestMetadata) -> str:
+def fetch_pull_request(git_dir: Path, metadata: PullRequestMetadata) -> CommitSha:
     """二つのコミットを取得し、変更前のツリーとなる merge-base のコミットを返す。"""
-    process.run_command(["git", "fetch", "origin", metadata.head_sha], cwd=git_dir)
+    head = metadata.head_sha
+    base = metadata.base_sha
+    process.run_command(
+        build_git_command(GitSubcommand.FETCH, fixed_values=["origin"], revisions=[head]),
+        cwd=git_dir,
+    )
     try:
-        process.run_command(["git", "fetch", "origin", metadata.base_sha], cwd=git_dir)
+        process.run_command(
+            build_git_command(GitSubcommand.FETCH, fixed_values=["origin"], revisions=[base]),
+            cwd=git_dir,
+        )
     except process.CommandError:
         # base ブランチが進んで base_sha が到達不能になると直接は取れない。
         # PR の ref は作成時点の base を履歴に含む
         process.run_command(
-            ["git", "fetch", "origin", f"pull/{metadata.number}/head"], cwd=git_dir
+            build_git_command(
+                GitSubcommand.FETCH,
+                fixed_values=["origin", f"pull/{metadata.number}/head"],
+            ),
+            cwd=git_dir,
         )
     # base ブランチの後の進みを含めないため、変更前は base の先頭でなく merge-base
     merge_base = process.run_command(
-        ["git", "merge-base", metadata.base_sha, metadata.head_sha], cwd=git_dir
+        build_git_command(GitSubcommand.MERGE_BASE, revisions=[base, head]), cwd=git_dir
     )
-    return merge_base.strip()
+    # git の出力を読むこの点で、merge-base の形を一度だけ確かめる
+    try:
+        return parse_commit_sha("merge-base", merge_base.strip())
+    except ValueError as error:
+        raise store.ReviewError(str(error)) from None
 
 
-def extract_tree(git_dir: Path, commit: str, destination: Path) -> None:
+def extract_tree(git_dir: Path, tree: CommitSha, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
@@ -116,7 +140,11 @@ def extract_tree(git_dir: Path, commit: str, destination: Path) -> None:
     with tempfile.TemporaryDirectory() as temporary:
         archive_path = Path(temporary) / "tree.tar"
         process.run_command(
-            ["git", "archive", "--format=tar", "-o", str(archive_path), commit],
+            build_git_command(
+                GitSubcommand.ARCHIVE,
+                options=["--format=tar", "-o", str(archive_path)],
+                revisions=[tree],
+            ),
             cwd=git_dir,
         )
         try:
@@ -124,7 +152,9 @@ def extract_tree(git_dir: Path, commit: str, destination: Path) -> None:
                 archive.extractall(destination, filter="data")
         except tarfile.ReadError:
             # 空の木の git archive は tar として読めない。木の空は ls-tree の出力で確かめる
-            if process.run_command(["git", "ls-tree", commit], cwd=git_dir).strip():
+            if process.run_command(
+                build_git_command(GitSubcommand.LS_TREE, revisions=[tree]), cwd=git_dir
+            ).strip():
                 raise
             # 木が空なら、作成済みの空のディレクトリがそのまま写しになる
 
@@ -152,9 +182,13 @@ def parse_name_status(output: str) -> list[FilePair]:
     return pairs
 
 
-def changed_file_pairs(git_dir: Path, base_commit: str, head_commit: str) -> list[FilePair]:
+def changed_file_pairs(git_dir: Path, base: CommitSha, head: CommitSha) -> list[FilePair]:
     output = process.run_command(
-        ["git", "diff", "--name-status", "-M", "-z", base_commit, head_commit],
+        build_git_command(
+            GitSubcommand.DIFF,
+            options=["--name-status", "-M", "-z"],
+            revisions=[base, head],
+        ),
         cwd=git_dir,
     )
     return parse_name_status(output)

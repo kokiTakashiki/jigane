@@ -54,6 +54,69 @@ def test_mismatched_keys_show_in_the_difference_columns(tmp_path: Path) -> None:
     assert plan[4] == "extra"
 
 
+SWIFT_SOURCE = """
+struct Settings {
+    func save() {
+        UserDefaults.standard.set("x", forKey: "written")
+        UserDefaults.standard.set("x", forKey: "both")
+    }
+    func load() -> String? {
+        _ = UserDefaults.standard.string(forKey: "read")
+        return UserDefaults.standard.string(forKey: "both")
+    }
+}
+"""
+
+
+def test_swift_user_defaults_row_shows_write_only_and_read_only_keys(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(feature_review(tmp_path, "Settings.swift", SWIFT_SOURCE))
+    assert isinstance(figure, TableFigure)
+    row = {r.cells[0]: r.cells for r in figure.rows}["UserDefaults"]
+    assert row[1] == "Settings.save: both, written"
+    assert row[2] == "Settings.load: both, read"
+    assert row[3] == "written"
+    assert row[4] == "read"
+
+
+SWIFT_CODABLE_SOURCE = """
+struct Profile: Codable {
+    var name: String
+    var age: Int
+}
+struct Repo {
+    func save(_ profile: Profile) throws {
+        _ = try JSONEncoder().encode(profile)
+    }
+}
+struct Reader {
+    func load(data: Data) throws -> Profile {
+        try JSONDecoder().decode(Profile.self, from: data)
+    }
+}
+"""
+
+
+def test_swift_codable_json_row_binds_by_type_name(tmp_path: Path) -> None:
+    review = feature_review(tmp_path, "Profile.swift", SWIFT_CODABLE_SOURCE)
+    figure = policy_stores.store_table(review)
+    assert isinstance(figure, TableFigure)
+    row = {r.cells[0]: r.cells for r in figure.rows}["Profile の JSON"]
+    assert row[1] == "Repo.save: age, name"
+    assert row[2] == "Reader.load: age, name（作る型: Profile）"
+    assert row[3] == ""
+    assert row[4] == ""
+
+
+def test_swift_codable_json_without_reader_shows_unknown_reader(tmp_path: Path) -> None:
+    source = SWIFT_CODABLE_SOURCE.replace("decode(Profile.self", "decode(Other.self")
+    review = feature_review(tmp_path, "Profile.swift", source)
+    figure = policy_stores.store_table(review)
+    assert isinstance(figure, TableFigure)
+    rows = {r.cells[0]: r.cells for r in figure.rows}
+    assert rows["Profile の JSON"][2] == policy_stores.NOT_FOUND
+    assert rows["Other の JSON"][1] == policy_stores.NOT_FOUND
+
+
 def test_no_figure_when_the_change_touches_no_store(tmp_path: Path) -> None:
     (tmp_path / "store.py").write_text(SOURCE, encoding="utf-8")
     review = feature_review(tmp_path, "m.py", "x = 1\n")
@@ -257,3 +320,30 @@ def test_fixed_name_store_without_a_counterpart_stays_not_found(tmp_path: Path) 
     assert isinstance(figure, TableFigure)
     row = {row.cells[0]: row.cells for row in figure.rows}["urls.json"]
     assert row[2] == policy_stores.NOT_FOUND
+
+
+SWIFT_KEYCHAIN_SOURCE = """
+struct Vault {
+    func save() {
+        let q: [String: Any] = [kSecAttrAccount as String: "written", kSecAttrService: "s"]
+        SecItemAdd(q as CFDictionary, nil)
+        SecItemAdd([kSecAttrAccount as String: "both"] as CFDictionary, nil)
+    }
+    func load() {
+        SecItemCopyMatching([kSecAttrAccount as String: "read"] as CFDictionary, &r)
+        SecItemCopyMatching([kSecAttrAccount as String: "both"] as CFDictionary, &r)
+    }
+}
+"""
+
+
+def test_swift_keychain_row_shows_write_only_and_read_only_accounts(tmp_path: Path) -> None:
+    figure = policy_stores.store_table(
+        feature_review(tmp_path, "Vault.swift", SWIFT_KEYCHAIN_SOURCE)
+    )
+    assert isinstance(figure, TableFigure)
+    row = {r.cells[0]: r.cells for r in figure.rows}["Keychain"]
+    assert row[1] == "Vault.save: both, written"
+    assert row[2] == "Vault.load: both, read"
+    assert row[3] == "written"
+    assert row[4] == "read"

@@ -1,18 +1,5 @@
-"""レビューの読み書きで、利用者へそのまま伝える失敗。"""
+"""レビューの失敗の import の入口。開発用リポジトリの継ぎ目のため残す。定義は store.py。"""
 
-from jigane.storage.store import ReviewId
+from jigane.storage.store import ReviewError, ReviewExistsError
 
-
-class ReviewError(Exception):
-    pass
-
-
-class ReviewExistsError(ReviewError):
-    """作ろうとしたレビューの識別子が、既にあるレビューと重なった。
-
-    呼ぶ側は誤りとして止めず、`review_id` のレビューを開ける。
-    """
-
-    def __init__(self, review_id: ReviewId, message: str) -> None:
-        super().__init__(message)
-        self.review_id = review_id
+__all__ = ["ReviewError", "ReviewExistsError"]

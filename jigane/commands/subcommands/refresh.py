@@ -19,6 +19,7 @@ from jigane.commands.views.review import (
 from jigane.design.review_documents import refresh_design_doc
 from jigane.findings.records import mark_stale
 from jigane.reviews import lifecycle as review_module
+from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import (
     NO_DECLARED_INPUTS,
     DeclaredInputs,
@@ -31,10 +32,11 @@ from jigane.reviews.lifecycle import (
     Review,
     ReviewError,
     ReviewInputs,
-    resolve_review,
 )
+from jigane.reviews.range_head import RefreshHead, RefreshHeadReason
+from jigane.reviews.resolution import resolve_review
 from jigane.static_analysis.intake import sarif_request
-from jigane.storage.store import ReviewId
+from jigane.storage.store import CheckedReviewId
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -49,7 +51,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
 
 
 def refresh_review(
-    review_id: ReviewId,
+    review_id: CheckedReviewId,
     inputs: DeclaredInputs = NO_DECLARED_INPUTS,
     working_directory: Path | None = None,
 ) -> RefreshResult:
@@ -59,7 +61,7 @@ def refresh_review(
     設計書のレビューには重ねないので、渡すと ReviewError になる。
     出所の型から更新の手への振り分けは、ここの一か所だけが持つ。
     """
-    review = review_module.load_review(review_id)
+    review = load_review(review_id)
     sarif = inputs.sarif
     replacement = review_module.read_intent(
         working_directory or Path.cwd(), inputs.intent, inputs.intent_file
@@ -91,6 +93,32 @@ def refresh_review(
     return result
 
 
+def _reason_text(reason: RefreshHeadReason) -> str:
+    match reason:
+        case RefreshHeadReason.RESOLVED_RANGE:
+            return "範囲の文字列を解き直しました"
+        case RefreshHeadReason.FOLLOWED_BRANCH:
+            return "記録した枝の先端へ進めました"
+        case RefreshHeadReason.BRANCH_MISSING:
+            return (
+                "記録した枝が無いので、先端を進めず記録した SHA のままにしました。"
+                "新しい先端で回を作るには、"
+                "`jigane new range <base>..<新しい先端>` で作り直してください"
+            )
+        case RefreshHeadReason.UNTRACKED:
+            return "追う枝を持たないので、記録した SHA のままです"
+        case _:
+            assert_never(reason)
+
+
+def head_lines(head: RefreshHead | None) -> list[str]:
+    """範囲のレビューの refresh が回を作った先端の行。範囲でないレビューは行を持たない。"""
+    if head is None:
+        return []
+    branch = head.branch if head.branch is not None else "（枝なし）"
+    return [f"先端: {branch} {head.sha[:12]}（{_reason_text(head.reason)}）"]
+
+
 def refresh_and_print(
     text: str,
     *,
@@ -104,10 +132,13 @@ def refresh_and_print(
         return review
     if not result.updated:
         print(f"変更なし: {review.id}")
+        if result.head is not None:
+            print_lines(head_lines(result.head))
         return review
     changes = result.region_changes
     print_lines(
         [f"レビューを更新しました: {review.id}", f"対象: {len(review.paths)} ファイル"],
+        head_lines(result.head),
         source_lines(review),
         map_lines(review),
         warning_lines(review),

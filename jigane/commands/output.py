@@ -116,9 +116,11 @@ def print_removal(removal: selection_module.Removal) -> None:
         print(f"注: 扱いが違うため外さなかった指摘: {', '.join(removal.skipped)}", file=sys.stderr)
 
 
-def print_selection(review: Review, *, as_json: bool) -> None:
+def print_selection(review: Review, *, as_json: bool, heading: str | None = None) -> None:
+    """記録の操作の出力。古い選択の本文は出さず、識別子と件数だけを添える。"""
     history = load_history_checked(review.id.directory())
     if as_json:
         print(json.dumps(selection_json(review, history), ensure_ascii=False, indent=2))
         return
-    print_lines(selection_lines(review, history))
+    lines = selection_lines(review, history, include_stale_text=False)
+    print_lines([heading, *lines] if heading else lines)

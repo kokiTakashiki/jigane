@@ -36,36 +36,26 @@ from jigane.llm_runs.launch_failure import Disposition, Stage
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import (
     adversarial,
+    discovery_errors,
     history,
     input_budget,
     micro,
-    pipeline,
     security,
     sharded,
     shards,
 )
 from jigane.skills.assembly import AssemblyInput
+from jigane.skills.pipeline import ShardedGroupRun
 
+# 実装とセキュリティの群の記録が書く鍵。shape と discarded は方針の群だけが書く
 RUN_STATE_KEYS = {
-    "ran_at",
-    "elapsed_s",
-    "model",
+    *ShardedGroupRun._HEAD_PLAIN_KEYS,
+    *ShardedGroupRun._HEAD_NESTED_KEYS,
     "effort",
-    "invocations",
-    "discovered",
-    "dropped_without_evidence",
-    "dropped_outside_shard",
-    "dropped_invalid_schema",
-    "failed_splits",
-    "launch_failures",
-    "unverified_candidates",
-    "shards",
-    "succeeded_shards",
-    "target_files",
-    "reviewed_files",
+    *ShardedGroupRun._OWN_PLAIN_KEYS,
     "budget_stops",
     "mcp_servers",
-}
+} - {"shape", "discarded"}
 
 
 @pytest.fixture
@@ -157,7 +147,7 @@ def test_findings_are_saved_under_the_group_name(project: Path) -> None:
 def test_all_shards_failing_raises_a_discovery_error_with_the_group(project: Path) -> None:
     calls: list[list[StoredFinding]] = []
     review = create_feature_review(project, ["src"], "p")
-    with pytest.raises(pipeline.DiscoveryError) as raised:
+    with pytest.raises(discovery_errors.DiscoveryError) as raised:
         sharded.run_sharded(
             spec_with(calls),
             AssemblyInput.load(review),
@@ -817,3 +807,14 @@ def test_nit_candidates_are_not_verified_so_they_are_never_unverified(project: P
     assert run.run_state.unverified_candidates == 0
     assert saved_micro(review)
     assert Triage.UNVERIFIED not in {f.decision.triage for f in saved_micro(review)}
+
+
+def test_shard_history_with_only_older_lines_gets_the_older_rule(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    older_only = ("- 2 回前 F3 hold 主張", history._Found(latest=False, older=True))
+    monkeypatch.setattr(history, "_round_text", lambda *_args: older_only)
+    text = history.shard_history_text(AssemblyInput.load(review), MICRO, {"src/a.py"})
+    assert text.endswith(history.OLDER_FINDINGS_RULE)
+    assert history.PREVIOUS_FINDINGS_RULES not in text

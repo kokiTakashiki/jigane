@@ -33,10 +33,10 @@ from jigane.languages.concurrency_core import (
     Extractor,
     WalkRules,
     line_of,
-    text_of,
 )
+from jigane.languages.node_text import text_or_empty
+from jigane.languages.swift_nodes import TYPE_DECLARATIONS
 
-_TYPE_DECLARATIONS = frozenset({"class_declaration", "protocol_declaration"})
 _TASK_GROUPS = frozenset(
     {
         "withTaskGroup",
@@ -48,7 +48,7 @@ _TASK_GROUPS = frozenset(
 _ADD_TASK = frozenset({"addTask", "addTaskUnlessCancelled"})
 _SLEEPS = frozenset({"usleep", "sleep"})
 # 別の本体になる宣言。手順を取るために降りない
-_SKIPPED = frozenset({"function_declaration", "class_declaration", "protocol_declaration"})
+_SKIPPED = TYPE_DECLARATIONS | {"function_declaration"}
 _COMMENTS = frozenset({"comment", "multiline_comment"})
 # 索引に宣言の無い外部の型の名前の表。UIKit のクラスとデリゲートのプロトコル、
 # SwiftUI の View と App と Scene が @MainActor なため、上位に持つと MainActor を引き継ぐ。
@@ -68,7 +68,7 @@ def isolation_of(node: Node, context: IsolationContext) -> Isolation:
     own = _annotation(node)
     if own is not None:
         return own
-    if node.type in _TYPE_DECLARATIONS:
+    if node.type in TYPE_DECLARATIONS:
         return _type_isolation(node, context)
     # メンバは自分の注記が無ければ、所属する型の領域に従う。入れ子の型には届かせない
     owner = node.parent.parent if node.parent is not None else None
@@ -79,12 +79,12 @@ def isolation_of(node: Node, context: IsolationContext) -> Isolation:
 
 def _type_name(node: Node) -> str:
     name = node.child_by_field_name("name")
-    return "".join(text_of(name).split()).rsplit(".", 1)[-1] if name is not None else ""
+    return "".join(text_or_empty(name).split()).rsplit(".", 1)[-1] if name is not None else ""
 
 
 def _declaration_kind(node: Node) -> str:
     kind = node.child_by_field_name("declaration_kind")
-    return text_of(kind) if kind is not None else ""
+    return text_or_empty(kind) if kind is not None else ""
 
 
 def _type_isolation(node: Node, context: IsolationContext) -> Isolation:
@@ -145,8 +145,8 @@ def _bases_in(syntax: Node) -> list[tuple[str, bool]]:
     for child in syntax.children:
         if child.type == "inheritance_specifier":
             inherited = child.child_by_field_name("inherits_from")
-            name = text_of(inherited).split("<")[0].strip() if inherited is not None else ""
-            unchecked = previous is not None and "unchecked" in text_of(previous)
+            name = text_or_empty(inherited).split("<")[0].strip() if inherited is not None else ""
+            unchecked = previous is not None and "unchecked" in text_or_empty(previous)
             found.append((name.rsplit(".", 1)[-1], unchecked))
         previous = child if child.type == "attribute" else None
     return found
@@ -186,7 +186,7 @@ def _has_stored_var(syntax: Node) -> bool:
             continue
         binding = next((c for c in member.children if c.type == "value_binding_pattern"), None)
         computed = any(c.type == "computed_property" for c in member.children)
-        if binding is not None and text_of(binding).startswith("var") and not computed:
+        if binding is not None and text_or_empty(binding).startswith("var") and not computed:
             return True
     return False
 
@@ -246,7 +246,7 @@ def _attribute_domain(attribute: Node) -> GlobalActorDomain | None:
     user_type = next((c for c in attribute.children if c.type == "user_type"), None)
     if user_type is None:
         return None
-    name = text_of(user_type)
+    name = text_or_empty(user_type)
     return GlobalActorDomain(name) if name.endswith("Actor") else None
 
 
@@ -255,7 +255,9 @@ def _annotation(node: Node) -> Isolation | None:
     if modifiers is None:
         return None
     for modifier in modifiers.children:
-        if modifier.type == "member_modifier" and text_of(modifier).startswith("nonisolated"):
+        if modifier.type == "member_modifier" and text_or_empty(modifier).startswith(
+            "nonisolated"
+        ):
             return NonisolatedDomain()
         if modifier.type == "attribute":
             domain = _attribute_domain(modifier)
@@ -299,11 +301,12 @@ def _callee(call: Node) -> tuple[Node | None, str | None]:
     """呼び出しの (受け手, 名前)。受け手の無い呼び出しの受け手は None。"""
     function = call.children[0]
     if function.type == "simple_identifier":
-        return None, text_of(function)
+        return None, text_or_empty(function)
     if function.type == "navigation_expression":
         suffix = function.child_by_field_name("suffix")
         name = suffix.child_by_field_name("suffix") if suffix is not None else None
-        return function.child_by_field_name("target"), text_of(name) if name is not None else None
+        target = function.child_by_field_name("target")
+        return target, (text_or_empty(name) if name is not None else None)
     return None, None
 
 
@@ -320,7 +323,7 @@ def _declared_semaphores(root: Node) -> frozenset[str]:
             continue
         _, name = _callee(value)
         if name == "DispatchSemaphore":
-            found.update(text_of(pattern) for pattern in node.children_by_field_name("name"))
+            found.update(text_or_empty(pattern) for pattern in node.children_by_field_name("name"))
     return frozenset(found)
 
 
@@ -328,7 +331,7 @@ def _is_main_actor_run(expression: Node) -> bool:
     if expression.type != "call_expression":
         return False
     receiver, name = _callee(expression)
-    return receiver is not None and text_of(receiver) == "MainActor" and name == "run"
+    return receiver is not None and text_or_empty(receiver) == "MainActor" and name == "run"
 
 
 def _lambdas_in(node: Node) -> list[Node]:
@@ -436,7 +439,7 @@ def _assignment(x: Extractor[_State], node: Node) -> list[ConcurrencyStep]:
     name = suffix.child_by_field_name("suffix") if suffix is not None else None
     if receiver is None or name is None:
         return []
-    return [MemberAssignment(receiver, text_of(name), line_of(node))]
+    return [MemberAssignment(receiver, text_or_empty(name), line_of(node))]
 
 
 def _await(x: Extractor[_State], node: Node) -> list[ConcurrencyStep]:
@@ -493,17 +496,17 @@ def _special(x: Extractor[_State], call: Node) -> list[ConcurrencyStep] | None:
     if (
         receiver is not None
         and name == "detached"
-        and text_of(receiver) == "Task"
+        and text_or_empty(receiver) == "Task"
         and closure is not None
     ):
         isolation = _closure_annotation(closure) or NonisolatedDomain()
         body = Body(isolation, tuple(x.lambda_steps(closure, isolation)))
         return [UnstructuredTask(TaskKind.DETACHED, body, line)]
     if receiver is not None and name == "async" and closure is not None:
-        queue = QueueDomain(text_of(receiver))
+        queue = QueueDomain(text_or_empty(receiver))
         return [QueueDispatch(Body(queue, tuple(x.lambda_steps(closure, queue))), line)]
     if _blocks(x.state, receiver, name):
-        label = f"{text_of(receiver)}.{name}" if receiver is not None else str(name)
+        label = f"{text_or_empty(receiver)}.{name}" if receiver is not None else str(name)
         return [BlockingWait(label, line)]
     return None
 
@@ -511,7 +514,7 @@ def _special(x: Extractor[_State], call: Node) -> list[ConcurrencyStep] | None:
 def _blocks(state: _State, receiver: Node | None, name: str | None) -> bool:
     if receiver is None:
         return name in _SLEEPS
-    target = text_of(receiver)
+    target = text_or_empty(receiver)
     if name == "sleep":
         return target == "Thread"
     if name == "wait":

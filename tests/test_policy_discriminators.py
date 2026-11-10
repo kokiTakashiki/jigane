@@ -216,6 +216,30 @@ def test_java_discriminator_is_drawn(tmp_path: Path) -> None:
     assert "case 1" in text
 
 
+CSHARP_SOURCE = """\
+enum Kind { Pr, Range, None }
+
+class Rules
+{
+    Kind Decide(object o, int x)
+    {
+        if (x > 1) { return Kind.Range; }
+        else if (o is string s) { return Kind.Pr; }
+        return x switch { 1 => Kind.None, _ => Kind.Pr };
+    }
+}
+"""
+
+
+def test_csharp_discriminator_is_drawn(tmp_path: Path) -> None:
+    review = feature_review(tmp_path, "Rules.cs", CSHARP_SOURCE)
+    text = required(discriminators.discriminator_diagram(review)).text()
+    assert "x ~ 1" in text
+    assert "o is string s" in text
+    assert "switch x" in text
+    assert "return Kind.Range" in text
+
+
 RANGED_SOURCE = """\
 from enum import Enum
 

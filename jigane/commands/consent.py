@@ -4,20 +4,20 @@ import sys
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 
 from jigane.commands.public_urls import installed_version, terms_urls
 from jigane.git.process import CONSENT_PROMPT_END
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, Effort, GroupId
-from jigane.judgment_map.map_kind import CodeMap
-from jigane.languages import registry
 from jigane.llm_runs import claude
-from jigane.reviews.lifecycle import Review
-from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import DiagramPolicyEstimate, Estimate
-from jigane.skills.estimator import estimate_of
+from jigane.skills.group_expectation import GroupExpectation
 from jigane.skills.mcp import ALL_TOOLS_NOTICE, NO_MCP, McpSelection
-from jigane.text.terminal import one_line_text
+
+# 群の見込みの行。値は GroupExpectation が持ち、書式はここだけに置く
+EXPECTATION_LINE = (
+    "  群の見込み: {total:.4f} USD"
+    "（発見役の見積もり {discovery:.4f} USD × 検証役の倍率 {multiplier:.2f}）"
+)
 
 
 class ConsentDeclinedError(Exception):
@@ -87,8 +87,9 @@ class LaunchPlan:
     breakdown: GroupBreakdown
     can_increase: bool
     effort: Effort | None
-    # 出力と推論の分を含めた見込み。見込みを持つのは設計書の形の方針だけで、他は None
-    expected_total_usd: float | None = None
+    expectation: GroupExpectation
+    # 見積もりが出力と推論の分まで見込む形か（今は設計書の形だけ）
+    includes_output: bool = False
     mcp: McpSelection = NO_MCP
 
     @property
@@ -125,13 +126,13 @@ def _breakdown_of(group: GroupId, estimate: Estimate, budget: claude.RunBudget) 
 
 
 def launch_plan(
-    assembly: AssemblyInput,
+    estimate: Estimate,
+    expectation: GroupExpectation,
     group: GroupId,
     settings: claude.RunSettings,
     mcp: McpSelection = NO_MCP,
 ) -> LaunchPlan:
-    """見積もりと同じ関数から、確実に起動する回数を求める。"""
-    estimate = estimate_of(assembly, group, mcp, settings.budget)
+    """見積もりから、確実に起動する回数を求める。群の見込みは組み立ての根が読んで渡す。"""
     # 方針は発見役の 1 回だけで検証役を持たない。他は発見役がシャードごとに 1 回で、
     # 検証役は指摘の数で決まり、数にも分割にも上限が無い
     # （finding_model.py の発見役の出力のモデルは findings の件数に上限を持たず、
@@ -141,7 +142,8 @@ def launch_plan(
         _breakdown_of(group, estimate, settings.budget),
         group != MACRO,
         settings.effort,
-        estimate.expected_total_usd(),
+        expectation,
+        estimate.expected_output() is not None,
         mcp=NO_MCP if group == MACRO else mcp,
     )
 
@@ -170,18 +172,27 @@ def consent_text(
         f"この群の内訳（{label}）:",
         f"  発見役: {plan.breakdown.calls_text()}",
     ]
+    expectation = plan.expectation
+    lines.append(
+        EXPECTATION_LINE.format(
+            total=expectation.total_usd,
+            discovery=expectation.discovery_usd,
+            multiplier=expectation.multiplier,
+        )
+    )
     if plan.breakdown.has_verifier:
         lines.append("  検証役: 回数は見つかった指摘の数で決まり、事前には分かりません")
     else:
         lines.append("  検証役なし")
     if plan.breakdown.past_cost_usd is not None:
         lines.append(f"  前回の実績 {plan.breakdown.past_cost_usd:.4f} USD")
-    if plan.expected_total_usd is not None:
+    if plan.includes_output:
+        # 出力と推論の分まで見込む形（設計書の形）は検証役を持たず、群の見込みがその見込みになる
         lines.append(
-            f"出力と推論の分を含めた見込み: {plan.expected_total_usd:.2f} USD"
+            f"出力と推論の分を含めた見込み: {expectation.total_usd:.2f} USD"
             + (
                 "（1 回の起動の額に達する見込みです。警告して続けます）"
-                if plan.expected_total_usd >= per_call
+                if expectation.total_usd >= per_call
                 else ""
             )
         )
@@ -217,75 +228,4 @@ def require_consent(
     for line in consent_text(plan):
         print(line, file=sys.stderr)
     if not is_yes(read_answer(f"続けますか{CONSENT_PROMPT_END}")):
-        raise ConsentDeclinedError("同意が得られなかったので起動しませんでした")
-
-
-# 言語のソースでない文書とデータの形式。アダプタが無くても、宣言を読めない言語としては数えない
-NON_SOURCE_SUFFIXES = frozenset(
-    {
-        ".md",
-        ".markdown",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".toml",
-        ".txt",
-        ".rst",
-        ".csv",
-        ".lock",
-    }
-)
-# 拡張子ごとに示すファイルの数。残りは件数だけにする
-_SHOWN_FILES_PER_SUFFIX = 5
-
-
-def unadapted_files(review: Review) -> dict[str, list[str]]:
-    """アダプタの無い言語のソースのファイルを、拡張子ごとにまとめる。無ければ空。"""
-    # 設計書の地図の区間は参考のコードで、設計書のレビューは宣言を読む対象ではない
-    if not isinstance(review.map_kind, CodeMap):
-        return {}
-    found: dict[str, list[str]] = {}
-    for segment in review.map_kind.segments:
-        path = segment.new_path or segment.old_path
-        if path is None:
-            # 新旧どちらの経路も無い区間は、数える対象のファイルを持たない
-            continue
-        suffix = PurePosixPath(path.replace("\\", "/")).suffix.lower()
-        if not suffix or suffix in NON_SOURCE_SUFFIXES:
-            # 拡張子が無いと言語を決められず、文書とデータの形式は言語ではない
-            continue
-        if registry.adapter_for(path) is not None or registry.is_build_path(
-            path, registry.adapters()
-        ):
-            # アダプタがあるか、ビルドのファイルで「重要」になるので、確認の対象にしない
-            continue
-        files = found.setdefault(suffix, [])
-        if path not in files:
-            files.append(path)
-    return found
-
-
-def unadapted_text(found: dict[str, list[str]]) -> list[str]:
-    lines = ["アダプタの無い言語のファイルが、判断の地図の区間に含まれています。"]
-    for suffix, files in sorted(found.items()):
-        shown = ", ".join(one_line_text(name) for name in files[:_SHOWN_FILES_PER_SUFFIX])
-        rest = len(files) - _SHOWN_FILES_PER_SUFFIX
-        more = f" ほか {rest} 件" if rest > 0 else ""
-        lines.append(f"  {one_line_text(suffix)}（{len(files)} 件）: {shown}{more}")
-    lines.append("これらの区間は宣言を読まずに「確認」になります。")
-    lines.append("アダプタは `jigane languages` で足せます。")
-    return lines
-
-
-def require_unadapted_consent(review: Review, *, read_answer: Callable[[str], str]) -> None:
-    """アダプタの無い言語のファイルがあるとき、y か yes のときだけ返る。
-
-    端末かどうかは費用の同意（require_consent）が先に確かめているので、ここでは確かめない。
-    """
-    found = unadapted_files(review)
-    if not found:
-        return
-    for line in unadapted_text(found):
-        print(line, file=sys.stderr)
-    if not is_yes(read_answer(f"それでもレビューを実施しますか{CONSENT_PROMPT_END}")):
         raise ConsentDeclinedError("同意が得られなかったので起動しませんでした")

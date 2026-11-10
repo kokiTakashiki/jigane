@@ -5,8 +5,10 @@ import argparse
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.output import print_removal, print_selection
+from jigane.commands.selection_inputs import past_round_reader
 from jigane.reviews import selection as selection_module
-from jigane.reviews.lifecycle import load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -22,7 +24,12 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
 def run(args: argparse.Namespace, context: Context) -> int:
     del context
     review = load_review(resolve_review(args.review))
-    _, removal = selection_module.unpick(review.id.directory(), args.findings)
+    directory = review.id.directory()
+    _, removal = selection_module.unpick(directory, args.findings, past_round_reader(directory))
     print_removal(removal)
-    print_selection(review, as_json=args.json)
+    print_selection(
+        review,
+        as_json=args.json,
+        heading=f"最終的な指摘から外しました: {' '.join(removal.removed)}",
+    )
     return EXIT_OK

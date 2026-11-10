@@ -31,6 +31,8 @@ from jigane.design.recommend import (
     recommend,
 )
 from jigane.design.review_documents import attachment_candidates
+from jigane.design.submodule_notes import submodule_lines
+from jigane.design.submodule_status import SubmoduleNote
 from jigane.git import repository
 
 _NUMBERED_TITLE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
@@ -220,6 +222,9 @@ def render(recommendation: Recommendation) -> str:
     lines.append(f"上限で切った候補: {recommendation.omitted} 件")
     lines += ["", "照合の表"]
     lines.extend(_match_line(match) for match in recommendation.matches)
+    notes = submodule_lines(recommendation.submodules)
+    if notes:
+        lines += ["", *notes]
     return "\n".join(lines)
 
 
@@ -282,6 +287,16 @@ def to_dict(recommendation: Recommendation) -> dict[str, Any]:
         ],
         "omitted": recommendation.omitted,
         "matches": [_match_dict(m) for m in recommendation.matches],
+        "submodules": [_submodule_dict(n) for n in recommendation.submodules],
+    }
+
+
+def _submodule_dict(note: SubmoduleNote) -> dict[str, Any]:
+    return {
+        "path": note.path,
+        "state": note.state,
+        "checked_out": note.checked_out,
+        "recorded": note.recorded,
     }
 
 

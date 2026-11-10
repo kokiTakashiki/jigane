@@ -7,16 +7,16 @@ from review_fakes import save_review_of_kind
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
 from jigane.commands.subcommands.refresh import refresh_review
-from jigane.reviews.lifecycle import (
+from jigane.reviews.catalog import (
     ARCHIVE_MARKER_FILE,
     ARCHIVED_INCLUDE,
     ARCHIVED_ONLY,
-    create_feature_review,
     is_archived,
     list_reviews,
-    resolve_review,
 )
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.resolution import resolve_review
+from jigane.storage.store import ReviewId, ReviewKind, check_review_id
 
 
 @pytest.fixture
@@ -97,4 +97,4 @@ def test_archive_does_not_mark_a_digits_only_feature_through_a_pull_request_id(
     feature_id = save_review_of_kind(project, "7", ReviewKind.FEATURE)
     pull_request_id = ReviewId("local", "shop", "7", ReviewKind.PULL_REQUEST)
     assert main(["archive", str(pull_request_id)]) == EXIT_PROCESSING_FAILURE
-    assert not is_archived(feature_id)
+    assert not is_archived(check_review_id(feature_id))

@@ -8,7 +8,7 @@ from pathlib import Path
 from string import Template
 
 import pytest
-from claude_inputs_support import WRAPPER_ENVIRONMENT, Launch, recorded_launches
+from claude_inputs_support import WRAPPER_ENVIRONMENT, RecordedLaunch, recorded_launches
 
 from jigane.groups.definitions import GroupId
 from jigane.languages.grammars import CACHE_ENV, cache_root
@@ -90,12 +90,12 @@ UNREACHABLE_KEYS: dict[str, dict[str, str]] = {
 
 
 @pytest.fixture(scope="module")
-def launches(tmp_path_factory: pytest.TempPathFactory) -> Iterator[list[Launch]]:
+def launches(tmp_path_factory: pytest.TempPathFactory) -> Iterator[list[RecordedLaunch]]:
     with recorded_launches(tmp_path_factory.mktemp("claude_inputs")) as recorded:
         yield recorded
 
 
-def _headings(launch: Launch) -> list[str]:
+def _headings(launch: RecordedLaunch) -> list[str]:
     found: list[str] = []
     fenced = False
     for line in str(launch["stdin"]).splitlines():
@@ -140,7 +140,7 @@ def _kept_markers(fragment: str) -> str:
     )
 
 
-def _without_template_text(launch: Launch) -> str:
+def _without_template_text(launch: RecordedLaunch) -> str:
     """標準入力から雛形の固定の文を取り除く。表に載る見出しとラベルの行は節の始まりとして残す。
 
     役の雛形の断片は順に（直前の位置より後ろから）探し、差し込まれる部品の断片はどこからでも探す。
@@ -159,7 +159,7 @@ def _without_template_text(launch: Launch) -> str:
     return text
 
 
-def _filled_headings(launch: Launch) -> list[str]:
+def _filled_headings(launch: RecordedLaunch) -> list[str]:
     """節（次の見出しまで）に、雛形の固定の文でない空白でない行がある見出し。
 
     本文の無い見出し、固定の文だけの見出しでは項目は渡らない。
@@ -182,7 +182,7 @@ def _is_label_line(line: str) -> bool:
     return bool(BOLD_ONLY.fullmatch(line) or LABEL_LINE.match(line))
 
 
-def _label_lines(launch: Launch) -> list[str]:
+def _label_lines(launch: RecordedLaunch) -> list[str]:
     """見出しでなく、太字だけか、ラベルの形の行。コードの囲みの中は数えない。"""
     found: list[str] = []
     fenced = False
@@ -214,7 +214,7 @@ def _heading_inputs(heading: str) -> tuple[ClaudeInput, ...] | None:
     return None
 
 
-def _received(launches: list[Launch], kind: ReviewKind) -> set[ClaudeInput]:
+def _received(launches: list[RecordedLaunch], kind: ReviewKind) -> set[ClaudeInput]:
     """そのレビューの種類の起動が、見出しで受けた項目の集合。"""
     return {
         item
@@ -230,39 +230,41 @@ def _received(launches: list[Launch], kind: ReviewKind) -> set[ClaudeInput]:
     }
 
 
-def _argument_names(launch: Launch) -> list[str]:
+def _argument_names(launch: RecordedLaunch) -> list[str]:
     # 記録の argv は claude の後に続く引数だけで、先頭も jigane の渡した引数
     return [token for token in launch["argv"] if ARGUMENT_NAME.match(token)]
 
 
-def _label(launch: Launch) -> str:
+def _label(launch: RecordedLaunch) -> str:
     return f"{launch.kind}/{launch.group}/{launch.role}"
 
 
-def _missing_roles(launch: Launch, inputs: set[ClaudeInput]) -> list[str]:
+def _missing_roles(launch: RecordedLaunch, inputs: set[ClaudeInput]) -> list[str]:
     key = GroupRole(launch.group, Role(launch.role))
     return [item.name for item in inputs if key not in item.value.roles]
 
 
 def test_launched_roles_are_the_expected_ones_and_none_is_unreachable(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     roles = {(launch.kind, launch.group, Role(launch.role)) for launch in launches}
     assert not {role for _, _, role in roles} & UNREACHABLE_ROLES
     assert roles == LAUNCHED_ROLES
 
 
-def test_every_heading_of_the_prompt_is_in_heading_inputs(launches: list[Launch]) -> None:
+def test_every_heading_of_the_prompt_is_in_heading_inputs(launches: list[RecordedLaunch]) -> None:
     unknown = {(_label(launch), h) for launch in launches for h in _headings(launch)}
     assert {pair for pair in unknown if _heading_inputs(pair[1]) is None} == set()
 
 
-def test_every_argument_name_is_in_argv_inputs(launches: list[Launch]) -> None:
+def test_every_argument_name_is_in_argv_inputs(launches: list[RecordedLaunch]) -> None:
     unknown = {(_label(launch), n) for launch in launches for n in _argument_names(launch)}
     assert {pair for pair in unknown if pair[1] not in ARGV_INPUTS} == set()
 
 
-def test_every_environment_difference_is_in_environment_inputs(launches: list[Launch]) -> None:
+def test_every_environment_difference_is_in_environment_inputs(
+    launches: list[RecordedLaunch],
+) -> None:
     for launch in launches:
         environment = launch["environment"]
         added = set(environment["added"]) - WRAPPER_ENVIRONMENT
@@ -297,7 +299,7 @@ def test_every_environment_difference_is_in_environment_inputs(launches: list[La
 
 
 def test_every_launched_role_is_in_the_roles_of_the_inputs_it_received(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     for launch in launches:
         inputs = {
@@ -313,7 +315,7 @@ def test_every_launched_role_is_in_the_roles_of_the_inputs_it_received(
 
 
 def test_pull_requests_receive_bot_comments_past_pull_requests_owners_and_documents(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     # 他の種類で渡らないことは確かめない。作り物の材料の偶然を、製品の規則として固定しないため
     received = _received(launches, ReviewKind.PULL_REQUEST)
@@ -331,7 +333,7 @@ def test_pull_requests_receive_bot_comments_past_pull_requests_owners_and_docume
 
 
 def test_ranges_receive_past_commits_and_run_under_the_data_home(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     assert ClaudeInput.PAST_COMMITS in _received(launches, ReviewKind.RANGE)
     for launch in launches:
@@ -342,7 +344,7 @@ def test_ranges_receive_past_commits_and_run_under_the_data_home(
 
 
 def test_design_doc_reviews_launch_macro_design_and_give_the_document_to_micro_and_security(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     design = [launch for launch in launches if launch.kind is ReviewKind.DESIGN_DOC]
     assert any(launch.role == Role.MACRO_DESIGN for launch in design)
@@ -359,7 +361,7 @@ def test_design_doc_reviews_launch_macro_design_and_give_the_document_to_micro_a
 
 
 def test_every_label_line_of_the_prompt_is_in_label_inputs_and_its_role_is_in_roles(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     unknown = {
         (_label(launch), line[:60])
@@ -373,7 +375,7 @@ def test_every_label_line_of_the_prompt_is_in_label_inputs_and_its_role_is_in_ro
         assert _missing_roles(launch, inputs) == [], _label(launch)
 
 
-def _observed_keys(launches: list[Launch]) -> dict[str, set[str]]:
+def _observed_keys(launches: list[RecordedLaunch]) -> dict[str, set[str]]:
     """起動の記録に現れた鍵を、表ごとに集める。"""
     observed: dict[str, set[str]] = {
         name: set()
@@ -398,7 +400,7 @@ def _observed_keys(launches: list[Launch]) -> dict[str, set[str]]:
 
 
 def test_every_key_of_the_tables_appears_in_a_launch_or_is_declared_unreachable(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     observed = _observed_keys(launches)
     tables = {
@@ -418,7 +420,7 @@ def test_every_key_of_the_tables_appears_in_a_launch_or_is_declared_unreachable(
         assert set(unreachable) <= set(table), f"{name}: 宣言した鍵が表に無い"
 
 
-def _orphan_lines(launch: Launch) -> list[str]:
+def _orphan_lines(launch: RecordedLaunch) -> list[str]:
     """雛形の固定の文を除いた残りのうち、表に載る見出しやラベルで始まる節の外にある行。"""
     orphans: list[str] = []
     in_section = False
@@ -437,7 +439,7 @@ def _orphan_lines(launch: Launch) -> list[str]:
 
 
 def test_no_sentence_of_the_prompt_stands_outside_a_section_of_the_tables(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     # 雛形の固定の文を除いた残りは差し込まれた素材だけで、全て表に載る見出しかラベルの節に入る。
     # 組み立てのコードが足す固定の文は、全て見出しかラベルの下にあり、節の外に残るものは無い。
@@ -449,13 +451,13 @@ def test_no_sentence_of_the_prompt_stands_outside_a_section_of_the_tables(
 
 
 def test_a_sentence_without_heading_before_the_first_section_is_found(
-    launches: list[Launch],
+    launches: list[RecordedLaunch],
 ) -> None:
     # 検査が空振りでないことの確かめ。標準入力の冒頭の文の直後に、見出しの無い文を差し込む
     launch = next(x for x in launches if x.role == Role.MICRO)
     stdin = str(launch["stdin"])
     first_line = stdin.splitlines()[0]
     inserted = f"{first_line}\n見出しの無い差し込みの文。"
-    tampered = Launch(launch, stdin=stdin.replace(first_line, inserted, 1))
+    tampered = RecordedLaunch(launch, stdin=stdin.replace(first_line, inserted, 1))
     assert _orphan_lines(tampered) == ["見出しの無い差し込みの文。"]
     assert _orphan_lines(launch) == []

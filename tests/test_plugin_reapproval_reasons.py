@@ -5,14 +5,10 @@ import pytest
 from language_plugin_support import Installer, approved, entry_points_in, legacy_record
 
 from jigane.languages import registry
-from jigane.languages.plugins import (
-    ApprovedContent,
-    EnabledLanguage,
-    FileDigest,
-    LanguageUnavailable,
-    discover,
-    reapproval_reason,
-)
+from jigane.languages.approval import ApprovedContent, FileDigest, reapproval_reason
+from jigane.languages.enabled import EnabledLanguage
+from jigane.languages.plugins import discover
+from jigane.languages.states import LanguageUnavailable
 
 _A = "a" * 64
 _B = "b" * 64

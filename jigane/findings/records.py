@@ -32,8 +32,9 @@ from jigane.findings.discard import (
 )
 from jigane.groups.definitions import GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
 from jigane.groups.viewpoints import VIEWPOINTS, Viewpoint, by_legacy_number, by_number, by_uuid
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.locking import review_lock
 from jigane.storage.review_error import ReviewError
-from jigane.storage.store import review_lock, write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
 
 # 読み込み口の警告はここへ流す。標準エラーへの出し方は呼ぶ側（CLI の出力層）が handler で決める
@@ -846,12 +847,12 @@ _KEY_SEVERITY = "severity"
 _KEY_VIEWPOINT = "viewpoint"
 _KEY_CLAIM = "claim"
 _KEY_TRIAGE = "triage"
-_KEY_THEME = "theme"
-_KEY_ADJUDICATION = "adjudication"
-_KEY_NIT_REASON = "nit_reason"
-_KEY_TRIAGE_REASON = "triage_reason"
+KEY_THEME = "theme"
+KEY_ADJUDICATION = "adjudication"
+KEY_NIT_REASON = "nit_reason"
+KEY_TRIAGE_REASON = "triage_reason"
 _KEY_DEEPENS = "deepens"
-_KEY_OUT_OF_SCOPE = "out_of_scope"
+KEY_OUT_OF_SCOPE = "out_of_scope"
 
 _KEY_TITLE = "title"
 _KEY_FINDING_IDS = "finding_ids"
@@ -969,14 +970,14 @@ class FindingBody:
             _KEY_VIEWPOINT: self.viewpoint,
             _KEY_CLAIM: self.claim,
             _KEY_TRIAGE: triage,
-            _KEY_THEME: self.theme,
-            _KEY_ADJUDICATION: None if self.adjudication is None else self.adjudication.to_json(),
+            KEY_THEME: self.theme,
+            KEY_ADJUDICATION: None if self.adjudication is None else self.adjudication.to_json(),
         }
         # 任意の欄は、無いことが「持たない」を表す。null で書くとスキーマ（deepens の型）に反する
         if self.nit_reason is not None:
-            raw[_KEY_NIT_REASON] = self.nit_reason.to_json()
+            raw[KEY_NIT_REASON] = self.nit_reason.to_json()
         if triage_reason is not None:
-            raw[_KEY_TRIAGE_REASON] = (
+            raw[KEY_TRIAGE_REASON] = (
                 triage_reason.raw
                 if isinstance(triage_reason, UnknownTriageReason)
                 else triage_reason
@@ -1007,7 +1008,7 @@ class ScopeBody(FindingBody):
     continued_from: str | None = None
 
     def kind_fields(self) -> dict[str, Any]:
-        return {_KEY_OUT_OF_SCOPE: self.out_of_scope}
+        return {KEY_OUT_OF_SCOPE: self.out_of_scope}
 
     def continued_from_value(self) -> str | None:
         return self.continued_from
@@ -1049,7 +1050,7 @@ class StoredFinding:
         今の版の形だけを読む。古い形は read_findings_json が呼ぶ版ごとの移しが先に直す。
         """
         data = copy.deepcopy(raw)
-        adjudication = _adjudication_from(data.pop(_KEY_ADJUDICATION))
+        adjudication = _adjudication_from(data.pop(KEY_ADJUDICATION))
         return cls._read(data, adjudication, where)
 
     @classmethod
@@ -1060,7 +1061,7 @@ class StoredFinding:
         where: str = "",
     ) -> "StoredFinding":
         """役の出力から作った一件を、読み済みの裁定と合わせて読む。"""
-        if _KEY_ADJUDICATION in raw_without_adjudication:
+        if KEY_ADJUDICATION in raw_without_adjudication:
             raise ValueError("adjudication は raw でなく、読み済みの型で渡します")
         return cls._read(copy.deepcopy(raw_without_adjudication), adjudication, where)
 
@@ -1081,7 +1082,7 @@ class StoredFinding:
                 data.get(_KEY_ID),
                 raw_triage,
             )
-        raw_triage_reason = data.pop(_KEY_TRIAGE_REASON, None)
+        raw_triage_reason = data.pop(KEY_TRIAGE_REASON, None)
         triage_reason = triage_reason_of(raw_triage_reason)
         if triage_reason is None and raw_triage_reason:
             # 文字列でない値はスキーマに反する。保てる形が無いので理由なしで読む
@@ -1091,10 +1092,10 @@ class StoredFinding:
                 data.get(_KEY_ID),
                 raw_triage_reason,
             )
-        raw_nit_reason = data.pop(_KEY_NIT_REASON, None)
+        raw_nit_reason = data.pop(KEY_NIT_REASON, None)
         nit_reason = None if raw_nit_reason is None else nit_reason_from_json(raw_nit_reason)
-        theme = data.pop(_KEY_THEME)
-        out_of_scope = data.pop(_KEY_OUT_OF_SCOPE, None)
+        theme = data.pop(KEY_THEME)
+        out_of_scope = data.pop(KEY_OUT_OF_SCOPE, None)
         # 空文字の deepens はスキーマ（F の番号）に反するので、持たない扱いで落とす
         continued_from = data.pop(_KEY_DEEPENS, None) or None
         # 空文字の from_concern もスキーマ（F の番号）に反するので、持たない扱いで落とす
@@ -1409,7 +1410,7 @@ def _upgrade_finding_v1(finding: dict[str, Any]) -> dict[str, Any]:
     data = copy.deepcopy(finding)
     for key in (_KEY_SEVERITY, _KEY_VIEWPOINT, _KEY_CLAIM):
         data.setdefault(key, "")
-    for key in (_KEY_THEME, _KEY_TRIAGE, _KEY_ADJUDICATION):
+    for key in (KEY_THEME, _KEY_TRIAGE, KEY_ADJUDICATION):
         data.setdefault(key, None)
     _migrate_legacy_nit(data)
     return data
@@ -1448,8 +1449,8 @@ def _upgrade_findings_v1(raw: dict[str, Any]) -> dict[str, Any]:
             continue
         upgraded = [_upgrade_finding_v1(f) for f in findings]
         for finding in upgraded:
-            if triage_of(finding[_KEY_TRIAGE]) is None and finding[_KEY_THEME] in theme_triages:
-                finding[_KEY_TRIAGE] = theme_triages[finding[_KEY_THEME]].value
+            if triage_of(finding[_KEY_TRIAGE]) is None and finding[KEY_THEME] in theme_triages:
+                finding[_KEY_TRIAGE] = theme_triages[finding[KEY_THEME]].value
         groups[name] = upgraded
     return {
         _KEY_FORMAT: 2,
@@ -1478,7 +1479,7 @@ def _upgrade_finding_v2(finding: dict[str, Any]) -> dict[str, Any]:
     それ以外の種類は places を空にする。
     """
     data = copy.deepcopy(finding)
-    reason = data.get(_KEY_NIT_REASON)
+    reason = data.get(KEY_NIT_REASON)
     # 版 2 の書き手は nit_reason を省く。無ければ移す中身がない
     if reason is None or "places" in reason:
         return data
@@ -1651,21 +1652,21 @@ def _migrate_legacy_nit(finding: dict[str, Any]) -> None:
     legacy_kind = finding.pop("discard_kind", None)
     legacy_concern = finding.pop("concern", None)
     kind = _legacy_discard_kind(legacy_kind, finding.get("id"))
-    stored = finding.get("nit_reason")
+    stored = finding.get(KEY_NIT_REASON)
     if kind in _LEGACY_NOT_NIT_KINDS or (
         stored is not None and stored.get("kind") in _LEGACY_NOT_NIT_KINDS
     ):
         # 前の回で直った候補は nit にならない。理由なしの捨てた候補で残せば表示が崩れない
-        finding.pop("nit_reason", None)
+        finding.pop(KEY_NIT_REASON, None)
         kind = None
-    if finding.get("nit_reason") is None and kind is not None:
+    if finding.get(KEY_NIT_REASON) is None and kind is not None:
         # 版 2 の形（places を持たない）で書く。版 3 への移しが続けて places を足す
-        finding["nit_reason"] = {
+        finding[KEY_NIT_REASON] = {
             "kind": kind.value,
             "text": stripped,
             "concern": legacy_concern or None,
         }
-    raw_reason = finding.get("nit_reason")
+    raw_reason = finding.get(KEY_NIT_REASON)
     if raw_reason is None:
         finding["claim"] = stripped
     else:

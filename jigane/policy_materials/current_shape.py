@@ -17,10 +17,10 @@ from jigane.figures.models import (
 from jigane.policy_materials import changed_files
 from jigane.policy_materials.classes import class_block, class_panel
 from jigane.policy_materials.type_deltas import members_of, referenced_types
-from jigane.sequence.diagram import DEFAULT_DEPTH, build_diagrams
+from jigane.sequence.diagram import DEFAULT_DEPTH, DiagramInputs
 from jigane.sequence.index import TypeInfo
 from jigane.sequence.indexes import Indexes
-from jigane.sequence.review_diagrams import FlowSource, drawn_flows
+from jigane.sequence.review_diagrams import FlowSource, build_diagrams, drawn_flows
 from jigane.sequence.roots import Root, RootSelection
 
 NO_NAMED_CLASSES_TEXT = "名を挙げた型が、選んだファイルの索引に無い。"
@@ -101,12 +101,13 @@ def _sequences(indexes: Indexes, wanted: set[str], paths: set[str]) -> SequenceF
             continue
         # 変更の概念が無いので、辿る先を絞らず（full）、入口は名を挙げたものに限る
         model = build_diagrams(
-            index,
-            RootSelection({}, []),
-            [],
-            DEFAULT_DEPTH,
-            full=True,
-            roots=[Root(m) for m in members],
+            DiagramInputs(
+                index,
+                RootSelection({}, [Root(m) for m in members]),
+                [],
+                DEFAULT_DEPTH,
+                full=True,
+            )
         )
         drawn = drawn_flows(FlowSource.from_model(model))
         flows += drawn.flows

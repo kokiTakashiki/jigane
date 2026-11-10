@@ -23,15 +23,14 @@ from jigane.reviews.lifecycle import (
     RefreshResult,
     Review,
     ReviewError,
-    _new_review_id,
-    _now,
-    _resolve_commit,
-    _staging_directory,
     judge_files,
+    now,
     refresh_from_content,
-    save_review,
+    save_staged_review,
 )
-from jigane.storage.store import ReviewKind
+from jigane.reviews.range_head import resolve_commit
+from jigane.storage.review_creation import staging_directory
+from jigane.storage.store import ReviewKind, new_review_id
 
 _NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -166,7 +165,7 @@ def _build_content(
 ) -> DesignDocContent:
     document = read_document(root / document_path)
     try:
-        code_version = _resolve_commit(root, "HEAD")
+        code_version = resolve_commit(root, "HEAD")
     except ReviewError as error:
         raise ReviewError(f"いまのコードの版（HEAD のコミット）を解けません: {root}") from error
     recommended = _recommended_paths(root, document.text)
@@ -236,14 +235,14 @@ def create_design_doc_review(
         )
     )
     resolved_name = name if name is not None else default_design_doc_name(document_path)
-    review_id = _new_review_id(
+    review_id = new_review_id(
         repository.owner, repository.repo, resolved_name, ReviewKind.DESIGN_DOC
     )
     content = _build_content(
         root, document_path, selection, _declaration(document_path), attachment_paths
     )
-    with _staging_directory(review_id) as staging:
-        review, _ = save_review(review_id, content, _now(), None, str(root), staging=staging)
+    with staging_directory(review_id) as staging:
+        review, _ = save_staged_review(review_id, content, now(), None, str(root), staging=staging)
     return review
 
 

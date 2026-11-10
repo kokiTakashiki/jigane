@@ -7,10 +7,14 @@ import sys
 import uuid
 from pathlib import Path
 
+from jigane.commands.consent import is_yes
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
-from jigane.reviews.lifecycle import REVIEW_FILE, TRASH_DIRECTORY, resolve_review
-from jigane.storage.store import LOCK_FILE, ReviewId, data_home, review_lock
+from jigane.reviews.catalog import TRASH_DIRECTORY
+from jigane.reviews.resolution import resolve_review
+from jigane.storage.locking import LOCK_FILE, review_lock
+from jigane.storage.review_creation import remove_claim_lock
+from jigane.storage.store import REVIEW_FILE, CheckedReviewId, check_review_id, data_home
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -21,8 +25,9 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     deleting.set_defaults(handler=run)
 
 
-def remove_review_directory(review_id: ReviewId) -> None:
-    # directory() が、置き場の外を指す経路（シンボリックリンク）を拒む
+def remove_review_directory(review_id: CheckedReviewId) -> None:
+    # 確認の入力を待つ間に保存先がリンクへ差し替えられた場合を拒むため、壊す直前に検査し直す
+    review_id = check_review_id(review_id)
     directory = review_id.directory()
     home = data_home().resolve()
     if directory.resolve() == home:
@@ -38,6 +43,8 @@ def remove_review_directory(review_id: ReviewId) -> None:
     # 墓標は消す前に落ちても、レビューの一覧に出ないので残っても害が無い
     shutil.rmtree(tombstone, ignore_errors=True)
     remove_empty_parents(directory, home)
+    # 作成の請求のロックのファイルも消す。作成が握っていれば残る（次の作成が同じ錠を使う）
+    remove_claim_lock(review_id)
 
 
 def move_entries_aside(directory: Path, tombstone: Path) -> None:
@@ -81,11 +88,11 @@ def remove_empty_parents(directory: Path, home: Path) -> None:
         parent = parent.parent
 
 
-def confirm_deletion(review_id: ReviewId) -> None:
+def confirm_deletion(review_id: CheckedReviewId) -> None:
     if not sys.stdin.isatty():
         raise ValueError("確認できません。--yes を付けてください")
     answer = input(f"{review_id} を削除します。戻せません。よろしいですか [y/N] ")
-    if answer.strip().lower() not in ("y", "yes"):
+    if not is_yes(answer):
         raise ValueError("削除を取りやめました")
 
 

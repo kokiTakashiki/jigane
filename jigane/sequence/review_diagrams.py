@@ -1,8 +1,7 @@
 """レビューのシーケンス図の組み立て。`jigane sequence` と `jigane diagrams` が共有する。"""
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from enum import StrEnum
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,29 +10,35 @@ from jigane.git.tree_files import walk_tree_files
 from jigane.languages import registry
 from jigane.languages.base import SequenceAdapter
 from jigane.reviews.lifecycle import Review
+from jigane.sequence.before_diagrams import (
+    NO_BASE_TREE_DISPLAY,
+    NO_BASE_TREE_TEXT,
+    BeforeAbsence,
+    attach_before,
+    before_diagrams,
+)
+from jigane.sequence.before_tree import load_before_tree
 from jigane.sequence.diagram import (
     DEFAULT_DEPTH,
     MAX_DEPTH,
     MIN_DEPTH,
+    DiagramInputs,
     EmptyEntryKind,
     EntryEvidence,
-    build_diagrams,
-    mark_differences,
-    region_ids,
-    select_diagrams,
-    to_mermaid,
+    construct_diagrams,
 )
-from jigane.sequence.index import Member, build_index
+from jigane.sequence.diagram_json import diagrams_to_dict
+from jigane.sequence.diagram_mermaid import to_mermaid
+from jigane.sequence.diagram_select import region_ids, select_diagrams
+from jigane.sequence.identifiers import identities_of
+from jigane.sequence.index import build_index
 from jigane.sequence.roots import (
-    Key,
     Root,
-    RootSelection,
     SequenceError,
-    Side,
     changed_members,
-    key_of,
     select_roots,
 )
+from jigane.sequence.side import Side, TreeSide
 
 # 注記の文は二本で持つ。*_TEXT と *_NOTE は LLM に渡す資料の常体、*_DISPLAY は利用者に見せる敬体。
 # 資料の文は評価の結果を動かさないため変えない
@@ -41,11 +46,6 @@ NO_ADAPTER_TEXT = "変更したファイルの言語に、呼び出しの抽出�
 NO_ADAPTER_DISPLAY = "変更したファイルの言語には、呼び出しの抽出がまだありません。"
 NO_DECLARATION_TEXT = "変更した宣言も、変更したファイルを読む宣言も無い。"
 NO_DECLARATION_DISPLAY = "変更した宣言も、変更したファイルを読む宣言もありません。"
-NO_BASE_TREE_TEXT = "変更前のツリーが無いため、変更前の図は作れない。"
-NO_BASE_TREE_DISPLAY = "変更前のツリーがないため、変更前の図は作れません。"
-BEFORE_NO_ROOT_NOTE = "変更前にこの入口が無い"
-BEFORE_NO_PATH_NOTE = "変更前は変更した宣言へ届かない"
-AFTER_NO_ARROW_NOTE = "変更後の図に呼び出しが無い"
 NO_INTERACTION_TEXT = "変更した宣言はあるが、他の型とのやり取りが無い。"
 NO_INTERACTION_DISPLAY = "変更した宣言はありますが、他の型とのやり取りがありません。"
 SKIPPED_NAMES_SHOWN = 3
@@ -62,29 +62,6 @@ UNRESOLVED_CALL_ENTRIES_DISPLAY = (
     "呼び先を解けない呼び出しがある入口 {count} 件は図にしません: {names}"
 )
 DROPPED_CHANGES_DISPLAY = "入口として拾えなかった変更 {count} 件: {names}"
-
-
-class BeforeAbsence(StrEnum):
-    """変更前の図が無い理由。値は表示の敬体で、図のモデルの before_note にそのまま入る。"""
-
-    NO_BASE_TREE = NO_BASE_TREE_DISPLAY
-    AFTER_NO_ARROW = "変更後の図に呼び出しがありません"
-    NO_ROOT = "変更前にこの入口がありません"
-    NO_PATH = "変更前は変更した宣言へ届きません"
-
-    @property
-    def note(self) -> NoteText:
-        """表示の敬体と資料の常体を一つにした値。"""
-        match self:
-            case BeforeAbsence.NO_BASE_TREE:
-                material = NO_BASE_TREE_TEXT
-            case BeforeAbsence.AFTER_NO_ARROW:
-                material = AFTER_NO_ARROW_NOTE
-            case BeforeAbsence.NO_ROOT:
-                material = BEFORE_NO_ROOT_NOTE
-            case BeforeAbsence.NO_PATH:
-                material = BEFORE_NO_PATH_NOTE
-        return NoteText(material, str(self))
 
 
 def _input_error(message: str) -> SequenceError:
@@ -109,6 +86,12 @@ def _required_adapter(review: Review) -> SequenceAdapter:
             raise SequenceError(NoteText(NO_ADAPTER_TEXT, NO_ADAPTER_DISPLAY))
         raise SequenceError(NoteText(NO_DECLARATION_TEXT, NO_DECLARATION_DISPLAY))
     return adapter
+
+
+def build_diagrams(inputs: DiagramInputs, side: TreeSide = Side.AFTER) -> dict[str, Any]:
+    """図を作り、識別子を導いて辞書にする。side が BEFORE の図は、関係の矢印を足さない。"""
+    built = construct_diagrams(inputs, relations=side is Side.AFTER)
+    return diagrams_to_dict(identities_of(built, side), built.notes, side)
 
 
 def _assemble(
@@ -147,15 +130,17 @@ def _assemble(
         members = [m for m in changed.values() if m.qualified_name == root]
         if not members:
             raise _input_error(f"修飾名が変更した宣言にありません: {root}")
-        model = build_diagrams(
-            index, selection, regions, depth, full=full, roots=[Root(m) for m in members]
-        )
+        named = replace(selection, roots=[Root(m) for m in members])
+        inputs = DiagramInputs(index, named, regions, depth, full=full)
     else:
-        model = build_diagrams(index, selection, regions, depth, full=full)
+        inputs = DiagramInputs(index, selection, regions, depth, full=full)
+    model = build_diagrams(inputs)
     if region is not None and region not in {r.id for r in regions}:
         raise _input_error(f"判断の箇所がありません: {region}")
     if side is not Side.AFTER:
-        _attach_before(model, review, adapter, depth, full=full, include_tests=include_tests)
+        tree = load_before_tree(review, adapter, include_tests=include_tests)
+        befores = before_diagrams(model, tree, inputs)
+        attach_before(model, befores)
         model["side"] = side
     if side is Side.BEFORE:
         # 変更前の図を持つ入口だけが残り、図そのものは変更前の側になる
@@ -164,71 +149,7 @@ def _assemble(
             for d in model["diagrams"]
             if d["before"] is not None
         ]
-        model["side"] = Side.BEFORE
     return select_diagrams(model, root, region), len(changed)
-
-
-def _attach_before(
-    model: dict[str, Any],
-    review: Review,
-    adapter: SequenceAdapter,
-    depth: int,
-    *,
-    full: bool,
-    include_tests: bool,
-) -> None:
-    """各図に、変更前の木で同じ根から辿った図 before と、無い理由 before_note を持たせる。"""
-    base_root = review.base_tree_path
-    if base_root is None:
-        for diagram in model["diagrams"]:
-            diagram["before"] = None
-            diagram["before_note"] = BeforeAbsence.NO_BASE_TREE
-        return
-    index = build_index(base_root, walk_tree_files(base_root, base_root), adapter)
-    # 変更前の集合は、判断の地図の segment の変更前の側（old_path と old_span）から作る
-    changed = changed_members(
-        index, review.map_kind.segments, adapter, include_tests=include_tests, side=Side.BEFORE
-    )
-    by_name: dict[str, list[Member]] = {}
-    for member in index.callables.values():
-        if member.declaration is not None and member.declaration.body is not None:
-            by_name.setdefault(member.qualified_name, []).append(member)
-    for diagram in model["diagrams"]:
-        if not diagram["arrows"]:
-            # 変更後の図が空なら目標が変更前の側の C だけになり、比べる相手が無い
-            diagram["before"], diagram["before_note"] = None, BeforeAbsence.AFTER_NO_ARROW
-            continue
-        candidates = by_name.get(diagram["root"], [])
-        # オーバーロードや部分クラスで複数あるときは、同じパス、近い行の宣言を採る
-        candidates.sort(key=lambda m: (m.path != diagram["path"], abs(m.line - diagram["line"])))
-        if not candidates:
-            diagram["before"], diagram["before_note"] = None, BeforeAbsence.NO_ROOT
-            continue
-        root = Root(candidates[0])
-        # 目標の集合は、変更前の側の C に、変更後の図の矢印の呼び先の宣言を足したもの（4.2.4 項）。
-        # 新しいメソッドを足す PR では変更前の C が空に近く、C だけでは既存の流れが消える
-        targets = {**changed, **_after_targets(diagram, index.callables.values())}
-        before = build_diagrams(
-            index,
-            RootSelection(targets, [root]),
-            [],
-            depth,
-            full=full,
-            roots=[root],
-            relations=False,
-        )
-        found = before["diagrams"][0]
-        if not found["arrows"]:
-            diagram["before"], diagram["before_note"] = None, BeforeAbsence.NO_PATH
-        else:
-            diagram["before"], diagram["before_note"] = found, None
-            mark_differences(found["arrows"], diagram["arrows"])
-
-
-def _after_targets(diagram: dict[str, Any], members: Iterable[Member]) -> dict[Key, Member]:
-    """変更後の図の矢印の呼び先の宣言を、変更前の索引から修飾名で引く。"""
-    names = {f"{a['receiver']}.{a['name']}" for a in diagram["arrows"]}
-    return {key_of(m): m for m in members if m.qualified_name in names}
 
 
 def build_model(

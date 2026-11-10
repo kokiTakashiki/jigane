@@ -19,7 +19,9 @@ from jigane.policy_materials.value_sets import (
     kind_of,
     value_set_rows,
 )
-from jigane.reviews.lifecycle import Review, load_pairs, scope_files
+from jigane.reviews.catalog import scope_files
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.stored_pairs import load_pairs
 from jigane.skills.assembly import AssemblyInput
 
 SECTION_VALUE_SETS = "値の組の表"

@@ -10,23 +10,31 @@ from pr_support import URL
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
+from jigane.reviews.catalog import list_reviews, load_review
 from jigane.reviews.lifecycle import (
-    REVIEW_FILE,
     ReviewError,
     ReviewKindMismatchError,
     create_pull_request_review,
-    list_reviews,
-    load_review,
 )
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.store import (
+    REVIEW_FILE,
+    CheckedReviewId,
+    ReviewId,
+    ReviewKind,
+    check_new_review_id,
+    check_review_id,
+)
 
 
 def _relocate(
-    source: ReviewId, target: ReviewId, mutate: Callable[[dict[str, Any]], None] | None = None
+    source: CheckedReviewId,
+    target: ReviewId,
+    mutate: Callable[[dict[str, Any]], None] | None = None,
 ) -> None:
     """source の記録を target の保存先へ写し、review.json の id と中身を書き換える。"""
-    shutil.copytree(source.directory(), target.directory())
-    path = target.directory() / REVIEW_FILE
+    target_directory = check_new_review_id(target).directory()
+    shutil.copytree(source.directory(), target_directory)
+    path = target_directory / REVIEW_FILE
     meta = json.loads(path.read_text(encoding="utf-8"))
     meta["id"] = str(target)
     if mutate is not None:
@@ -42,7 +50,12 @@ def _drop_pull_request(meta: dict[str, Any]) -> None:
 def _as_range(meta: dict[str, Any]) -> None:
     # 範囲のレビューの形。PR の情報を外し、範囲の情報を足す
     meta["pull_request"] = None
-    meta["local_range"] = {"range_text": "a..b", "working_directory": "/work"}
+    meta["local_range"] = {
+        "range_text": "a..b",
+        "working_directory": "/work",
+        "git_directory": "",
+        "head_tracking": None,
+    }
 
 
 def _drop_sources(meta: dict[str, Any]) -> None:
@@ -59,7 +72,7 @@ def test_each_kind_loads_when_the_stored_source_agrees() -> None:
     _relocate(pull_request, range_id, _as_range)
     _relocate(pull_request, feature_id, _drop_sources)
     for review_id in (pull_request, range_id, feature_id):
-        assert load_review(review_id).kind == review_id.kind
+        assert load_review(check_review_id(review_id)).kind == review_id.kind
 
 
 @pytest.mark.usefixtures("pr")
@@ -68,7 +81,7 @@ def test_load_stops_when_the_pull_request_slot_holds_another_source() -> None:
     elsewhere = ReviewId(pull_request.owner, pull_request.repo, "9", ReviewKind.PULL_REQUEST)
     _relocate(pull_request, elsewhere, _drop_pull_request)
     with pytest.raises(ReviewKindMismatchError, match="食い違います"):
-        load_review(elsewhere)
+        load_review(check_review_id(elsewhere))
 
 
 @pytest.mark.parametrize(
@@ -88,7 +101,7 @@ def test_load_stops_when_the_slot_kind_differs_from_the_stored_source(
     target = ReviewId(pull_request.owner, pull_request.repo, "x", kind)
     _relocate(pull_request, target, mutate)
     with pytest.raises(ReviewError, match="食い違います"):
-        load_review(target)
+        load_review(check_review_id(target))
 
 
 @pytest.mark.usefixtures("pr")
@@ -100,7 +113,7 @@ def test_list_skips_a_mismatched_record_and_warns() -> None:
         listed = list_reviews()
     assert [review.id for review in listed] == [pull_request]
     with pytest.raises(ReviewError):
-        load_review(bad)
+        load_review(check_review_id(bad))
 
 
 @pytest.mark.usefixtures("pr")

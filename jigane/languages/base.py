@@ -383,10 +383,6 @@ class SequenceAdapter(LanguageAdapter, Protocol):
         """合成の型（Swift の `any A & B`）の成分の単純名。合成でなければ空。"""
         ...
 
-    def is_external_type_name(self, name: str, /) -> bool:
-        """索引に無い識別子 name を、外部の型の静的な呼び出しの受け手とみなしてよいか。"""
-        ...
-
     # プログラムの入口のメンバ名（main など）。呼び手の有無によらず入口になる
     @property
     def entry_point_names(self) -> frozenset[str]: ...
@@ -1081,6 +1077,25 @@ class TypeFieldReader(LanguageAdapter, Protocol):
 
         項目のある型だけを返す。読めないファイルは空を返す。
         """
+        ...
+
+
+@dataclass(frozen=True)
+class StringConstant:
+    """ファイル直下で空でない文字列を代入している定数一つ。"""
+
+    name: str
+    value: str
+    # 代入の文の最初の行（1 始まり）
+    line: int
+
+
+@runtime_checkable
+class StringConstantReader(LanguageAdapter, Protocol):
+    """ファイル直下の文字列定数を静的に読める言語アダプタ。"""
+
+    def string_constants(self, source: str, /) -> list[StringConstant]:
+        """一つのファイルの文字列定数を、文書順に返す。読めないファイルは空を返す。"""
         ...
 
 

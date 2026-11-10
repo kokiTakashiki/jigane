@@ -33,6 +33,7 @@ from jigane.languages.base import (
     Step,
     StoreAccess,
     StringComparison,
+    StringConstant,
     TypeDecl,
     TypeFields,
     TypeKind,
@@ -43,7 +44,9 @@ from jigane.languages.base import (
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
+from jigane.languages.node_text import text_of
 from jigane.languages.python_arguments import command_arguments as _command_arguments
+from jigane.languages.python_constants import string_constants as _string_constants
 from jigane.languages.python_file_paths import file_path_patterns as _file_path_patterns
 from jigane.languages.python_public_names import added_public_names as _added_public_names
 from jigane.languages.python_regex import regex_scan as _regex_scan
@@ -63,10 +66,6 @@ def _is_private(name: str) -> bool:
     return name.startswith("_") and not is_special
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def _exported_names(module: Node) -> set[str] | None:
     for statement in module.children:
         # この文法では代入が式文で包まれず、モジュールやブロックの直下に現れる
@@ -75,13 +74,13 @@ def _exported_names(module: Node) -> set[str] | None:
             continue
         left = assignment.child_by_field_name("left")
         right = assignment.child_by_field_name("right")
-        if left is None or right is None or _text(left) != "__all__":
+        if left is None or right is None or text_of(left) != "__all__":
             continue
         if right.type not in ("list", "tuple"):
             continue
         items = right.named_children
         if all(item.type == "string" for item in items):
-            return {_text(item).strip("'\"") for item in items}
+            return {text_of(item).strip("'\"") for item in items}
     return None
 
 
@@ -106,16 +105,16 @@ def _package_of(path: str) -> str:
 def _from_base(module: Node, package: str) -> str | None:
     """from の後ろのモジュールを絶対の修飾名にする。パッケージの外へ出る相対 import は None。"""
     if module.type != "relative_import":
-        return _text(module)
+        return text_of(module)
     prefix = next((c for c in module.children if c.type == "import_prefix"), None)
     dotted = next((c for c in module.children if c.type == "dotted_name"), None)
-    levels = len(_text(prefix)) if prefix is not None else 1
+    levels = len(text_of(prefix)) if prefix is not None else 1
     parts = package.split(".") if package else []
     if levels - 1 > len(parts):
         return None
     base = parts[: len(parts) - (levels - 1)]
     if dotted is not None:
-        base.append(_text(dotted))
+        base.append(text_of(dotted))
     return ".".join(base)
 
 
@@ -134,7 +133,7 @@ def _unwrap(node: Node) -> tuple[Node, list[str]]:
     """decorated_definition を、定義の節点とデコレータの原文に分ける。"""
     if node.type != "decorated_definition":
         return node, []
-    decorators = [_text(c).lstrip("@").strip() for c in node.children if c.type == "decorator"]
+    decorators = [text_of(c).lstrip("@").strip() for c in node.children if c.type == "decorator"]
     return required(node.child_by_field_name("definition")), decorators
 
 
@@ -169,11 +168,11 @@ def _inherits_abc(superclasses: Node | None, imported: Mapping[str, str]) -> boo
             if (
                 name is not None
                 and value is not None
-                and _text(name) == "metaclass"
-                and _resolved(_text(value), imported) == _ABC_METACLASS
+                and text_of(name) == "metaclass"
+                and _resolved(text_of(value), imported) == _ABC_METACLASS
             ):
                 return True
-        elif _resolved(_text(child), imported) == _ABC_BASE:
+        elif _resolved(text_of(child), imported) == _ABC_BASE:
             return True
     return False
 
@@ -184,7 +183,7 @@ def _is_protocol(superclasses: Node | None, imported: Mapping[str, str]) -> bool
         return False
     return any(
         child.type != "keyword_argument"
-        and _resolved(_text(child).split("[", 1)[0], imported) in _PROTOCOLS
+        and _resolved(text_of(child).split("[", 1)[0], imported) in _PROTOCOLS
         for child in superclasses.named_children
     )
 
@@ -200,7 +199,7 @@ def _parameters(function: Node, *, drop_first: bool) -> tuple[ParameterDecl, ...
     result: list[ParameterDecl] = []
     for child in parameters.named_children:
         if child.type == "identifier":
-            result.append(ParameterDecl(_text(child), "", optional=False))
+            result.append(ParameterDecl(text_of(child), "", optional=False))
         elif child.type in ("typed_parameter", "default_parameter", "typed_default_parameter"):
             name_node = child.child_by_field_name("name") or child.named_children[0]
             if name_node.type != "identifier":
@@ -210,8 +209,8 @@ def _parameters(function: Node, *, drop_first: bool) -> tuple[ParameterDecl, ...
             has_default = child.child_by_field_name("value") is not None
             result.append(
                 ParameterDecl(
-                    _text(name_node).lstrip("*"),
-                    _text(annotation) if annotation is not None else "",
+                    text_of(name_node).lstrip("*"),
+                    text_of(annotation) if annotation is not None else "",
                     has_default,
                 )
             )
@@ -242,7 +241,7 @@ def _arguments(call: Node) -> tuple[Argument, ...]:
         if argument.type == "keyword_argument":
             name = required(argument.child_by_field_name("name"))
             value = required(argument.child_by_field_name("value"))
-            result.append(Argument(value, _text(name)))
+            result.append(Argument(value, text_of(name)))
         else:
             result.append(Argument(argument, None))
     return tuple(result)
@@ -251,19 +250,19 @@ def _arguments(call: Node) -> tuple[Argument, ...]:
 def _call_parts(call: Node) -> CallParts:
     function = call.child_by_field_name("function")
     arguments = _arguments(call)
-    text = _text(call)
+    text = text_of(call)
     if function is None:
         return CallParts(None, None, arguments, text)
     if function.type == "attribute":
         attribute = function.child_by_field_name("attribute")
         return CallParts(
             function.child_by_field_name("object"),
-            _text(attribute) if attribute is not None else None,
+            text_of(attribute) if attribute is not None else None,
             arguments,
             text,
         )
     if function.type == "identifier":
-        return CallParts(None, _text(function), arguments, text)
+        return CallParts(None, text_of(function), arguments, text)
     return CallParts(None, None, arguments, text)
 
 
@@ -271,7 +270,7 @@ def _call_site(captures: Captures) -> CallSite | None:
     node = captures["call"][0]
     callee = captures["callee"][0]
     receiver = captures["receiver"][0] if "receiver" in captures else None
-    name = _text(callee)
+    name = text_of(callee)
     if name in _NOT_CALLS and receiver is None:
         return None
     # 生成かどうかは構文では決まらない。Foo() も is_creation は False のまま返す
@@ -289,7 +288,7 @@ def _call_site(captures: Captures) -> CallSite | None:
 def _pattern_names(node: Node) -> list[str]:
     """代入先やループ変数の並びに含まれる識別子の名前を、文書順に返す。"""
     if node.type == "identifier":
-        return [_text(node)]
+        return [text_of(node)]
     if node.type in ("attribute", "subscript"):
         return []
     return [name for child in node.named_children for name in _pattern_names(child)]
@@ -325,7 +324,9 @@ def _steps(block: Node) -> list[Step]:
         if statement.type == "return_statement":
             expression = statement.named_children[0] if statement.named_children else None
             member = expression is not None and expression.type == "attribute"
-            steps.append(Return(_text(expression) if expression is not None and member else None))
+            steps.append(
+                Return(text_of(expression) if expression is not None and member else None)
+            )
         elif statement.type == "raise_statement":
             steps.append(Return(None))
         elif statement.type == "if_statement":
@@ -345,7 +346,7 @@ def _if_chain(clauses: list[Node]) -> Branch:
     condition = head.child_by_field_name("condition")
     consequence = head.child_by_field_name("consequence")
     arms = [BranchArm("yes", tuple(_steps(consequence)) if consequence else ())]
-    text = _text(condition) if condition else "?"
+    text = text_of(condition) if condition else "?"
     if not rest:
         return Branch(text, tuple(arms), "no")
     if rest[0].type == "elif_clause":
@@ -365,9 +366,9 @@ def _match_branch(statement: Node) -> Branch:
             continue
         pattern = next((c for c in clause.named_children if c.type == "case_pattern"), None)
         block = next((c for c in clause.named_children if c.type == "block"), None)
-        label = "case " + (_text(pattern) if pattern else "_")
+        label = "case " + (text_of(pattern) if pattern else "_")
         arms.append(BranchArm(label, tuple(_steps(block)) if block else ()))
-    return Branch(f"match {_text(subject)}" if subject else "match", tuple(arms), None)
+    return Branch(f"match {text_of(subject)}" if subject else "match", tuple(arms), None)
 
 
 class _PythonRules(calls_core.RuleDefaults):
@@ -400,7 +401,7 @@ class _PythonRules(calls_core.RuleDefaults):
         if node.type not in self.scope_types:
             return None
         name = node.child_by_field_name("name")
-        return _text(name) if name is not None else None
+        return text_of(name) if name is not None else None
 
     def lambda_parameter_names(self, node: Node) -> list[str]:
         return _lambda_parameter_names(node)
@@ -421,8 +422,8 @@ def _assignment_variables(assignment: Node) -> list[LocalVariable]:
     annotation = assignment.child_by_field_name("type")
     right = assignment.child_by_field_name("right")
     if left.type == "identifier":
-        text = _text(annotation) if annotation is not None else None
-        return [LocalVariable(_text(left), text, right)]
+        text = text_of(annotation) if annotation is not None else None
+        return [LocalVariable(text_of(left), text, right)]
     # 分解の代入は、各名前の型が分からない
     return [LocalVariable(name, None, None) for name in _pattern_names(left)]
 
@@ -461,9 +462,6 @@ class PythonAdapter:
     def composition_type_names(self, _raw: str, /) -> list[str]:
         return []
 
-    def is_external_type_name(self, name: str) -> bool:
-        return type_names.capitalized_is_external_type(name)
-
     def anonymous_class_display(self, _qualified: str, /) -> str | None:
         # 無名クラスを型の名前で持たない言語
         return None
@@ -478,11 +476,11 @@ class PythonAdapter:
                         name.child_by_field_name("name") if name.type == "aliased_import" else name
                     )
                     if target is not None:
-                        found.append(Import(_text(target), target.start_point.row + 1))
+                        found.append(Import(text_of(target), target.start_point.row + 1))
             else:
                 module = node.child_by_field_name("module_name")
                 if module is not None:
-                    found.append(Import(_text(module), module.start_point.row + 1))
+                    found.append(Import(text_of(module), module.start_point.row + 1))
                 elif node.type == "future_import_statement":
                     found.append(Import("__future__", node.start_point.row + 1))
         return found
@@ -505,10 +503,10 @@ class PythonAdapter:
                         target = name.child_by_field_name("name")
                         alias = name.child_by_field_name("alias")
                         if target is not None and alias is not None:
-                            table[_text(alias)] = _text(target)
+                            table[text_of(alias)] = text_of(target)
                     else:
                         # `import a.b` が束縛するのは先頭の a だけ
-                        table[_text(name).split(".", 1)[0]] = _text(name).split(".", 1)[0]
+                        table[text_of(name).split(".", 1)[0]] = text_of(name).split(".", 1)[0]
             elif node.type == "import_from_statement":
                 module = node.child_by_field_name("module_name")
                 base = _from_base(module, package) if module is not None else None
@@ -525,8 +523,8 @@ class PythonAdapter:
                     )
                     if target is None:
                         continue
-                    imported = _text(target)
-                    bound = _text(alias) if alias is not None else imported
+                    imported = text_of(target)
+                    bound = text_of(alias) if alias is not None else imported
                     table[bound] = f"{base}.{imported}" if base else imported
         return table
 
@@ -557,6 +555,9 @@ class PythonAdapter:
 
     def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
         return _string_comparisons(source, path)
+
+    def string_constants(self, source: str, /) -> list[StringConstant]:
+        return _string_constants(source)
 
     def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
         return _type_fields_of(text, path)
@@ -597,7 +598,7 @@ class PythonAdapter:
             if definition.type in ("function_definition", "class_definition"):
                 name_node = definition.child_by_field_name("name")
                 name_node = required(name_node)
-                name = _text(name_node)
+                name = text_of(name_node)
                 kind: DeclarationKind = (
                     "class"
                     if definition.type == "class_definition"
@@ -611,7 +612,7 @@ class PythonAdapter:
                 target = statement.child_by_field_name("left")
                 if target is None or target.type != "identifier":
                     continue
-                name = _text(target)
+                name = text_of(target)
                 kind = "variable"
                 spans = split_declaration(statement, None)
             else:
@@ -708,14 +709,14 @@ class PythonAdapter:
                 if target is None or target.type != "identifier":
                     continue
                 annotation = assignment.child_by_field_name("type")
-                name = _text(target)
+                name = text_of(target)
                 seen_fields.add(name)
                 result.append(
                     MemberDecl(
                         owner,
                         name,
                         "field" if in_class else "variable",
-                        _text(annotation) if annotation is not None else None,
+                        text_of(annotation) if annotation is not None else None,
                         (),
                         line,
                         statement,
@@ -736,11 +737,11 @@ class PythonAdapter:
         *,
         result: list[TypeDecl | MemberDecl],
     ) -> None:
-        name = _text(required(node.child_by_field_name("name")))
+        name = text_of(required(node.child_by_field_name("name")))
         qualified = f"{owner}.{name}"
         supers = node.child_by_field_name("superclasses")
         bases = tuple(
-            _text(c)
+            text_of(c)
             for c in (supers.named_children if supers is not None else [])
             if c.type != "keyword_argument"
         )
@@ -777,9 +778,9 @@ class PythonAdapter:
         *,
         in_class: bool,
     ) -> None:
-        name = _text(required(node.child_by_field_name("name")))
+        name = text_of(required(node.child_by_field_name("name")))
         returns = node.child_by_field_name("return_type")
-        annotation = _text(returns) if returns is not None else None
+        annotation = text_of(returns) if returns is not None else None
         line = outer.start_point.row + 1
         body = node.child_by_field_name("body")
         if any(d.endswith((".setter", ".deleter")) for d in decorators):
@@ -834,9 +835,9 @@ class PythonAdapter:
                 continue
             obj = target.child_by_field_name("object")
             attr = target.child_by_field_name("attribute")
-            if obj is None or attr is None or _text(obj) != "self":
+            if obj is None or attr is None or text_of(obj) != "self":
                 continue
-            name = _text(attr)
+            name = text_of(attr)
             if name in seen:
                 continue
             seen.add(name)
@@ -846,7 +847,7 @@ class PythonAdapter:
                     owner,
                     name,
                     "field",
-                    _text(annotation) if annotation is not None else None,
+                    text_of(annotation) if annotation is not None else None,
                     (),
                     node.start_point.row + 1,
                     node,

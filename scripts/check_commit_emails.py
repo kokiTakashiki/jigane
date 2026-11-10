@@ -38,7 +38,10 @@ def is_noreply(address: str) -> bool:
 
 
 def find_offenders(root: Path, revision_range: str) -> list[str]:
-    log = run_command(["git", "log", f"--format={LOG_FORMAT}", revision_range, "--"], cwd=root)
+    log = run_command(
+        ["git", "log", f"--format={LOG_FORMAT}", "--end-of-options", revision_range, "--"],
+        cwd=root,
+    )
     offenders: list[str] = []
     for line in log.splitlines():
         short_sha, author, committer = line.split(SEPARATOR)

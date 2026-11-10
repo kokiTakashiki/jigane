@@ -113,7 +113,9 @@ def write(gate: Gate) -> int:
 def peel_to_commit(sha: str) -> str | None:
     # 注釈付きタグの SHA はタグのオブジェクトなので、指すコミットまで剥がす
     try:
-        return run_command(["git", "rev-parse", "--verify", f"{sha}^{{commit}}"]).strip()
+        return run_command(
+            ["git", "rev-parse", "--verify", "--end-of-options", f"{sha}^{{commit}}"]
+        ).strip()
     except CommandError:
         return None
 
@@ -148,7 +150,13 @@ def base_commit(ref: PushedRef) -> str | None:
     if ref.has_remote_tip:
         try:
             return run_command(
-                ["git", "rev-parse", "--verify", f"{ref.remote_tip}^{{commit}}"]
+                [
+                    "git",
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    f"{ref.remote_tip}^{{commit}}",
+                ]
             ).strip()
         except CommandError:
             # リモートの先端がこの複製に無い。新しい枝と同じく既定の枝を基準にする
@@ -164,7 +172,15 @@ def required_gate(ref: PushedRef) -> Gate:
         # 改名は旧新どちらのパスも出す。文書から外へ動かした変更を文書だけと見誤らないため
         # -z は引用符と 8 進の逃がしを止め、日本語のパスを生の名前で返す
         output = run_command(
-            ["git", "diff", "--name-only", "-z", "--no-renames", f"{base}...{ref.commit}"]
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--end-of-options",
+                f"{base}...{ref.commit}",
+            ]
         )
     except CommandError:
         # 共通の祖先が無いなど、差分を取れない。文書だけとは言えない

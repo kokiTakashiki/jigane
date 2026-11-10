@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pytest
+from fakes import run_command_stub
 from pr_support import commit_all, git
 
+from jigane.git import process
 from jigane.policy_materials import cochange
 
 
@@ -101,3 +103,20 @@ def test_select_strong_drops_pairs_below_each_floor() -> None:
 def test_select_strong_caps_rows() -> None:
     rows = [row(5, 0.9, 6, 6), row(6, 0.8, 7, 7)]
     assert cochange.select_strong(rows, max_rows=1) == rows[:1]
+
+
+def test_revision_is_resolved_then_guarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+    sha = "c" * 40
+
+    def fake_run(args: list[str]) -> str:
+        seen.append(args)
+        return f"{sha}\n" if args[1] == "rev-parse" else ""
+
+    monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
+    evil = "--upload-pack=touch /tmp/x"
+    cochange.count_co_changes(Path(), frozenset({"a.py"}), revision=evil)
+    rev_parse, log = seen
+    assert rev_parse.index("--end-of-options") < rev_parse.index(f"{evil}^{{commit}}")
+    assert evil not in log
+    assert log[-3:] == ["--end-of-options", sha, "--"]

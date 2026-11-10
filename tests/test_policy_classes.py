@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,8 @@ from jigane.figures.models import (
     SignatureFigure,
 )
 from jigane.policy_materials import changed_files
-from jigane.policy_materials.classes import class_diagram
-from jigane.policy_materials.type_deltas import TypeShapeChange, type_shape_change
+from jigane.policy_materials.classes import _note_of, class_diagram
+from jigane.policy_materials.type_deltas import TypeRole, TypeShapeChange, type_shape_change
 from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import TypeInfo
 from jigane.sequence.indexes import Indexes
@@ -1031,3 +1032,154 @@ def test_class_diagram_takes_no_shape_change_for_an_added_type(tmp_path: Path) -
     text = class_diagram(shape_review(tmp_path, "class A:\n    pass\n", WITH_BASE)).text()
     assert "追加した型" in text
     assert "継承か種類が変わった型" not in text
+
+
+JSON_STORE = """\
+class JsonStore:
+    def load(self) -> dict:
+        return {}
+
+    def save(self, data: dict) -> None:
+        pass
+
+
+class UserStore(JsonStore):
+    pass
+
+
+class ProductStore(JsonStore):
+    pass
+"""
+ORDER_STORE = """\
+class OrderStore:
+    def load(self) -> dict:
+        return {}
+
+    def save(self, data: dict) -> None:
+        pass
+"""
+
+
+def sibling_review(
+    tmp_path: Path, unchanged: dict[str, str], changed: dict[str, str], *, kind: ReviewKind
+) -> Review:
+    """unchanged を両方の木に、changed を変更後の木だけに置いた差分のレビュー。"""
+    base = tmp_path / "base"
+    after = tmp_path / "after"
+    base.mkdir()
+    after.mkdir()
+    for name, source in unchanged.items():
+        (base / name).write_text(source, encoding="utf-8")
+        (after / name).write_text(source, encoding="utf-8")
+    segments = []
+    for name, source in changed.items():
+        (after / name).write_text(source, encoding="utf-8")
+        segments.append(whole(name, len(source.splitlines())))
+    return make_review(
+        after,
+        list(changed),
+        base_tree=base,
+        judgment_map={"segments": segments, "regions": [], "line_counts": {}},
+        kind=kind,
+    )
+
+
+def children_source(base: str, names: list[str]) -> str:
+    return f"class {base}:\n    pass\n\n\n" + "\n\n".join(
+        f"class {name}({base}):\n    pass\n" for name in names
+    )
+
+
+def type_notes(text: str) -> dict[str, str]:
+    """型ごとの `%%` の行の注記。行は `%% 名前 パス:行 注記`。"""
+    return {
+        m["name"]: m["note"]
+        for m in re.finditer(r"^    %% (?P<name>\S+) \S+:\d+ (?P<note>.*)$", text, re.MULTILINE)
+    }
+
+
+def test_class_diagram_shows_the_siblings_found_from_same_named_methods(tmp_path: Path) -> None:
+    review = sibling_review(
+        tmp_path, {"store.py": JSON_STORE}, {"order.py": ORDER_STORE}, kind=ReviewKind.RANGE
+    )
+    text = class_diagram(review).text()
+    assert type_notes(text) == {
+        "OrderStore": "追加した型",
+        "JsonStore": "兄弟の型",
+        "UserStore": "兄弟の型",
+        "ProductStore": "兄弟の型",
+    }
+    assert "JsonStore <|-- UserStore" in text
+    assert "JsonStore <|-- ProductStore" in text
+    assert "<|-- OrderStore" not in text
+    # 兄弟の型の項目は名前だけで、型注記もシグネチャも付かない
+    json_store = _blocks(text)["JsonStore"].split("    }\n")[0]
+    assert "        load\n        save\n" in json_store
+    assert "(" not in json_store
+    assert "兄弟の型: ほか" not in text
+
+
+def test_class_diagram_shows_the_siblings_of_a_declared_base(tmp_path: Path) -> None:
+    unchanged = {"base.py": children_source("Base", ["Gadget", "Gizmo"])}
+    changed = {"widget.py": "from base import Base\n\n\nclass Widget(Base):\n    size: int\n"}
+    review = sibling_review(tmp_path, unchanged, changed, kind=ReviewKind.RANGE)
+    notes = type_notes(class_diagram(review).text())
+    assert notes["Base"] == "参照される型"
+    assert notes["Gadget"] == "兄弟の型"
+    assert notes["Gizmo"] == "兄弟の型"
+
+
+def test_class_diagram_caps_siblings_per_base_and_counts_the_rest(tmp_path: Path) -> None:
+    unchanged = {"base.py": children_source("Base", ["C1", "C2", "C3", "C4"])}
+    changed = {"widget.py": "from base import Base\n\n\nclass Widget(Base):\n    size: int\n"}
+    review = sibling_review(tmp_path, unchanged, changed, kind=ReviewKind.RANGE)
+    figure = class_diagram(review)
+    notes = type_notes(figure.text())
+    assert sorted(n for n in notes if n.startswith("C")) == ["C1", "C2", "C3"]
+    assert figure.note is not None
+    assert "兄弟の型: ほか 1 件（基底 `Base`）" in figure.note
+
+
+def test_class_diagram_does_not_infer_a_base_with_a_single_other_child(tmp_path: Path) -> None:
+    only_one = JSON_STORE.replace("\n\nclass ProductStore(JsonStore):\n    pass\n", "")
+    review = sibling_review(
+        tmp_path, {"store.py": only_one}, {"order.py": ORDER_STORE}, kind=ReviewKind.RANGE
+    )
+    assert type_notes(class_diagram(review).text()) == {"OrderStore": "追加した型"}
+
+
+def test_class_diagram_does_not_search_siblings_in_a_file_review(tmp_path: Path) -> None:
+    (tmp_path / "store.py").write_text(JSON_STORE, encoding="utf-8")
+    figure = class_diagram(feature_review(tmp_path, "order.py", ORDER_STORE))
+    assert "UserStore" not in type_notes(figure.text())
+    assert figure.note is not None
+    assert (
+        "ファイルのレビューは変更していないファイルの型を持たないため、兄弟の型は探していない。"
+        in figure.note
+    )
+
+
+def test_class_diagram_does_not_repeat_a_sibling_that_is_already_referenced(
+    tmp_path: Path,
+) -> None:
+    unchanged = {"base.py": children_source("Base", ["Gadget", "Gizmo"])}
+    changed = {
+        "widget.py": "from base import Base, Gadget\n\n\nclass Widget(Base):\n    peer: Gadget\n"
+    }
+    review = sibling_review(tmp_path, unchanged, changed, kind=ReviewKind.RANGE)
+    text = class_diagram(review).text()
+    assert text.count("class Gadget[") == 1
+    notes = type_notes(text)
+    assert notes["Gadget"] == "参照される型"
+    assert notes["Gizmo"] == "兄弟の型"
+
+
+def test_note_of_derives_the_note_from_the_role() -> None:
+    notes = {role: _note_of(added=False, role=role, moved_from=None) for role in TypeRole}
+    assert notes == {
+        TypeRole.CHANGED: "変更した型",
+        TypeRole.REFERENCED: "参照される型",
+        TypeRole.BASE: "兄弟の型",
+        TypeRole.SIBLING: "兄弟の型",
+    }
+    assert _note_of(added=True, role=TypeRole.CHANGED, moved_from=None) == "追加した型"

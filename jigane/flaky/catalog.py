@@ -255,6 +255,7 @@ def load_catalog(
             query_texts.setdefault(
                 name.removesuffix(".toml"), place.joinpath(name).read_text(encoding="utf-8")
             )
-    languages = {adapter.name for adapter in registry.adapters()}
+    # 文法の無い言語も選べる言語に入れる。その言語のファイルにはアダプタが返らず、検出は走らない
+    languages = registry.selectable_names()
     builtin = {plugin.adapter.name for plugin in registry.builtin_plugins()}
     return parse_catalog(path.read_text(encoding="utf-8"), query_texts, languages, builtin)

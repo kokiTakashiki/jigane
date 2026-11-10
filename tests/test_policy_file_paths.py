@@ -138,3 +138,41 @@ def test_dropping_the_read_still_removes_it(tmp_path: Path) -> None:
         "def load(path):\n    return parse(DEFAULT)\n",
     )
     assert marks == {"path": ("読む", RowChange.REMOVED)}
+
+
+JAVA_SOURCE = """class Report {
+    void save(Path out, String name) throws IOException {
+        Path target = out.resolve(name + ".csv");
+        Files.writeString(target, "");
+        Files.readString(Path.of("table.csv"));
+    }
+}
+"""
+
+
+def test_java_change_lists_the_file_names(tmp_path: Path) -> None:
+    figure = policy_file_paths.file_path_table(feature_review(tmp_path, "R.java", JAVA_SOURCE))
+    assert isinstance(figure, TableFigure)
+    assert tuple(row.cells for row in figure.rows) == (
+        ("R.java", "Report.save", "書く", 'out.resolve(name + ".csv")'),
+        ("R.java", "Report.save", "読む", 'Path.of("table.csv")'),
+    )
+
+
+CSHARP_SOURCE = """class Report {
+    void Save(string output, string name) {
+        var target = Path.Combine(output, $"{name}.csv");
+        File.WriteAllText(target, "");
+        File.ReadAllText(Path.Combine("table", "a.csv"));
+    }
+}
+"""
+
+
+def test_csharp_change_lists_the_file_names(tmp_path: Path) -> None:
+    figure = policy_file_paths.file_path_table(feature_review(tmp_path, "R.cs", CSHARP_SOURCE))
+    assert isinstance(figure, TableFigure)
+    assert tuple(row.cells for row in figure.rows) == (
+        ("R.cs", "Report.Save", "書く", 'Path.Combine(output, $"{name}.csv")'),
+        ("R.cs", "Report.Save", "読む", 'Path.Combine("table", "a.csv")'),
+    )

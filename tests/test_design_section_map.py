@@ -18,7 +18,8 @@ from jigane.judgment_map.region_table import (
     RegionTable,
     SectionRegion,
 )
-from jigane.reviews.lifecycle import create_feature_review, judge_files, load_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import create_feature_review, judge_files
 
 DOCUMENT = """# 題
 

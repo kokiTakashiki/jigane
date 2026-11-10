@@ -7,7 +7,8 @@ from language_plugin_support import Installer, enabled_of, entry_points_in, fail
 from jigane.flaky.catalog import EquivalentState, load_catalog
 from jigane.languages import grammars, queries, registry
 from jigane.languages.data_places import BUILTIN_QUERIES_DIR
-from jigane.languages.plugins import ReasonKind, discover
+from jigane.languages.plugins import discover
+from jigane.languages.states import ReasonKind
 
 
 @pytest.fixture(autouse=True)

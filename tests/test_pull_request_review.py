@@ -30,6 +30,7 @@ from jigane.judgment_map.declaration import (
 from jigane.pull_request_context import background
 from jigane.pull_request_context.background import PastPullRequest, dump_background
 from jigane.reviews import lifecycle as review_module
+from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import (
     DeclaredInputs,
     FeatureOrigin,
@@ -38,7 +39,6 @@ from jigane.reviews.lifecycle import (
     ReviewError,
     create_feature_review,
     create_pull_request_review,
-    load_review,
 )
 from jigane.skills import macro, shards
 from jigane.skills.assembly import AssemblyInput

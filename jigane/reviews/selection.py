@@ -3,14 +3,17 @@
 import copy
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from jigane.findings.discarded_nits import LEGACY_NOT_SELECTABLE, is_legacy_nit_id
 from jigane.findings.records import (
+    FindingBody,
     HistoryLoad,
+    StoredTheme,
     TriagedFinding,
     is_rejected,
     load_findings_state,
@@ -18,31 +21,88 @@ from jigane.findings.records import (
 from jigane.groups.definitions import GROUP_IDS, GroupId
 from jigane.groups.viewpoints import viewpoint_fields
 from jigane.reviews.lifecycle import ReviewError
-from jigane.storage.store import review_lock, write_text_atomic
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.locking import review_lock
 from jigane.storage.store_format import Upgrade, upgrade_mapping
 
 SELECTION_FILE = "selection.json"
 # selection.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
-SELECTION_FORMAT = 3
+SELECTION_FORMAT = 4
 _FINDING_PATTERN = re.compile(r"^F[1-9][0-9]*$")
 _THEME_PATTERN = re.compile(r"^B[1-9][0-9]*$")
 
 
 @dataclass(frozen=True)
+class PastRoundInputs:
+    """前の回の指摘を照合するために読む、履歴と、群ごとの今の結果を作った実行の時刻。"""
+
+    history: HistoryLoad
+    current_ran_at: Mapping[GroupId, str | None]
+
+
+# 読む関数は入口が組み立てる。runs.json の読み口は reviews 層から import できない
+PastRoundReader = Callable[[], PastRoundInputs]
+
+
+class NoRanAt(Enum):
+    """回の記録が実行時刻を持たない（時刻を残さない古い回）ことを表す、ただ一つの値。"""
+
+    ABSENT = "no_ran_at"
+
+
+class UnknownOrigin(Enum):
+    """出所を持たない版 3 から移した扱いであることを表す、ただ一つの値。"""
+
+    ABSENT = "unknown_origin"
+
+
+# 呼ぶ側が使う名前はこの二つだけ。列挙の値は直接参照しない
+NO_RAN_AT = NoRanAt.ABSENT
+UNKNOWN_ORIGIN = UnknownOrigin.ABSENT
+
+RanAt = str | NoRanAt
+
+
+@dataclass(frozen=True)
+class RoundOrigin:
+    """指摘が属する回の出所。群と、その回を作った実行の時刻。時刻の記録が無い回は NO_RAN_AT。"""
+
+    group: GroupId
+    ran_at: RanAt
+
+    @classmethod
+    def recorded(cls, group: GroupId, ran_at: str | None) -> "RoundOrigin":
+        """保存や履歴から読んだ時刻（無ければ None）を、名前の付いた値へ写して作る唯一の口。"""
+        match ran_at:
+            case str():
+                return cls(group, ran_at)
+            case None:
+                return cls(group, NO_RAN_AT)
+
+
+SelectionOrigin = RoundOrigin | UnknownOrigin
+
+
+@dataclass(frozen=True)
 class Picked:
-    """最終的な指摘に入れる。"""
+    """最終的な指摘に入れる。origin が UNKNOWN_ORIGIN なのは、版 3 から移した扱い。"""
+
+    origin: SelectionOrigin = UNKNOWN_ORIGIN
 
 
 @dataclass(frozen=True)
 class Held:
-    """判断を保留にする。"""
+    """判断を保留にする。origin が UNKNOWN_ORIGIN なのは、出所を持たない版 3 から移した扱い。"""
+
+    origin: SelectionOrigin = UNKNOWN_ORIGIN
 
 
 @dataclass(frozen=True)
 class Objected:
-    """指摘に同意しない。理由を持つ。"""
+    """指摘に同意しない。理由を持つ。origin が UNKNOWN_ORIGIN なのは、版 3 から移した扱い。"""
 
     reason: str
+    origin: SelectionOrigin = UNKNOWN_ORIGIN
 
 
 SelectionVerdict = Picked | Held | Objected
@@ -79,24 +139,52 @@ class Selection:
         return {"picked": self.picked, "held": self.held, "objections": self.objections}
 
 
-def _dump_verdict(verdict: SelectionVerdict) -> dict[str, str]:
+def _dump_ran_at(ran_at: RanAt) -> str | None:
+    match ran_at:
+        case str():
+            return ran_at
+        case NoRanAt():
+            return None
+
+
+def _dump_origin(origin: SelectionOrigin) -> dict[str, str | None] | None:
+    match origin:
+        case RoundOrigin(group, ran_at):
+            return {"group": group.value, "ran_at": _dump_ran_at(ran_at)}
+        case UnknownOrigin():
+            return None
+
+
+def _dump_verdict(verdict: SelectionVerdict) -> dict[str, Any]:
     match verdict:
-        case Picked():
-            return {"kind": "picked"}
-        case Held():
-            return {"kind": "held"}
-        case Objected(reason):
-            return {"kind": "objected", "reason": reason}
+        case Picked(origin):
+            return {"kind": "picked", "round": _dump_origin(origin)}
+        case Held(origin):
+            return {"kind": "held", "round": _dump_origin(origin)}
+        case Objected(reason, origin):
+            return {"kind": "objected", "reason": reason, "round": _dump_origin(origin)}
+
+
+def _parse_origin(number: str, raw: object) -> SelectionOrigin:
+    if raw is None:
+        return UNKNOWN_ORIGIN
+    if isinstance(raw, Mapping) and raw.get("group") in GROUP_IDS:
+        ran_at = raw.get("ran_at")
+        if ran_at is None or isinstance(ran_at, str):
+            return RoundOrigin.recorded(GroupId(raw["group"]), ran_at)
+    raise ReviewError(f"{SELECTION_FILE} の指摘 {number} の回の出所が読めません: {raw!r}")
 
 
 def _parse_verdict(number: str, raw: object) -> SelectionVerdict:
     kind = raw.get("kind") if isinstance(raw, Mapping) else None
-    if kind == "picked":
-        return Picked()
-    if kind == "held":
-        return Held()
-    if kind == "objected" and isinstance(raw, Mapping) and isinstance(raw.get("reason"), str):
-        return Objected(raw["reason"])
+    if isinstance(raw, Mapping) and "round" in raw:
+        origin = _parse_origin(number, raw["round"])
+        if kind == "picked":
+            return Picked(origin)
+        if kind == "held":
+            return Held(origin)
+        if kind == "objected" and isinstance(raw.get("reason"), str):
+            return Objected(raw["reason"], origin)
     raise ReviewError(f"{SELECTION_FILE} の指摘 {number} の扱いが読めません: {raw!r}")
 
 
@@ -143,8 +231,21 @@ def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {"verdicts": verdicts}
 
 
+def _upgrade_v3(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """版 3 の selection.json を次の版へ移す。
+
+    扱いはそのまま写す。版 3 は出所を持たないので、出所の項目そのものを null（不明）にする。
+    """
+    return {
+        "verdicts": {
+            number: {**verdict, "round": None} if isinstance(verdict, Mapping) else verdict
+            for number, verdict in raw["verdicts"].items()
+        }
+    }
+
+
 # 保存された版から次の版への移し。parse_selection が SELECTION_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2}
+_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2, 3: _upgrade_v3}
 
 
 def parse_selection(raw: Mapping[str, Any]) -> Selection:
@@ -196,17 +297,17 @@ class StaleFinding:
         """画面へ渡す形。履歴に無い番号は id と group だけ。"""
         if self.past is None:
             return {"id": self.id, "group": None}
-        past = self.past
+        origin, body = self.past.origin, self.past.body
         return {
             "id": self.id,
-            "group": past.group,
-            "ran_at": past.ran_at,
-            "severity": past.severity,
-            "viewpoint": past.viewpoint,
-            **viewpoint_fields(past.viewpoint),
-            "claim": past.claim,
-            "body": past.body,
-            "evidence": past.evidence,
+            "group": origin.group,
+            "ran_at": _dump_ran_at(origin.ran_at),
+            "severity": body.severity,
+            "viewpoint": body.viewpoint,
+            **viewpoint_fields(body.viewpoint),
+            "claim": body.claim,
+            "body": body.extra.get("body"),
+            "evidence": body.extra["evidence"],
         }
 
     @property
@@ -217,22 +318,19 @@ class StaleFinding:
         """CLI の表示に使う一行。本文を引けたものは前の回の指摘と分かる形にする。"""
         if self.past is None:
             return f"{self.id}（履歴にありません）"
-        head = f"{self.id} {self.past.viewpoint} {self.past.claim}"
+        body = self.past.body
+        head = f"{self.id} {body.viewpoint} {body.claim}"
         text = f"{head}（前の回の指摘で、今回の結果にありません）"
-        return f"{text}\n{self.past.body}" if self.past.body else text
+        detail = body.extra.get("body")
+        return f"{text}\n{detail}" if detail else text
 
 
 @dataclass(frozen=True)
 class PastFinding:
     """履歴から引いた前の回の指摘。どの群の、どの回のものかを添える。"""
 
-    group: GroupId
-    ran_at: str | None
-    severity: str
-    viewpoint: str
-    claim: str
-    body: str | None
-    evidence: Any
+    origin: RoundOrigin
+    body: FindingBody
 
 
 def history_findings(history: HistoryLoad) -> dict[str, PastFinding]:
@@ -246,15 +344,7 @@ def history_findings(history: HistoryLoad) -> dict[str, PastFinding]:
             for finding in entry.findings:
                 found.setdefault(
                     finding.body.id,
-                    PastFinding(
-                        group=group,
-                        ran_at=entry.ran_at,
-                        severity=finding.body.severity,
-                        viewpoint=finding.body.viewpoint,
-                        claim=finding.body.claim,
-                        body=finding.body.extra.get("body"),
-                        evidence=finding.body.extra["evidence"],
-                    ),
+                    PastFinding(RoundOrigin.recorded(group, entry.ran_at), finding.body),
                 )
     return found
 
@@ -274,44 +364,102 @@ def stale_details(
     ]
 
 
-def _unknown_message(tokens: list[str]) -> str:
-    """番号を受け付けない誤りの文。古い記録の候補の番号は、知らないのでなく選べないと分けて言う。"""
+_HISTORY_UNREADABLE_NOTE = "（履歴が読めないため、前の回の指摘の番号は受け付けられません）"
+
+
+@dataclass(frozen=True)
+class _Known:
+    """受け付ける F の番号。今の結果と履歴の和で、番号ごとに回の出所を持つ。
+
+    places は番号ごとの出所の場所の表示。二か所以上にある番号は、使われたときだけ止める。
+    """
+
+    origins: dict[str, RoundOrigin]
+    places: dict[str, tuple[str, ...]]
+    current: dict[str, TriagedFinding]
+    themes: dict[str, StoredTheme]
+    history_readable: bool
+
+
+def _require_unique(known: _Known, numbers: Iterable[str]) -> None:
+    """指定された番号が二か所以上に現れていたら、保存物の不整合として止める。"""
+    for number in numbers:
+        places = known.places[number]
+        if len(places) > 1:
+            raise ReviewError(
+                f"保存物の不整合です: 指摘 {number} が {' と '.join(places)} の複数か所にあります"
+            )
+
+
+def _unknown_error(known: _Known, tokens: list[str]) -> ReviewError:
+    """番号を受け付けない誤り。古い記録の候補の番号は、知らないのでなく選べないと分けて言う。"""
     legacy = [t for t in tokens if is_legacy_nit_id(t)]
     unknown = [t for t in tokens if not is_legacy_nit_id(t)]
     parts: list[str] = []
     if legacy:
         parts.append(f"{LEGACY_NOT_SELECTABLE}: {', '.join(legacy)}")
     if unknown:
-        parts.append(f"知らない指摘の番号です: {', '.join(unknown)}")
-    return "。".join(parts)
+        note = "" if known.history_readable else _HISTORY_UNREADABLE_NOTE
+        parts.append(f"知らない指摘の番号です: {', '.join(unknown)}{note}")
+    return ReviewError("。".join(parts))
 
 
-def _split_tokens(directory: Path, tokens: list[str]) -> tuple[list[str], list[str]]:
+def _locate(directory: Path, inputs: PastRoundInputs) -> _Known:
+    """今の結果と履歴の番号を集める。二か所に現れた番号は、場所を覚えておく。
+
+    inputs はレビューの錠の中で読み関数から受け取った、履歴と群ごとの今の結果の実行時刻。
+    """
+    history, current_ran_at = inputs.history, inputs.current_ran_at
+    state = load_findings_state(directory)
+    origins: dict[str, RoundOrigin] = {}
+    places: dict[str, tuple[str, ...]] = {}
+    current: dict[str, TriagedFinding] = {}
+
+    def claim(number: str, origin: RoundOrigin, place: str) -> None:
+        origins.setdefault(number, origin)
+        places[number] = (*places.get(number, ()), place)
+
+    for group, findings in state.groups.items():
+        origin = RoundOrigin.recorded(group, current_ran_at.get(group))
+        for triaged in findings:
+            claim(triaged.finding.id, origin, f"今の結果（{group.value}）")
+            current[triaged.finding.id] = triaged
+    for group in GROUP_IDS:
+        for entry in history.rounds.get(group, []):
+            origin = RoundOrigin.recorded(group, entry.ran_at)
+            for stored in entry.findings:
+                claim(stored.body.id, origin, f"履歴（{group.value}、{entry.ran_at}）")
+    themes = {t.id: t for t in state.themes}
+    return _Known(origins, places, current, themes, history_readable=not history.warnings)
+
+
+def _split_tokens(known: _Known, tokens: list[str]) -> tuple[list[str], list[str]]:
     """番号を F の番号の列と、B の所属の F の番号の列に分ける。知らない番号は ReviewError にする。
 
     F の番号に直接挙げられた番号は、B の所属にも入っていても前者に入れる。
+    B の番号は今の結果のまとめだけで展開する。
     """
-    findings = current_ids(directory)
-    themes = {t.id: t for t in load_findings_state(directory).themes}
     direct: dict[str, None] = {}
     members: dict[str, None] = {}
     unknown: list[str] = []
     for token in tokens:
-        if _FINDING_PATTERN.match(token) and token in findings:
+        if _FINDING_PATTERN.match(token) and token in known.origins:
             direct[token] = None
-        elif _THEME_PATTERN.match(token) and token in themes:
-            for member in themes[token].finding_ids:
+        elif _THEME_PATTERN.match(token) and token in known.themes:
+            for member in known.themes[token].finding_ids:
                 members[member] = None
         else:
             unknown.append(token)
     if unknown:
-        raise ReviewError(_unknown_message(unknown))
-    return list(direct), [m for m in members if m not in direct]
+        raise _unknown_error(known, unknown)
+    members_only = [m for m in members if m not in direct]
+    _require_unique(known, [*direct, *members_only])
+    return list(direct), members_only
 
 
-def expand(directory: Path, tokens: list[str]) -> list[str]:
+def _expand(known: _Known, tokens: list[str]) -> list[str]:
     """F と B の番号を F の番号の列に展開する。知らない番号は ReviewError にする。"""
-    direct, members = _split_tokens(directory, tokens)
+    direct, members = _split_tokens(known, tokens)
     return [*direct, *members]
 
 
@@ -332,25 +480,55 @@ class LostReason:
     reason: str
 
 
-def _replace(selection: Selection, ids: list[str], verdict: SelectionVerdict) -> list[LostReason]:
+_KindOfVerdict = type[Picked] | type[Held] | type[Objected]
+
+
+@dataclass(frozen=True)
+class _KindSpec:
+    """扱いの種類ごとの作り方と、外せない番号を拒むときの文の頭。"""
+
+    build: Callable[[RoundOrigin, str], SelectionVerdict]
+    mismatch_head: str
+
+
+# reason を使うのは Objected だけ。他の作り方は受け取って捨てる
+_KINDS: dict[_KindOfVerdict, _KindSpec] = {
+    Picked: _KindSpec(lambda origin, _reason: Picked(origin), "pickedではない指摘の番号です"),
+    Held: _KindSpec(lambda origin, _reason: Held(origin), "heldではない指摘の番号です"),
+    Objected: _KindSpec(
+        lambda origin, reason: Objected(reason, origin), "異議の無い指摘の番号です"
+    ),
+}
+
+
+def _replace(
+    known: _Known,
+    selection: Selection,
+    ids: list[str],
+    kind: _KindOfVerdict,
+    reason: str = "",
+) -> list[LostReason]:
+    """番号の扱いを kind に置き換える。reason は kind が Objected のときの異議の理由。"""
+    build = _KINDS[kind].build
     lost: list[LostReason] = []
     for number in ids:
         previous = selection.verdicts.get(number)
         if isinstance(previous, Objected):
             lost.append(LostReason(number, previous.reason))
-        selection.verdicts[number] = verdict
+        selection.verdicts[number] = build(known.origins[number], reason)
     return lost
 
 
 def _remove(
-    directory: Path, selection: Selection, tokens: list[str], kind: type, mismatch: str
+    known: _Known, selection: Selection, tokens: list[str], kind: _KindOfVerdict
 ) -> Removal:
     """扱いが kind の番号だけを外す。
 
-    mismatch は誤りの文の頭。F の番号は一つでも扱いが違えば何も外さず ReviewError にする。
+    F の番号は一つでも扱いが違えば何も外さず ReviewError にする。
     B の所属は扱いが合うものだけを外し、一件も外せなければ ReviewError にする。
     """
-    direct, members = _split_tokens(directory, tokens)
+    mismatch = _KINDS[kind].mismatch_head
+    direct, members = _split_tokens(known, tokens)
     wrong = [n for n in direct if not isinstance(selection.verdicts.get(n), kind)]
     if wrong:
         raise ReviewError(f"{mismatch}: {', '.join(wrong)}")
@@ -363,61 +541,93 @@ def _remove(
     return Removal((*direct, *matching), tuple(skipped), via_theme=bool(members))
 
 
-def pick(directory: Path, tokens: list[str]) -> tuple[Selection, list[str], list[LostReason]]:
+def pick(
+    directory: Path,
+    tokens: list[str],
+    read_inputs: PastRoundReader,
+) -> tuple[Selection, list[str], list[LostReason]]:
     """前の扱いを picked に置き換える。
 
     二つ目は棄却済みなのに pick した F の番号、三つ目は置き換えで消えた異議の理由。
+    read_inputs は錠を握った後に呼ばれ、履歴と今の結果の実行時刻を読む。
     """
     with review_lock(directory):
-        ids = expand(directory, tokens)
-        findings = current_findings(directory)
+        known = _locate(directory, read_inputs())
+        ids = _expand(known, tokens)
         selection = load_selection(directory)
-        lost = _replace(selection, ids, Picked())
+        lost = _replace(known, selection, ids, Picked)
         save_selection(directory, selection)
-        return selection, [i for i in ids if is_rejected(findings[i].finding)], lost
+        # 前の回の指摘の棄却の判定は履歴の本体を要するので、この枝では今の結果の指摘だけ見る
+        rejected = [i for i in ids if i in known.current and is_rejected(known.current[i].finding)]
+        return selection, rejected, lost
 
 
-def unpick(directory: Path, tokens: list[str]) -> tuple[Selection, Removal]:
+def unpick(
+    directory: Path,
+    tokens: list[str],
+    read_inputs: PastRoundReader,
+) -> tuple[Selection, Removal]:
     with review_lock(directory):
+        known = _locate(directory, read_inputs())
         selection = load_selection(directory)
-        removal = _remove(directory, selection, tokens, Picked, "pickedではない指摘の番号です")
+        removal = _remove(known, selection, tokens, Picked)
         save_selection(directory, selection)
         return selection, removal
 
 
-def hold(directory: Path, tokens: list[str]) -> tuple[Selection, list[LostReason]]:
+def hold(
+    directory: Path,
+    tokens: list[str],
+    read_inputs: PastRoundReader,
+) -> tuple[Selection, list[LostReason]]:
     with review_lock(directory):
-        ids = expand(directory, tokens)
+        known = _locate(directory, read_inputs())
+        ids = _expand(known, tokens)
         selection = load_selection(directory)
-        lost = _replace(selection, ids, Held())
+        lost = _replace(known, selection, ids, Held)
         save_selection(directory, selection)
         return selection, lost
 
 
-def unhold(directory: Path, tokens: list[str]) -> tuple[Selection, Removal]:
+def unhold(
+    directory: Path,
+    tokens: list[str],
+    read_inputs: PastRoundReader,
+) -> tuple[Selection, Removal]:
     with review_lock(directory):
+        known = _locate(directory, read_inputs())
         selection = load_selection(directory)
-        removal = _remove(directory, selection, tokens, Held, "heldではない指摘の番号です")
+        removal = _remove(known, selection, tokens, Held)
         save_selection(directory, selection)
         return selection, removal
 
 
-def object_to(directory: Path, token: str, reason: str) -> tuple[Selection, list[LostReason]]:
+def object_to(
+    directory: Path,
+    token: str,
+    reason: str,
+    read_inputs: PastRoundReader,
+) -> tuple[Selection, list[LostReason]]:
     with review_lock(directory):
         if not reason.strip():
             raise ReviewError("異議の理由が空です")
-        if not _FINDING_PATTERN.match(token) or token not in current_ids(directory):
-            raise ReviewError(_unknown_message([token]))
+        known = _locate(directory, read_inputs())
+        if not _FINDING_PATTERN.match(token) or token not in known.origins:
+            raise _unknown_error(known, [token])
+        _require_unique(known, [token])
         selection = load_selection(directory)
-        lost = _replace(selection, [token], Objected(reason))
+        lost = _replace(known, selection, [token], Objected, reason)
         save_selection(directory, selection)
         return selection, lost
 
 
-def unobject(directory: Path, token: str) -> tuple[Selection, Removal]:
+def unobject(
+    directory: Path, token: str, read_inputs: PastRoundReader
+) -> tuple[Selection, Removal]:
     with review_lock(directory):
+        known = _locate(directory, read_inputs())
         selection = load_selection(directory)
-        removal = _remove(directory, selection, [token], Objected, "異議の無い指摘の番号です")
+        removal = _remove(known, selection, [token], Objected)
         save_selection(directory, selection)
         return selection, removal
 

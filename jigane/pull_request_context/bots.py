@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand, build_git_command
+from jigane.git.revision import CommitSha, parse_commit_sha
 from jigane.git.tree_files import read_tree_text
 from jigane.judgment_map.classification import BotTouch
 from jigane.preconditions.required import required
@@ -237,23 +239,36 @@ def _touched_lines(
 
 
 def analyze(git_dir: Path, head_tree: Path, comments: list[BotComment]) -> BotAnalysis:
-    fetched: dict[str, bool] = {}
+    # 取れたコミットは検査済みの CommitSha、取れなかったものは None
+    fetched: dict[str, CommitSha | None] = {}
     judgments: list[BotJudgment] = []
     for comment in comments:
         sha = comment.original_commit_id
         if sha not in fetched:
             try:
-                process.run_command(["git", "fetch", "origin", sha], cwd=git_dir)
-                fetched[sha] = True
-            except process.CommandError:
+                # GitHub の応答の値は形の保証が無い。SHA でなければ、取れないコミットと同じに扱う
+                commit = parse_commit_sha("original_commit_id", sha)
+                process.run_command(
+                    build_git_command(
+                        GitSubcommand.FETCH, fixed_values=["origin"], revisions=[commit]
+                    ),
+                    cwd=git_dir,
+                )
+                fetched[sha] = commit
+            except (process.CommandError, ValueError):
                 # force-push の後などで、コミットがもう取れない
-                fetched[sha] = False
+                fetched[sha] = None
         head_text = read_tree_text(head_tree, comment.path)
         old_text: str | None = None
-        if fetched[sha] and head_text is not None:
+        fetched_commit = fetched[sha]
+        if fetched_commit is not None and head_text is not None:
             try:
                 old_text = process.run_command(
-                    ["git", "show", f"{sha}:{comment.path}"], cwd=git_dir
+                    build_git_command(
+                        GitSubcommand.SHOW,
+                        revision_paths=[(fetched_commit, comment.path)],
+                    ),
+                    cwd=git_dir,
                 )
             except (process.CommandError, UnicodeDecodeError):
                 old_text = None

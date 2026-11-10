@@ -8,13 +8,12 @@ from pr_support import commit_all, git
 from jigane import commands
 from jigane.commands.subcommands.refresh import refresh_review
 from jigane.design.review_documents import create_design_doc_review
+from jigane.reviews.catalog import list_reviews, load_review
 from jigane.reviews.lifecycle import (
     DesignDocOrigin,
     FeatureOrigin,
     ReviewError,
-    _origin_from_stored,
-    list_reviews,
-    load_review,
+    origin_from_stored,
 )
 from jigane.storage.store import ReviewId, ReviewKind, check_new_key
 
@@ -117,7 +116,7 @@ def test_origin_round_trip_through_stored_fields(repo: Path) -> None:
     }
     restored = DesignDocOrigin.from_dict(json.loads(json.dumps(stored["design_doc"])))
     assert (
-        _origin_from_stored(
+        origin_from_stored(
             ReviewKind.DESIGN_DOC, None, None, None, None, design_doc=stored["design_doc"]
         )
         == review.origin
@@ -128,10 +127,10 @@ def test_origin_round_trip_through_stored_fields(repo: Path) -> None:
 def test_unassemblable_combinations_are_rejected() -> None:
     origin = DesignDocOrigin("d.md", "v", "c", ()).to_dict()
     with pytest.raises(ReviewError, match="ファイルの対象"):
-        _origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, ["a"], design_doc=origin)
+        origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, ["a"], design_doc=origin)
     with pytest.raises(ReviewError, match="設計書の情報がありません"):
-        _origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, None, design_doc=None)
-    assert _origin_from_stored(
+        origin_from_stored(ReviewKind.DESIGN_DOC, None, None, None, None, design_doc=None)
+    assert origin_from_stored(
         ReviewKind.FEATURE, None, None, None, None, design_doc=None
     ) == FeatureOrigin(None)
     with pytest.raises(TypeError):

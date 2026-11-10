@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from jigane.storage import store
-from jigane.storage.store import ReviewId, ReviewKind, check_new_key
+from jigane.storage.store import (
+    ReviewId,
+    ReviewKind,
+    check_new_key,
+    check_new_review_id,
+    check_review_id,
+)
 
 
 def test_jigane_home_takes_priority(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -63,7 +69,7 @@ def test_parse_rejects_invalid(text: str) -> None:
 
 def test_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(tmp_path))
-    review = ReviewId.parse("owner/repo#128")
+    review = check_new_review_id(ReviewId.parse("owner/repo#128"))
     assert review.directory() == tmp_path / "owner" / "repo" / "128"
     assert not review.directory().exists()
 
@@ -125,8 +131,11 @@ def test_directory_rejects_symlink_escape(monkeypatch: pytest.MonkeyPatch, tmp_p
     outside.mkdir()
     (home / "owner" / "repo").symlink_to(outside)
     monkeypatch.setenv("JIGANE_HOME", str(home))
+    review_id = ReviewId("owner", "repo", "1", ReviewKind.PULL_REQUEST)
     with pytest.raises(ValueError, match="外"):
-        ReviewId("owner", "repo", "1", ReviewKind.PULL_REQUEST).directory()
+        check_review_id(review_id)
+    with pytest.raises(ValueError, match="外"):
+        check_new_review_id(review_id)
 
 
 @pytest.mark.parametrize(
@@ -160,9 +169,9 @@ def test_directories_of_the_three_kinds_do_not_overlap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(tmp_path))
-    assert ReviewId.parse("o/r@7").directory() == tmp_path / "o" / "r" / "@7"
-    assert ReviewId.parse("o/r#7").directory() == tmp_path / "o" / "r" / "7"
-    assert ReviewId.parse("o/r:x").directory() == tmp_path / "o" / "r" / "x"
+    assert check_new_review_id(ReviewId.parse("o/r@7")).directory() == tmp_path / "o" / "r" / "@7"
+    assert check_new_review_id(ReviewId.parse("o/r#7")).directory() == tmp_path / "o" / "r" / "7"
+    assert check_new_review_id(ReviewId.parse("o/r:x")).directory() == tmp_path / "o" / "r" / "x"
 
 
 @pytest.mark.parametrize("text", ["o/r@", "o/r@a/b", "o/r@.x", "o/r@a@b", "o/r@a:b", "o/r#1@x"])
@@ -215,7 +224,7 @@ def test_kinds_never_share_a_directory(monkeypatch: pytest.MonkeyPatch, tmp_path
             except ValueError:
                 # その種類では作れない組。保存先を持たせない
                 continue
-            review_id = ReviewId("o", "r", key, kind)
+            review_id = check_new_review_id(ReviewId("o", "r", key, kind))
             assert review_id.directory() not in directories, (review_id, directories)
             directories[review_id.directory()] = str(review_id)
     assert len(directories) > len(keys)
@@ -248,7 +257,7 @@ def test_review_id_round_trips_through_directory_and_text(
     directory_name: str,
 ) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(tmp_path))
-    review_id = ReviewId("o", "r", key, kind)
+    review_id = check_new_review_id(ReviewId("o", "r", key, kind))
     assert review_id.directory() == tmp_path / "o" / "r" / directory_name
     assert ReviewId.parse(str(review_id)) == review_id
     assert ReviewId.parse_short(f"r{kind.separator}{key}") == ("r", kind, key)
@@ -318,7 +327,7 @@ def test_directory_stays_under_data_home(
     text: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(tmp_path))
-    directory = ReviewId.parse(text).directory()
+    directory = check_new_review_id(ReviewId.parse(text)).directory()
     assert directory.resolve().is_relative_to(tmp_path.resolve())
     assert directory != tmp_path.resolve()
 
@@ -354,3 +363,30 @@ def test_ensure_data_home_keeps_mode_of_existing_root(
     monkeypatch.setenv("JIGANE_HOME", str(home))
     store.ensure_data_home()
     assert stat.S_IMODE(home.stat().st_mode) == 0o755
+
+
+def test_directory_does_not_touch_the_file_system(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JIGANE_HOME", str(tmp_path))
+    review_id = check_new_review_id(ReviewId.parse("owner/repo#9"))
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("directory はファイルシステムを引かない")
+
+    monkeypatch.setattr(Path, "resolve", forbidden)
+    monkeypatch.setattr(Path, "is_symlink", forbidden)
+    monkeypatch.setattr(Path, "is_junction", forbidden)
+    assert review_id.directory() == tmp_path / "owner" / "repo" / "9"
+
+
+def test_directory_is_the_path_checked_at_issue_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = tmp_path / "first"
+    monkeypatch.setenv("JIGANE_HOME", str(first))
+    review_id = check_new_review_id(ReviewId.parse("owner/repo#9"))
+    monkeypatch.setenv("JIGANE_HOME", str(tmp_path / "second"))
+    assert review_id.directory() == first / "owner" / "repo" / "9"
+    assert review_id == ReviewId.parse("owner/repo#9")
+    assert hash(review_id) == hash(ReviewId.parse("owner/repo#9"))

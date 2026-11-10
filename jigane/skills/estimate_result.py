@@ -259,7 +259,7 @@ class DesignPolicyEstimate(PolicyEstimateBase):
         return self.expected
 
     def input_cost(self, basis: claude.RunBudget) -> InputCostEstimate | None:
-        cost = pricing.input_cost_usd(basis.model, self.discovery_input_tokens)
+        cost = basis.launch_cost(self.discovery_input_tokens)
         return ExpectedInputCost(
             cost,
             basis.input_stops_run(self.discovery_input_tokens),
@@ -315,8 +315,8 @@ class ShardedEstimate(EstimateCommon, ABC):
 
     def input_cost(self, basis: claude.RunBudget) -> InputCostEstimate | None:
         # 上限は起動ごとなので、シャード単位で比べる
-        tokens = [pricing.estimate_input_tokens(size) for size in self.prompt_bytes]
-        costs = [pricing.input_cost_usd(basis.model, count) for count in tokens]
+        tokens = [basis.prompt_tokens(size) for size in self.prompt_bytes]
+        costs = [basis.launch_cost(count) for count in tokens]
         return ShardedInputCost(
             cost=pricing.InputCost(
                 sum(cost.usd for cost in costs),

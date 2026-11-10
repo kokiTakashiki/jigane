@@ -63,8 +63,8 @@ def test_estimate_text_shows_the_principle_runs_and_the_sum_of_all_runs(
     assert main(["estimate", "shop:p", "macro"]) == EXIT_OK
     out = capsys.readouterr().out.splitlines()
     index = next(i for i, line in enumerate(out) if line.startswith("1 回の起動の目安"))
-    assert out[index + 1] == ("原則の起動: claude-haiku-5-5 4 回（1 回の目安 0.02 USD）")
-    assert out[index + 2] == "全起動の和の目安（超えることがある）: 0.44 USD"
+    assert out[index + 1] == ("原則の起動: claude-haiku-5-5 4 回（1 回の目安 0.04 USD）")
+    assert out[index + 2] == "全起動の和の目安（超えることがある）: 0.52 USD"
     assert "principle" not in "".join(out)
 
 

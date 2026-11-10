@@ -10,7 +10,7 @@ from jigane import commands
 from jigane.languages import fetch_main, grammars, queries, registry
 from jigane.languages.base import grammar_target
 from jigane.languages.plugin import GrammarSpec
-from jigane.languages.plugins import LanguageUnavailable, ReasonKind
+from jigane.languages.states import LanguageUnavailable, ReasonKind
 
 
 def _digest(content: bytes) -> str:
@@ -129,6 +129,9 @@ def test_matching_external_grammar_leaves_the_language_ready(
 def test_external_grammar_error_makes_the_language_unavailable(
     install: Installer, tmp_path: Path, store: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    for grammar in grammars.GRAMMARS:
+        # 組み込みの文法が置き場に在れば、使えない言語は zig だけになる
+        fake_library(store, "c_sharp" if grammar == "csharp" else grammar, grammar.encode())
     fake_library(store, "zig", b"tampered")
     _enable_zig(install, tmp_path, _spec())
     (state,) = [s for s in registry.states() if isinstance(s, LanguageUnavailable)]
@@ -386,3 +389,116 @@ def test_load_queries_checks_the_grammar_by_the_declared_target(
 def test_grammar_target_named_falls_back_to_builtin_for_unknown_names() -> None:
     assert registry.grammar_target_named("python") == grammars.BuiltinGrammar("python")
     assert registry.grammar_target_named("nowhere") == grammars.BuiltinGrammar("nowhere")
+
+
+def _builtin_libraries(store: Path, *names: str) -> None:
+    for name in names:
+        fake_library(store, "c_sharp" if name == "csharp" else name, name.encode())
+
+
+def test_fetch_with_names_downloads_and_reports_only_those(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = _fake_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    assert commands.main(["languages", "fetch", "--accept-terms", "swift", "python", "swift"]) == 0
+    assert calls == [["python", "swift"]]
+    assert capsys.readouterr().out == "取得して照合しました: python, swift\n"
+
+
+def test_fetch_with_only_an_external_name_skips_the_builtin_download(
+    install: Installer,
+    tmp_path: Path,
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _fake_download(store, monkeypatch, {**_BUILTIN_CONTENTS, "zig": b"zig-library"})
+    _enable_zig(install, tmp_path, _spec())
+    assert commands.main(["languages", "fetch", "--accept-terms", "zig"]) == 0
+    assert calls == [["zig"]]
+    assert capsys.readouterr().out == "取得して照合しました: zig\n"
+    # 追加の言語だけを取得した状態で、起動は止まらない
+    assert commands.main(["languages", "list"]) == 0
+    registry.set_states(None)
+    registry.require_ready()
+    assert registry.adapter_for("a.zig") is not None
+    assert registry.adapter_for("a.py") is None
+    assert "文法を取得していない言語: python, java, swift, csharp" in capsys.readouterr().err
+
+
+def test_fetch_with_an_unknown_name_stops_before_consent_and_download(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = _fake_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+
+    def forbidden(prompt: str) -> str:
+        raise AssertionError(prompt)
+
+    code = commands.main(
+        ["languages", "fetch", "python", "cobol"], is_terminal=lambda: True, read_answer=forbidden
+    )
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "'cobol'" in err
+    assert "python, java, swift, csharp" in err
+    assert calls == []
+
+
+def test_startup_does_not_stop_when_only_some_builtin_grammars_are_missing(
+    store: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _builtin_libraries(store, "java", "csharp")
+    assert commands.main(["languages", "list"]) == 0
+    capsys.readouterr()
+    registry.set_states(None)
+    registry.require_ready()
+    err = capsys.readouterr().err
+    assert "文法を取得していない言語: python, swift（そのファイルは" in err
+    assert registry.adapter_for("A.java") is not None
+    assert registry.adapter_for("a.py") is None
+
+
+def test_startup_does_not_stop_when_only_an_enabled_extra_grammar_is_missing(
+    install: Installer, tmp_path: Path, store: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _builtin_libraries(store, *grammars.GRAMMARS)
+    _enable_zig(install, tmp_path, _spec())
+    registry.require_ready()
+    assert registry.adapter_for("a.zig") is None
+    assert registry.adapter_for("A.java") is not None
+    assert "文法を取得していない言語: zig" in capsys.readouterr().err
+
+
+def test_startup_does_not_stop_with_external_enabled_and_builtins_only_fetched(
+    install: Installer, tmp_path: Path, store: Path
+) -> None:
+    _builtin_libraries(store, *grammars.GRAMMARS)
+    _enable_zig(install, tmp_path, _spec())
+    registry.require_ready()
+    assert registry.adapter_for("a.zig") is None
+    assert registry.adapter_for("A.java") is not None
+
+
+def test_languages_list_json_shows_a_missing_builtin_as_grammar_absent(
+    store: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _builtin_libraries(store, "java", "swift", "csharp")
+    assert commands.main(["languages", "list", "--json"]) == 0
+    rows = {r["name"]: r for r in json.loads(capsys.readouterr().out)["languages"]}
+    assert rows["java"]["state"] == "ready"
+    assert rows["python"]["state"] == "grammar_absent"
+    assert rows["python"]["reason_kind"] is None
+    assert {"name", "state", "reason_kind", "detail"} <= set(rows["python"])
+
+
+def test_languages_list_text_shows_a_missing_builtin_as_grammar_absent_with_a_fetch_line(
+    store: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _builtin_libraries(store, "java", "swift", "csharp")
+    assert commands.main(["languages", "list"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    index = next(i for i, line in enumerate(lines) if line.startswith("python\t"))
+    assert "文法を取得していない" in lines[index]
+    assert "使えない" not in lines[index]
+    assert lines[index + 1] == "    取得: jigane languages fetch python"
+    assert not any("理由（" in line for line in lines)

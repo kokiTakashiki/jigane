@@ -13,7 +13,11 @@ from pathlib import Path
 import pytest
 
 from jigane.languages import registry
-from jigane.languages.plugins import EnabledLanguage, LanguageReady, discover, validate_plugin
+from jigane.languages.approval import read_content
+from jigane.languages.enabled import EnabledLanguage
+from jigane.languages.plugins import discover
+from jigane.languages.states import LanguageReady
+from jigane.languages.validation import validate_plugin
 from jigane.skills.language_support import support_of
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "jigane-language-kotlin"
@@ -57,7 +61,9 @@ def entry_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Ent
 
 def _approved(entry_point: EntryPoint) -> EnabledLanguage:
     assert entry_point.dist is not None
-    return EnabledLanguage.approve("kotlin", entry_point.dist)
+    return EnabledLanguage(
+        "kotlin", entry_point.dist.name, entry_point.dist.version, read_content(entry_point.dist)
+    )
 
 
 def test_example_passes_validation(entry_point: EntryPoint) -> None:

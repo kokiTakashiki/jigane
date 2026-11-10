@@ -12,7 +12,8 @@ from jigane.policy_materials.value_sets import (
     ValueSetLocation,
     ValueSetRow,
 )
-from jigane.reviews.lifecycle import PAIRS_FILE, Review
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.review_formats import PAIRS_FILE
 from jigane.skills import policy_value_sets
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.macro_principles_run import estimate_policy

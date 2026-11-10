@@ -9,21 +9,21 @@
 | 名前 | 役割 |
 | --- | --- |
 | `build.build_model` | レビューから技術選定のモデル（dict）を作ります。CLI の `jigane technology-list` が使います |
-| `materials.short_section_text` | 一回の形の「技術選定」の節を、変化のあった技術だけの表にして、`build_model` から Markdown で作ります。変更したファイルから消えた技術は、`build.still_used_elsewhere` で他のファイルを調べ、使い続けていれば場所を添えます。`jigane.skills.macro` が使います |
+| `materials.short_section_text` | 一回の形の「技術選定」の節を、変化のあった技術だけの表にして、`build_model` から Markdown で作ります。変更したファイルから消えた技術は、`build_model` がモデルに載せた項目 `still_used_elsewhere` を読み、他のファイルで使い続けていれば場所を添えます。`jigane.skills.macro` が使います |
 | `repository_modules.collect` | ツリーの中で定義されたモジュールの名前を、根拠のファイルと行とともに集めます |
 | `repository_modules.match` | 技術の名前が、集めた定義のどれに当たるかを返します |
 | `manifests.read` | 木を一度走査し、依存の宣言（パッケージの名前と版、ファイルと行）と、変更したファイルに効くマニフェストの配備の下限を読みます。ファイル名ごとの知識は、一行に集めた表 `MANIFEST_KINDS` が持ちます |
 | `manifests.match` | 技術の名前が、宣言のパッケージのどれに当たるかを返します |
 | `manifests.changes` | 変更前と変更後の宣言を比べ、足した、消した、版を変えたものを返します |
 | `platforms.model` | 配備の下限を変更の前後で比べ、変化を付けて一覧にします |
-| `tables` | 節ごとの「ヘッダと行（文字列のセル）」を作ります。CLI は桁そろえ、資料は Markdown の表にするだけにします |
+| `tables` | 節ごとの「ヘッダと行（文字列のセル）」を作ります。CLI は桁そろえ、資料は Markdown の表にするだけにします。完全な表の消えた行は、短い表と同じく「他では使い続けている: …」を出し、同じ言語と分類で同じ変更で増えた技術があれば「同じ変更で増えた: …」を足します |
 | `changes` | 変化の値（added など）と、資料と CLI が共有する表示の文言の表を持ちます |
 
 ## 他のモジュールとの関係
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`git`、`languages`、`markdown`、`reviews`
+読むサブパッケージ：`git`、`languages`、`markdown`、`reviews`、`text`
 
 読まれるサブパッケージ：`commands`、`skills`
 

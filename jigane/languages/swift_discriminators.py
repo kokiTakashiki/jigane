@@ -10,7 +10,9 @@ import re
 
 from tree_sitter import Node
 
+from jigane.languages import discriminators_core as core
 from jigane.languages.base import Branch, BranchArm, Return, Step
+from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
 _MEMBER_REFERENCE = re.compile(r"^(\.[A-Za-z_]\w*|[A-Za-z_]\w*(\.[A-Za-z_]\w*)+)$")
@@ -18,18 +20,6 @@ _MEMBER_NODES = frozenset({"prefix_expression", "navigation_expression"})
 _CONDITION_END = frozenset({"statements", "else"})
 _TYPED_DECLARATIONS = frozenset({"function_declaration", "property_declaration"})
 _TYPE_NODES = frozenset({"user_type", "optional_type"})
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
-def _member_text(expression: Node | None) -> str | None:
-    # 値は Kind.RANGE の形のメンバ参照だけを残す。呼び出しや演算を含む式は値なしの終わりにする
-    if expression is None or expression.type not in _MEMBER_NODES:
-        return None
-    text = _text(expression)
-    return text if _MEMBER_REFERENCE.match(text) else None
 
 
 def _statements(node: Node) -> list[Node]:
@@ -61,7 +51,7 @@ def discriminator_steps(body_node: Node) -> list[Step]:
     statements = _statements(body_node)
     owner = _return_type(body_node)
     # 戻り値の型を持つ関数の本体が if か switch の一文なら、腕の式を暗黙の return と読む
-    steps = _steps(statements, is_value=owner is not None and len(statements) == 1)
+    steps = core.steps(statements, _RULES, is_value=owner is not None and len(statements) == 1)
     return steps if owner is None else _qualify(steps, owner)
 
 
@@ -79,7 +69,7 @@ def _return_type(body_node: Node) -> str | None:
         types = [c for c in declaration.named_children if c.type in _TYPE_NODES]
     if not types:
         return None
-    name = _text(types[-1]).rstrip("?!")
+    name = text_of(types[-1]).rstrip("?!")
     return None if "<" in name else name
 
 
@@ -98,72 +88,66 @@ def _qualify(steps: list[Step], owner: str) -> list[Step]:
     return qualified
 
 
-def _steps(statements: list[Node], *, is_value: bool) -> list[Step]:
-    """文の並びから Return と Branch だけを残す。is_value は式が値を返す位置であることを示す。"""
-    steps: list[Step] = []
-    for index, statement in enumerate(statements):
-        kind = statement.type
-        if kind == "control_transfer_statement":
-            step = _transfer(statement)
-            if step is not None:
-                steps.append(step)
-        elif kind == "if_statement":
-            steps.append(_if_branch(statement, is_value=is_value))
-        elif kind == "switch_statement":
-            steps.append(_switch_branch(statement, is_value=is_value))
-        elif kind == "guard_statement":
-            # 条件が真の流れは、guard の後ろの文がすべて受け持つ
-            steps.append(_guard_branch(statement, statements[index + 1 :], is_value=is_value))
-            break
-        elif is_value and kind.endswith("_expression"):
-            steps.append(Return(_member_text(statement)))
-        else:
-            # 他の文は分岐も終わりも作らない。ループや do の中の分岐と、代入の右辺の式は読まない
-            continue
-    return steps
-
-
-def _transfer(statement: Node) -> Step | None:
-    text = _text(statement)
-    if text.startswith("throw"):
-        return Return(None)
-    if not text.startswith("return"):
-        # break、continue、fallthrough は関数の終わりではない
-        return None
+def _transfer(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+    del is_value
+    if not text_of(statement).startswith("return"):
+        # break、continue、fallthrough は関数の終わりではない。throw は `Rules.is_throw` が読む
+        return []
     result = statement.child_by_field_name("result")
     if result is not None and result.type == "if_statement":
-        return _if_branch(result, is_value=True)
+        return [core.if_branch(result, _RULES, is_value=True)]
     if result is not None and result.type == "switch_statement":
-        return _switch_branch(result, is_value=True)
-    return Return(_member_text(result))
+        return [core.switch_branch(result, _RULES, is_value=True)]
+    return [Return(core.member_text(result, _RULES))]
 
 
-def _if_branch(statement: Node, *, is_value: bool) -> Branch:
-    """偽の腕に、else if の連なりを入れ子にして入れる。"""
+def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+    return [core.if_branch(statement, _RULES, is_value=is_value)]
+
+
+def _switch_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+    return [core.switch_branch(statement, _RULES, is_value=is_value)]
+
+
+def _guard_statement(statement: Node, rest: list[Node], *, is_value: bool) -> list[Step]:
+    # 条件が真の流れは、guard の後ろの文がすべて受け持つ
+    return [_guard_branch(statement, rest, is_value=is_value)]
+
+
+def _expression_value(statement: Node, *, is_value: bool) -> Step | None:
+    if is_value and statement.type.endswith("_expression"):
+        return Return(core.member_text(statement, _RULES))
+    return None
+
+
+def _is_throw(statement: Node) -> bool:
+    return statement.type == "control_transfer_statement" and text_of(statement).startswith(
+        "throw"
+    )
+
+
+def _then_steps(statement: Node, *, is_value: bool) -> list[Step]:
     children = statement.children
     else_index = next((i for i, c in enumerate(children) if c.type == "else"), None)
     before = children if else_index is None else children[:else_index]
     consequence = next((c for c in before if c.type == "statements"), None)
-    arms = [
-        BranchArm(
-            "yes",
-            tuple(_steps(_statements(consequence), is_value=is_value)) if consequence else (),
-        )
-    ]
-    text = _condition_text(statement)
+    return core.steps(_statements(consequence), _RULES, is_value=is_value) if consequence else []
+
+
+def _else_steps(statement: Node, *, is_value: bool) -> list[Step] | None:
+    children = statement.children
+    else_index = next((i for i, c in enumerate(children) if c.type == "else"), None)
     if else_index is None:
-        return Branch(text, tuple(arms), "no")
+        return None
     alternative = children[else_index + 1 :]
     nested = next((c for c in alternative if c.type == "if_statement"), None)
     if nested is not None:
-        no_steps: list[Step] = [_if_branch(nested, is_value=is_value)]
-    else:
-        no_steps = _steps(
-            [s for c in alternative if c.type == "statements" for s in _statements(c)],
-            is_value=is_value,
-        )
-    arms.append(BranchArm("no", tuple(no_steps)))
-    return Branch(text, tuple(arms), None)
+        return [core.if_branch(nested, _RULES, is_value=is_value)]
+    return core.steps(
+        [s for c in alternative if c.type == "statements" for s in _statements(c)],
+        _RULES,
+        is_value=is_value,
+    )
 
 
 def _guard_branch(statement: Node, rest: list[Node], *, is_value: bool) -> Branch:
@@ -172,29 +156,28 @@ def _guard_branch(statement: Node, rest: list[Node], *, is_value: bool) -> Branc
     return Branch(
         _condition_text(statement),
         (
-            BranchArm("yes", tuple(_steps(rest, is_value=is_value))),
-            BranchArm("no", tuple(_steps(otherwise, is_value=False))),
+            BranchArm("yes", tuple(core.steps(rest, _RULES, is_value=is_value))),
+            BranchArm("no", tuple(core.steps(otherwise, _RULES))),
         ),
         None,
     )
 
 
-def _switch_branch(statement: Node, *, is_value: bool) -> Branch:
+def _switch_subject(statement: Node) -> str:
     subject = statement.child_by_field_name("expr")
-    arms: list[BranchArm] = []
+    return " ".join(text_of(subject).split()) if subject is not None else ""
+
+
+def _switch_clauses(statement: Node) -> list[core.Clause]:
+    clauses: list[core.Clause] = []
     for entry in statement.named_children:
         if entry.type != "switch_entry":
             # 対象の式。腕ではない
             continue
         body = next((c for c in entry.named_children if c.type == "statements"), None)
-        arms.append(
-            BranchArm(
-                _case_label(entry),
-                tuple(_steps(_statements(body), is_value=is_value)) if body else (),
-            )
-        )
-    subject_text = " ".join(_text(subject).split()) if subject is not None else ""
-    return Branch(f"switch {subject_text}".strip(), tuple(arms), None)
+        nodes = tuple(_statements(body)) if body else ()
+        clauses.append(core.Clause(_case_label(entry), nodes, falls_through=not nodes))
+    return clauses
 
 
 def _case_label(entry: Node) -> str:
@@ -207,3 +190,26 @@ def _case_label(entry: Node) -> str:
     start = heads[0].start_byte - entry.start_byte
     end = heads[-1].end_byte - entry.start_byte
     return "case " + " ".join(required(entry.text)[start:end].decode().split())
+
+
+_RULES = core.Rules(
+    member_nodes=_MEMBER_NODES,
+    member_pattern=_MEMBER_REFERENCE,
+    statement_readers={
+        "control_transfer_statement": _transfer,
+        "if_statement": _if_statement,
+        "switch_statement": _switch_statement,
+        "guard_statement": _guard_statement,
+    },
+    is_throw=_is_throw,
+    condition_text=_condition_text,
+    then_steps=_then_steps,
+    else_steps=_else_steps,
+    switch_subject=_switch_subject,
+    switch_clauses=_switch_clauses,
+    # 本体の無い case は束ねず、空の腕にする
+    arm_name=lambda labels: labels[0],
+    bundles_fallthrough=False,
+    ends_sequence=frozenset({"guard_statement"}),
+    value_reader=_expression_value,
+)

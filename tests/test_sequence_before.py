@@ -9,14 +9,13 @@ from review_fakes import make_review, with_map
 from jigane.commands.subcommands import sequence as sequence_command
 from jigane.figures.models import NoteText
 from jigane.reviews.lifecycle import DiffSource, LocalRange, RangeOrigin, Review
-from jigane.sequence.diagram import mark_differences, to_mermaid
-from jigane.sequence.review_diagrams import (
-    BEFORE_NO_ROOT_NOTE,
-    NO_BASE_TREE_DISPLAY,
-    build_model,
-    review_sequences,
-)
-from jigane.sequence.roots import SequenceError, Side
+from jigane.sequence.before_diagrams import BEFORE_NO_ROOT_NOTE, NO_BASE_TREE_DISPLAY
+from jigane.sequence.diagram_diff import PairedSide, PlainMark, Retargeted, mark_differences
+from jigane.sequence.diagram_mermaid import to_mermaid
+from jigane.sequence.model_json import model_to_json
+from jigane.sequence.review_diagrams import build_model, review_sequences
+from jigane.sequence.roots import SequenceError
+from jigane.sequence.side import Side
 from jigane.storage.store import ReviewKind
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sequence" / "before"
@@ -131,6 +130,46 @@ def test_cli_side_values(
     assert "%% root: App.Main (before)" in capsys.readouterr().out
 
 
+def test_cli_json_flattens_a_retargeted_mark_through_model_to_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    arrow = {
+        "sender": "A",
+        "receiver": "B",
+        "name": "x",
+        "mark": Retargeted("C", PairedSide.AFTER),
+    }
+    before_arrow = {
+        "sender": "A",
+        "receiver": "C",
+        "name": "x",
+        "mark": Retargeted("B", PairedSide.BEFORE),
+    }
+    before = {"root": "A.run", "arrows": [before_arrow], "before": None}
+    model = {"diagrams": [{"root": "A.run", "arrows": [arrow], "before": before}]}
+    monkeypatch.setattr(sequence_command, "load_review", lambda _id: _Review(with_base=True))
+    monkeypatch.setattr(sequence_command, "resolve_review", lambda text: text)
+    monkeypatch.setattr(sequence_command, "build_model", lambda *_a, **_k: model)
+    parser = argparse.ArgumentParser()
+    sequence_command.register(parser.add_subparsers())
+    args = parser.parse_args(["sequence", "r#1", "--format", "json"])
+    assert args.handler(args, None) == 0
+    diagram = json.loads(capsys.readouterr().out)["diagrams"][0]
+    shown = diagram["arrows"][0]
+    assert (shown["mark"], shown["paired_receiver"], shown["paired_side"]) == (
+        "retargeted",
+        "C",
+        "after",
+    )
+    # 変更前の図も同じ規則で書き出す（入れ子の図をたどる枝）
+    earlier = diagram["before"]["arrows"][0]
+    assert (earlier["mark"], earlier["paired_receiver"], earlier["paired_side"]) == (
+        "retargeted",
+        "B",
+        "before",
+    )
+
+
 def test_before_diagram_keeps_existing_calls_when_the_before_changed_set_is_empty() -> None:
     review = _Review(with_base=True)
     # 入口 App.Main は変更前の側に変更した宣言を持たない（変更前の側の C が空）
@@ -169,8 +208,15 @@ def _arrows(*names: str, owner: str = "A") -> list[dict[str, Any]]:
     return [{"sender": owner, "receiver": "B", "name": n, "line": i} for i, n in enumerate(names)]
 
 
-def _marks(arrows: list[dict[str, Any]]) -> list[str]:
-    return [a["mark"] for a in arrows]
+def _marks(arrows: list[dict[str, Any]]) -> list[PlainMark | type[Retargeted]]:
+    """印の並び。付け替えは対の受け手を除いて型だけで比べる。"""
+    return [a["mark"] if isinstance(a["mark"], PlainMark) else type(a["mark"]) for a in arrows]
+
+
+def _paired(arrow: dict[str, Any]) -> str:
+    mark = arrow["mark"]
+    assert isinstance(mark, Retargeted)
+    return mark.paired_receiver
 
 
 def test_mark_differences_marks_added_and_removed_arrows() -> None:
@@ -183,8 +229,9 @@ def test_mark_differences_marks_added_and_removed_arrows() -> None:
 def test_mark_differences_treats_a_reordering_as_removal_and_addition() -> None:
     before, after = _arrows("a", "b"), _arrows("b", "a")
     mark_differences(before, after)
-    assert sorted(_marks(before)) == ["removed", "same"]
-    assert sorted(_marks(after)) == ["added", "same"]
+    # 長さの同じ共通部分列が二つあるときは前の図の側を先に進める。その選び方まで固定する
+    assert _marks(before) == ["removed", "same"]
+    assert _marks(after) == ["same", "added"]
 
 
 def test_mark_differences_ignores_line_numbers() -> None:
@@ -258,3 +305,124 @@ def test_sequence_without_a_base_tree_has_one_panel_and_no_note() -> None:
     assert sequences
     assert all([p.title for p in s.panels] == ["シーケンス図"] for s in sequences)
     assert all(s.note is None for s in sequences)
+
+
+def _arrow(sender: str, receiver: str, name: str) -> dict[str, Any]:
+    return {"sender": sender, "receiver": receiver, "name": name, "line": 0}
+
+
+def test_mark_differences_pairs_a_changed_receiver_as_retargeted() -> None:
+    before, after = [_arrow("A", "claude", "price")], [_arrow("A", "pricing", "price")]
+    mark_differences(before, after)
+    assert _marks(before) == _marks(after) == [Retargeted]
+    assert _paired(before[0]) == "pricing"
+    assert _paired(after[0]) == "claude"
+
+
+def test_mark_differences_keeps_a_renamed_constructor_as_removed_and_added() -> None:
+    before = [_arrow("A", "Old", "Old"), _arrow("A", "Old", "price")]
+    after = [_arrow("A", "New", "New"), _arrow("A", "New", "price")]
+    mark_differences(before, after)
+    assert _marks(before) == ["removed", Retargeted]
+    assert _marks(after) == ["added", Retargeted]
+
+
+def test_mark_differences_does_not_pair_a_different_sender_or_name() -> None:
+    before = [_arrow("A", "X", "price"), _arrow("A", "X", "cost")]
+    after = [_arrow("Z", "Y", "price"), _arrow("A", "Y", "total")]
+    mark_differences(before, after)
+    assert _marks(before) == ["removed", "removed"]
+    assert _marks(after) == ["added", "added"]
+
+
+def test_mark_differences_does_not_pair_across_a_same_arrow() -> None:
+    before = [_arrow("A", "X", "price"), _arrow("A", "B", "keep")]
+    after = [_arrow("A", "B", "keep"), _arrow("A", "Y", "price")]
+    mark_differences(before, after)
+    assert _marks(before) == ["removed", "same"]
+    assert _marks(after) == ["same", "added"]
+
+
+def test_mark_differences_pairs_an_arrow_only_once() -> None:
+    before = [_arrow("A", "X", "price")]
+    after = [_arrow("A", "Y", "price"), _arrow("A", "Z", "price")]
+    mark_differences(before, after)
+    assert _marks(before) == [Retargeted]
+    assert _marks(after) == [Retargeted, "added"]
+    assert _paired(before[0]) == "Y"
+
+
+def test_mermaid_labels_name_the_paired_receiver_of_a_retargeted_arrow() -> None:
+    def participant(alias: str, name: str) -> dict[str, Any]:
+        return {
+            "alias": alias,
+            "qualified_name": name,
+            "display": name,
+            "external": False,
+            "regions": [],
+        }
+
+    def diagram(receiver: str, arrows: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "participants": [participant("P0", "A"), participant("P1", receiver)],
+            "arrows": [{"status": "resolved", "region": None, **a} for a in arrows],
+            "labels": [],
+            "notes": [],
+        }
+
+    before, after = [_arrow("A", "claude", "price")], [_arrow("A", "pricing", "price")]
+    mark_differences(before, after)
+    assert "    P0->>P1: price()（呼び先の変更: 変更後は pricing）\n" in to_mermaid(
+        diagram("claude", before)
+    )
+    assert "    P0->>P1: price()（呼び先の変更: 変更前は claude）\n" in to_mermaid(
+        diagram("pricing", after)
+    )
+
+
+def test_retargeted_arrow_reaches_the_built_model_and_the_mermaid_text(tmp_path: Path) -> None:
+    base, head = tmp_path / "base", tmp_path / "head"
+    for tree, module in ((base, "claude"), (head, "pricing")):
+        tree.mkdir()
+        (tree / "a.py").write_text(f"import {module}\n\n\ndef run():\n    {module}.price()\n")
+        (tree / f"{module}.py").write_text("def price():\n    return 1\n")
+    review = make_review(
+        head,
+        ["a.py"],
+        base_tree=base,
+        judgment_map={
+            "segments": [
+                {
+                    "old_path": "a.py",
+                    "old_span": WHOLE,
+                    "new_path": "a.py",
+                    "new_span": WHOLE,
+                    "qualified_name": "run",
+                    "declaration_kind": "function",
+                }
+            ],
+            "regions": [],
+        },
+        kind=ReviewKind.RANGE,
+    )
+    model = build_model(review, None, None, 4, full=True, include_tests=False, side=Side.BOTH)
+    diagram = _by_root(model)["a.run"]
+    before_arrows = diagram["before"]["arrows"]
+    assert [(a["name"], _paired(a)) for a in before_arrows] == [("price", "pricing")]
+    assert [(a["name"], _paired(a)) for a in diagram["arrows"]] == [("price", "claude")]
+    assert "（呼び先の変更: 変更後は pricing）" in to_mermaid(diagram["before"])
+    assert "（呼び先の変更: 変更前は claude）" in to_mermaid(diagram)
+
+
+def test_retargeted_is_the_only_mark_that_carries_a_pair_and_serializes_flat() -> None:
+    before, after = [_arrow("A", "claude", "price")], [_arrow("A", "pricing", "price")]
+    mark_differences(before, after)
+    assert before[0]["mark"] == Retargeted("pricing", PairedSide.AFTER)
+    plain = [_arrow("A", "B", "x")]
+    mark_differences(plain, [])
+    assert plain[0]["mark"] is PlainMark.REMOVED
+    shown = model_to_json({"diagrams": [{"arrows": [*before, *plain], "before": None}]})
+    assert [a["mark"] for a in shown["diagrams"][0]["arrows"]] == ["retargeted", "removed"]
+    assert shown["diagrams"][0]["arrows"][0]["paired_side"] == "after"
+    assert "paired_receiver" not in shown["diagrams"][0]["arrows"][1]
+    json.dumps(shown)

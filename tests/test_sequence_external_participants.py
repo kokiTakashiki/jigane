@@ -8,19 +8,22 @@ from jigane.sequence.diagram import (
     COLLAPSED_NAME_LIMIT,
     EXTERNAL_PARTICIPANT_LIMIT,
     PARTICIPANT_LIMIT,
-    build_diagrams,
-    to_mermaid,
+    DiagramInputs,
 )
+from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.index import build_index
-from jigane.sequence.review_diagrams import sequences_of
+from jigane.sequence.review_diagrams import build_diagrams, sequences_of
 from jigane.sequence.roots import changed_members, select_roots
 
 
 def _diagram(tmp_path: Path, count: int) -> dict[str, Any]:
-    """外部のモジュールの型を count 個、一つずつ呼ぶだけの入口 run の図。"""
+    """外部のモジュールの型を count 個、型注記の引数を通して一つずつ呼ぶだけの入口 run の図。"""
     imports = "".join(f"from lib{n} import Ext{n}\n" for n in range(count))
-    calls = "".join(f"    Ext{n}.go()\n" for n in range(count))
-    (tmp_path / "app.py").write_text(f"{imports}\n\ndef run():\n{calls}", encoding="utf-8")
+    parameters = ", ".join(f"e{n}: Ext{n}" for n in range(count))
+    calls = "".join(f"    e{n}.go()\n" for n in range(count))
+    (tmp_path / "app.py").write_text(
+        f"{imports}\n\ndef run({parameters}):\n{calls}", encoding="utf-8"
+    )
     adapter = PythonAdapter()
     index = build_index(tmp_path, ["app.py"], adapter)
     run = next(m for m in index.callables.values() if m.name == "run")
@@ -35,7 +38,7 @@ def _diagram(tmp_path: Path, count: int) -> dict[str, Any]:
     )
     changed = changed_members(index, [segment], adapter, include_tests=False)
     selection = select_roots(index, changed, adapter)
-    model = build_diagrams(index, selection, [])
+    model = build_diagrams(DiagramInputs(index, selection, []))
     diagram: dict[str, Any] = model["diagrams"][0]
     return diagram
 
@@ -99,7 +102,7 @@ def test_entry_calling_index_and_external_types_draws_no_external_arrow(tmp_path
     ]
     changed = changed_members(index, segments, adapter, include_tests=False)
     selection = select_roots(index, changed, adapter)
-    model = build_diagrams(index, selection, [])
+    model = build_diagrams(DiagramInputs(index, selection, []))
     diagram = next(d for d in model["diagrams"] if d["root"].endswith("run"))
     assert [a["status"] for a in diagram["arrows"]] == ["resolved"]
     assert _externals(diagram) == []
@@ -132,7 +135,7 @@ def _collapsed_note(tmp_path: Path, unrelated: int) -> list[str]:
     ]
     changed = changed_members(index, segments, adapter, include_tests=False)
     selection = select_roots(index, changed, adapter)
-    model = build_diagrams(index, selection, [])
+    model = build_diagrams(DiagramInputs(index, selection, []))
     diagram = next(d for d in model["diagrams"] if d["root"].endswith("run"))
     notes: list[str] = diagram["notes"]
     return notes
@@ -174,6 +177,6 @@ def test_builtin_calls_are_counted_without_their_names(tmp_path: Path) -> None:
     ]
     changed = changed_members(index, segments, adapter, include_tests=False)
     selection = select_roots(index, changed, adapter)
-    model = build_diagrams(index, selection, [])
+    model = build_diagrams(DiagramInputs(index, selection, []))
     diagram = next(d for d in model["diagrams"] if d["root"].endswith("run"))
     assert diagram["notes"] == ["変更に関わらない呼び出し 3 件"]

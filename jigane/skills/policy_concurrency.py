@@ -37,7 +37,7 @@ from jigane.languages.base import (
     UnstructuredTask,
 )
 from jigane.reviews.lifecycle import Review
-from jigane.sequence.diagram import mermaid_text
+from jigane.sequence.diagram_mermaid import mermaid_text
 from jigane.sequence.index import Index, Member, TypeInfo, build_index
 from jigane.sequence.resolve import Call, call_resolver, receiver_typer
 from jigane.sequence.roots import changed_members, resolved_member

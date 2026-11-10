@@ -6,7 +6,8 @@ from typing import Any
 
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
-from jigane.reviews.lifecycle import load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
 from jigane.technology_list.build import build_model
 
 

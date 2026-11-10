@@ -6,9 +6,9 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.node_text import text_of
 from jigane.languages.python_walk import call_arguments
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
-from jigane.preconditions.required import required
 
 _REGEX_FUNCTIONS = frozenset(
     {"compile", "match", "search", "fullmatch", "sub", "subn", "split", "findall", "finditer"}
@@ -26,10 +26,6 @@ _USES = {
 }
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def _walk(root: Node) -> Iterator[Node]:
     stack = [root]
     while stack:
@@ -41,19 +37,19 @@ def _walk(root: Node) -> Iterator[Node]:
 def _import_binding(name: Node) -> tuple[str, str] | None:
     """`import` の一つの名前から、束縛される名前とモジュール名の組を返す。"""
     if name.type != "aliased_import":
-        module = _text(name).split(".", 1)[0]
+        module = text_of(name).split(".", 1)[0]
         return module, module
     target = name.child_by_field_name("name")
     alias = name.child_by_field_name("alias")
     if target is None or alias is None:
         return None
-    return _text(alias), _text(target)
+    return text_of(alias), text_of(target)
 
 
 def _from_import_functions(node: Node) -> dict[str, str]:
     """`from re import` で束縛された名前から関数名への対応。`re` 以外のモジュールは空。"""
     module_node = node.child_by_field_name("module_name")
-    if module_node is None or _text(module_node) != "re":
+    if module_node is None or text_of(module_node) != "re":
         return {}
     functions: dict[str, str] = {}
     for name in node.children_by_field_name("name"):
@@ -62,8 +58,8 @@ def _from_import_functions(node: Node) -> dict[str, str]:
         alias = name.child_by_field_name("alias") if is_aliased else None
         if target is None:
             continue
-        imported = _text(target)
-        functions[_text(alias) if alias is not None else imported] = imported
+        imported = text_of(target)
+        functions[text_of(alias) if alias is not None else imported] = imported
     return functions
 
 
@@ -141,7 +137,7 @@ def _string_constant(node: Node) -> str | None:
     if any(child.type == "interpolation" for child in node.children):
         return None
     try:
-        value = ast.literal_eval(_text(node))
+        value = ast.literal_eval(text_of(node))
     except (ValueError, SyntaxError):
         return None
     if isinstance(value, bytes):
@@ -167,7 +163,7 @@ def _sum_constant(node: Node, *, resolve: bool) -> str | None:
     operator = node.child_by_field_name("operator")
     left = node.child_by_field_name("left")
     right = node.child_by_field_name("right")
-    if operator is None or _text(operator) != "+" or left is None or right is None:
+    if operator is None or text_of(operator) != "+" or left is None or right is None:
         return None
     left_value = _constant(left, resolve=resolve)
     right_value = _constant(right, resolve=resolve)
@@ -201,7 +197,7 @@ def _function_name(call: Node, modules: set[str], functions: dict[str, str]) -> 
     if function is None:
         return None
     if function.type == "identifier":
-        name = functions.get(_text(function))
+        name = functions.get(text_of(function))
         return name if name in _REGEX_FUNCTIONS else None
     if function.type == "attribute":
         owner = function.child_by_field_name("object")
@@ -210,10 +206,10 @@ def _function_name(call: Node, modules: set[str], functions: dict[str, str]) -> 
             owner is not None
             and attribute is not None
             and owner.type == "identifier"
-            and _text(owner) in modules
-            and _text(attribute) in _REGEX_FUNCTIONS
+            and text_of(owner) in modules
+            and text_of(attribute) in _REGEX_FUNCTIONS
         ):
-            return _text(attribute)
+            return text_of(attribute)
     return None
 
 

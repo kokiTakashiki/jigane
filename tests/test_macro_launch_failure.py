@@ -9,6 +9,7 @@ from fakes import MacroFake, as_run, discovered, settings_for
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
+from jigane.commands.views.findings import over_budget_lines
 from jigane.findings.records import load_findings_state, triaged_dicts
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
@@ -24,21 +25,20 @@ from jigane.llm_runs.cost import (
     cost_text,
     total_by_source,
 )
+from jigane.llm_runs.failure_views import FailureView, earlier_failures_view, failure_views
 from jigane.llm_runs.launch_failure import (
     DiscoveryLaunchFailed,
     Disposition,
     FailedInvocation,
     FailureRound,
-    FailureView,
     RunRecordKind,
     Stage,
     StoredFailure,
-    earlier_failures,
     failure_from_record,
-    failure_views,
+    selected_failures,
 )
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import macro, pipeline
+from jigane.skills import macro, pipeline, policy_launch
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.group_result import Failed, HasFindings, group_outcome
 from jigane.skills.pipeline import ShardedGroupRun
@@ -77,7 +77,7 @@ def _fail(review: Review, error: claude.ClaudeInvocationError) -> None:
     def invoke(_invocation: claude.Invocation) -> claude.InvocationResult:
         raise error
 
-    with pytest.raises(macro.LaunchFailed):
+    with pytest.raises(policy_launch.LaunchFailed):
         macro.run_macro(AssemblyInput.load(review), settings_for(invoke, max_budget_usd=0.5))
 
 
@@ -364,7 +364,7 @@ def test_failure_row_is_marked_over_budget_by_its_kind(project: Path) -> None:
     assert item["cost_usd"] == 0.42
     assert item["max_budget_usd"] == 0.5
     assert item["outcome"] == "stopped_at_limit"
-    (line,) = pipeline.over_budget_lines(totals)
+    (line,) = over_budget_lines(totals)
     assert line.startswith("上限で停止:")
     assert "0.4200 USD（上限 0.5 USD）" in line
 
@@ -598,12 +598,12 @@ def test_earlier_failures_summarize_count_and_cost_with_the_estimate(
 def test_earlier_failures_omit_the_estimate_and_count_not_charged_as_zero() -> None:
     measured = _stored_failure(Measured(0.3), FailureRound.EARLIER)
     free = _stored_failure(NotCharged(), FailureRound.EARLIER, index=1)
-    summary = earlier_failures([measured, free])
+    summary = earlier_failures_view([measured, free])
     assert summary is not None
     assert summary.text == "前の回: 通らなかった失敗 2 件、計 0.30 USD"
     assert summary.to_json()["substituted_cost_usd"] == 0
     # 今回の回の失敗だけなら、前の回の行は無い
-    assert earlier_failures([_stored_failure(Measured(0.3), FailureRound.CURRENT)]) is None
+    assert earlier_failures_view([_stored_failure(Measured(0.3), FailureRound.CURRENT)]) is None
 
 
 def test_earlier_failures_count_the_recovered_launches_the_cost_includes() -> None:
@@ -611,7 +611,7 @@ def test_earlier_failures_count_the_recovered_launches_the_cost_includes() -> No
         _stored_failure(Measured(0.4), FailureRound.EARLIER), disposition=Disposition.RECOVERED
     )
     failed = _stored_failure(Measured(0.3), FailureRound.EARLIER, index=1)
-    summary = earlier_failures([recovered, failed])
+    summary = earlier_failures_view([recovered, failed])
     assert summary is not None
     assert summary.text == "前の回: 通らなかった失敗 1 件、回復した起動 1 回、計 0.70 USD"
 
@@ -620,13 +620,13 @@ def test_earlier_failures_keep_the_row_when_only_recovered_launches_were_charged
     recovered = replace(
         _stored_failure(Measured(0.4), FailureRound.EARLIER), disposition=Disposition.RECOVERED
     )
-    summary = earlier_failures([recovered])
+    summary = earlier_failures_view([recovered])
     assert summary is not None
     assert summary.text == "前の回: 回復した起動 1 回、計 0.40 USD"
     free = replace(
         _stored_failure(NotCharged(), FailureRound.EARLIER), disposition=Disposition.RECOVERED
     )
-    assert earlier_failures([free]) is None
+    assert earlier_failures_view([free]) is None
 
 
 def test_earlier_failures_show_the_failure_without_an_invocation_record() -> None:
@@ -634,14 +634,14 @@ def test_earlier_failures_show_the_failure_without_an_invocation_record() -> Non
     unrecorded = replace(
         _stored_failure(NotCharged(), FailureRound.EARLIER, index=1), invocation=None
     )
-    summary = earlier_failures([measured, unrecorded])
+    summary = earlier_failures_view([measured, unrecorded])
     assert summary is not None
     assert summary.text == "前の回: 通らなかった失敗 2 件、計 0.30 USD、額の記録なし 1 件"
     encoded = summary.to_json()
     assert (encoded["count"], encoded["invocation_count"]) == (2, 1)
     assert (encoded["recovered_count"], encoded["unrecorded_cost_count"]) == (0, 1)
     # 記録の無い失敗だけでも、隠さずに行を出す
-    only = earlier_failures([unrecorded])
+    only = earlier_failures_view([unrecorded])
     assert only is not None
     assert only.text == "前の回: 通らなかった失敗 1 件、額の記録なし 1 件"
 
@@ -653,9 +653,23 @@ def test_earlier_failures_count_an_unrecorded_recovery_in_both_counts() -> None:
         disposition=Disposition.RECOVERED,
         invocation=None,
     )
-    summary = earlier_failures([recovered])
+    summary = earlier_failures_view([recovered])
     assert summary is not None
     assert summary.text == "前の回: 回復した起動 1 回、額の記録なし 1 件"
     encoded = summary.to_json()
     assert (encoded["count"], encoded["invocation_count"]) == (0, 0)
     assert (encoded["recovered_count"], encoded["unrecorded_cost_count"]) == (1, 1)
+
+
+def test_selected_failures_drops_recovered_and_earlier_and_merges_one_unit() -> None:
+    first = DiscoveryLaunchFailed(0, "diagram", BUDGET, "a", 1, Disposition.RERUN_FAILED)
+    last = DiscoveryLaunchFailed(0, "diagram", BUDGET, "b", 2, Disposition.NOT_RERUN)
+    recovered = DiscoveryLaunchFailed(1, "diagram", BUDGET, "c", 1, Disposition.RECOVERED)
+    earlier = replace(
+        DiscoveryLaunchFailed(2, "diagram", BUDGET, "d", 1, Disposition.NOT_RERUN),
+        round=FailureRound.EARLIER,
+    )
+    selected = selected_failures([first, last, recovered, earlier])
+    assert [(item.failure, item.reruns, item.stopped_reruns) for item in selected] == [
+        (last, 1, 0)
+    ]

@@ -22,9 +22,13 @@ from jigane.commands.subcommands.run import (
 from jigane.findings.records import HISTORY_FILE
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, SECURITY, Effort, GroupId
 from jigane.llm_runs import claude
-from jigane.reviews.lifecycle import create_feature_review, load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.resolution import resolve_review
 from jigane.skills import macro, macro_principles_run, policy_principles
 from jigane.skills.assembly import AssemblyInput
+from jigane.skills.estimator import estimate_of
+from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
 from jigane.skills.mcp import McpSelection, McpServer
 
 SKIPPING_OPTIONS = ("--yes", "--force", "--no-confirm", "--assume-yes", "-y", "-f")
@@ -170,10 +174,9 @@ def test_run_review_passes_the_group_default_model(
 ) -> None:
     def stop(
         _assembly: object,
-        _group: object,
         settings: claude.RunSettings,
         *,
-        mcp: object = None,  # noqa: ARG001 - 本物の run_group が受けるキーワード引数。呼ぶ側が渡しても通すため名前を変えない
+        plan: object = None,  # noqa: ARG001 - 本物の run_group が受けるキーワード引数。呼ぶ側が渡しても通すため名前を変えない
     ) -> None:
         raise _StoppedError(settings)
 
@@ -200,7 +203,11 @@ def test_run_group_carries_the_history_warning_and_writes_nothing(
     (review.id.directory() / HISTORY_FILE).write_text("{not json", encoding="utf-8")
     assembly = AssemblyInput.load(review)
     source = assembly.source
-    result = run_group(assembly, MICRO, _micro_settings(MicroFake({1: []})))
+    result = run_group(
+        assembly,
+        _micro_settings(MicroFake({1: []})),
+        plan=_plan_for(MICRO, past_cost_usd=None),
+    )
     assert isinstance(result, ShardedGroupResult)
     assert capsys.readouterr().out == ""
     assert [w["path"] for w in result.history.warnings] == [
@@ -226,8 +233,8 @@ def test_incomplete_coverage_exit_code_when_a_shard_fails(
     review = create_feature_review(Path.cwd(), ["big"], name="big")
     result = run_group(
         AssemblyInput.load(review),
-        MICRO,
         _micro_settings(MicroFake({1: [], 2: None})),
+        plan=_plan_for(MICRO, past_cost_usd=None),
     )
     assert result.exit_code == EXIT_INCOMPLETE_COVERAGE
     assert print_group_result(result, as_json=False) == EXIT_INCOMPLETE_COVERAGE
@@ -283,12 +290,14 @@ def test_consent_text_shows_the_mcp_line() -> None:
         GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),
         can_increase=True,
         effort=None,
+        expectation=EXPECTATION,
     )
     assert "MCP は使いません" in consent_text(plan)
     selected = LaunchPlan(
         plan.breakdown,
         can_increase=True,
         effort=None,
+        expectation=EXPECTATION,
         mcp=McpSelection((McpServer("mobile-sec", {}, None), McpServer("server-sec", {}, None))),
     )
     lines = consent_text(selected)
@@ -303,6 +312,7 @@ def test_consent_text_links_the_input_list_before_asking_to_continue() -> None:
         GroupBreakdown(SECURITY, 2, 0.5, has_verifier=True, past_cost_usd=None),
         can_increase=True,
         effort=None,
+        expectation=EXPECTATION,
     )
     expected = (
         f"渡す情報の一覧: {terms_urls(None).security} の「レビューの入力と Claude Code」の節"
@@ -356,6 +366,7 @@ def test_consent_text_shows_past_cost_once_and_avoids_cap_words_in_the_totals() 
         GroupBreakdown(MACRO, 1, 0.5, has_verifier=False, past_cost_usd=0.1234),
         can_increase=False,
         effort=None,
+        expectation=EXPECTATION,
     )
     lines = consent_text(plan)
     assert "  前回の実績 0.1234 USD" in lines
@@ -409,6 +420,7 @@ def test_consent_text_for_policy_shows_diagram_and_principle_runs() -> None:
         ),
         can_increase=False,
         effort=None,
+        expectation=EXPECTATION,
     )
     lines = consent_text(plan)
     expression = (
@@ -465,6 +477,15 @@ def test_consent_expression_sums_only_the_assembled_principle_runs() -> None:
     )
 
 
+EXPECTATION = GroupExpectation(0.5, 1.0, VerifierMultiplierSource.NO_VERIFIER)
+# 検証役を持つ群の見込み。倍率は既定の値から引いた形
+VERIFIER_EXPECTATION = GroupExpectation(0.5, 2.5, VerifierMultiplierSource.DEFAULT)
+
+
+def _expectation_for(group: GroupId) -> GroupExpectation:
+    return EXPECTATION if group == MACRO else VERIFIER_EXPECTATION
+
+
 _ESTIMATES_NOT_MADE = "他の群の額は見積もっていません。"
 
 
@@ -479,6 +500,7 @@ def _plan_for(group: GroupId, *, past_cost_usd: float | None) -> LaunchPlan:
         ),
         can_increase=group != MACRO,
         effort=None,
+        expectation=_expectation_for(group),
     )
 
 
@@ -494,6 +516,12 @@ def test_consent_text_covers_only_the_selected_group(group: GroupId) -> None:
         group != MACRO
     )
     assert "  前回の実績 0.1234 USD" in lines
+    expected_line = (
+        "  群の見込み: 0.5000 USD（発見役の見積もり 0.5000 USD × 検証役の倍率 1.00）"
+        if group == MACRO
+        else "  群の見込み: 1.2500 USD（発見役の見積もり 0.5000 USD × 検証役の倍率 2.50）"
+    )
+    assert expected_line in lines
     assert any(line.startswith(_ESTIMATES_NOT_MADE) for line in lines)
     assert (
         "実際の額は、検証役の回数と出力の量で変わります。この額は実額の予測ではありません。"
@@ -543,9 +571,12 @@ def test_launch_plan_of_a_non_policy_group_does_not_estimate_the_policy(
     monkeypatch.setattr(macro_principles_run, "estimate_policy", fail)
     # 差し替えが estimator の読む名前に効くことを、方針の見積もりの呼び出しで確かめる
     with pytest.raises(AssertionError, match="方針の見積もりを呼んだ"):
-        launch_plan(assembly, MACRO, settings)
+        launch_plan(
+            estimate_of(assembly, MACRO, budget=settings.budget), EXPECTATION, MACRO, settings
+        )
     for group in (MICRO, SECURITY):
-        assert launch_plan(assembly, group, settings).group == group
+        estimate = estimate_of(assembly, group, budget=settings.budget)
+        assert launch_plan(estimate, EXPECTATION, group, settings).group == group
 
 
 def _count_calls(
@@ -611,3 +642,12 @@ def test_remembered_results_stay_out_of_equality_hash_and_repr(review_name: str)
     assert memo.compare is False
     assert memo.repr is False
     assert memo.hash is None
+
+
+@pytest.mark.parametrize("group", [MICRO, SECURITY])
+def test_consent_text_shows_the_expectation_line_from_the_plan(group: GroupId) -> None:
+    lines = consent_text(_plan_for(group, past_cost_usd=None))
+
+    assert "  群の見込み: 1.2500 USD（発見役の見積もり 0.5000 USD × 検証役の倍率 2.50）" in lines
+    assert any(line.startswith("  発見役:") for line in lines)
+    assert not any(line.startswith("出力と推論の分を含めた見込み") for line in lines)

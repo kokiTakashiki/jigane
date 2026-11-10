@@ -49,8 +49,12 @@ def contract_layers() -> dict[str, set[str]]:
     """
     config = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
     contracts = config["tool"]["importlinter"]["contracts"]
-    layered = [contract for contract in contracts if contract["type"] == "layers"]
-    assert len(layered) == 1, "layers 契約が一つではない"
+    layered = [
+        contract
+        for contract in contracts
+        if contract["type"] == "layers" and contract.get("containers") == ["jigane"]
+    ]
+    assert len(layered) == 1, "サブパッケージの layers 契約が一つではない"
     lines = layered[0]["layers"]
     assert len(lines) == len(CONTRACT_ORDER), f"契約の層の数が {len(CONTRACT_ORDER)} ではない"
     return {

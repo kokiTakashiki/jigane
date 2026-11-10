@@ -12,6 +12,7 @@ from enum import StrEnum
 from jigane.design.mermaid import AnyDiagram, ClassDiagram, ErDiagram, SequenceDiagram
 from jigane.design.parse import DesignDocument, Section
 from jigane.markdown import blocks as markdown_blocks
+from jigane.storage.store_suffixes import STORED_FILE_SUFFIXES
 
 
 class MentionKind(StrEnum):
@@ -77,7 +78,6 @@ _PROSE_STORED_FILE = re.compile(
 _PROSE_TOKEN = re.compile(r"(?<![A-Za-z0-9_./\-:])[A-Za-z0-9_./\-]+")
 _GENERIC_SUFFIX = re.compile(r"(?:~.*~|<.*>)$")
 
-STORED_FILE_SUFFIXES = frozenset({"json", "jsonl", "ndjson", "csv", "tsv", "toml", "yaml", "yml"})
 FILE_SUFFIXES = frozenset(
     {
         "py",

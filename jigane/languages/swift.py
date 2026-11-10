@@ -9,6 +9,7 @@ from jigane.languages import (
     swift_file_paths,
     swift_public_names,
     swift_regex,
+    swift_stores,
     swift_string_comparisons,
     swift_type_fields,
     swift_value_sets,
@@ -37,6 +38,7 @@ from jigane.languages.base import (
     RegexScan,
     Sharing,
     Step,
+    StoreAccess,
     StringComparison,
     TypeDecl,
     TypeFields,
@@ -50,20 +52,17 @@ from jigane.languages.base import (
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
+from jigane.languages.node_text import text_of
 from jigane.languages.queries import load_queries
+from jigane.languages.swift_nodes import TYPE_DECLARATIONS
 from jigane.preconditions.required import required
 
 _ASSIGNMENT_MIN_PARTS = 2  # 「=」と初期値
 
-_TYPE_DECLARATIONS = frozenset({"class_declaration", "protocol_declaration"})
 _FILE_LEVEL = frozenset({"private", "fileprivate"})
 _PUBLIC_LEVEL = frozenset({"public", "open", "package"})
 _LAMBDAS = frozenset({"lambda_literal"})
 _SELECTORS = frozenset({"selector_expression"})
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
 
 
 def _declared(node: Node) -> Visibility | None:
@@ -74,7 +73,7 @@ def _declared(node: Node) -> Visibility | None:
         for modifier in child.children:
             if modifier.type != "visibility_modifier":
                 continue
-            word = _text(modifier)
+            word = text_of(modifier)
             # private(set) のような setter だけの制限は、読み出しの可視性を変えない
             if "(" in word:
                 continue
@@ -89,8 +88,8 @@ def _declared(node: Node) -> Visibility | None:
 def _parameter_label(parameter: Node) -> str:
     external = parameter.child_by_field_name("external_name")
     if external is not None:
-        return _text(external)
-    return _text(next(c for c in parameter.children if c.type == "simple_identifier"))
+        return text_of(external)
+    return text_of(next(c for c in parameter.children if c.type == "simple_identifier"))
 
 
 def _parameters(node: Node) -> list[Node]:
@@ -133,13 +132,13 @@ def _type_annotation_of(node: Node) -> str | None:
     if annotation is None:
         return None
     type_node = annotation.child_by_field_name("name")
-    return _text(type_node) if type_node is not None else None
+    return text_of(type_node) if type_node is not None else None
 
 
 def _return_type_of(node: Node) -> str | None:
     # 関数の name フィールドは、関数名の識別子に続けて戻り値の型の節点を持つ
     names = node.children_by_field_name("name")
-    return _text(names[1]) if len(names) > 1 else None
+    return text_of(names[1]) if len(names) > 1 else None
 
 
 def _parameter_declarations(node: Node) -> tuple[ParameterDecl, ...]:
@@ -150,11 +149,11 @@ def _parameter_declarations(node: Node) -> tuple[ParameterDecl, ...]:
         following = parameter.next_sibling
         found.append(
             ParameterDecl(
-                _text(names[0]),
-                _text(names[-1]) if len(names) > 1 else "",
+                text_of(names[0]),
+                text_of(names[-1]) if len(names) > 1 else "",
                 # 既定値は仮引数の節点の外にあり、`=` が仮引数の直後に付く
                 following is not None and following.type == "=",
-                _text(external) if external is not None else None,
+                text_of(external) if external is not None else None,
             )
         )
     return tuple(found)
@@ -162,7 +161,7 @@ def _parameter_declarations(node: Node) -> tuple[ParameterDecl, ...]:
 
 def _bases_of(node: Node) -> tuple[str, ...]:
     return tuple(
-        _text(required(c.child_by_field_name("inherits_from")))
+        text_of(required(c.child_by_field_name("inherits_from")))
         for c in node.children
         if c.type == "inheritance_specifier"
     )
@@ -174,7 +173,7 @@ def _navigation_name(navigation: Node) -> Node | None:
 
 
 def _label_text(label: Node | None) -> str | None:
-    return _text(label).rstrip(":").strip() if label is not None else None
+    return text_of(label).rstrip(":").strip() if label is not None else None
 
 
 def _arguments(suffix: Node | None) -> tuple[Argument, ...]:
@@ -192,7 +191,7 @@ def _arguments(suffix: Node | None) -> tuple[Argument, ...]:
                         Argument(value, _label_text(argument.child_by_field_name("name")))
                     )
         elif child.type == "simple_identifier":
-            pending = _text(child)
+            pending = text_of(child)
         elif child.type == "lambda_literal":
             result.append(Argument(child, pending))
             pending = None
@@ -243,18 +242,18 @@ def _call_site(captures: Captures) -> CallSite | None:
         # Array<Int>() のようなジェネリクス付きの型の生成は、専用の節点になる
         return CallSite(
             node,
-            _text(callee),
+            text_of(callee),
             None,
             arguments,
             is_creation=True,
             end=node.end_byte,
             line=callee.start_point.row + 1,
         )
-    name = _text(callee)
+    name = text_of(callee)
     creation = _is_type_initializer(receiver, name)
     if creation:
         # 受け手の式が生成する型の名前になる
-        name = _text(required(receiver))
+        name = text_of(required(receiver))
         receiver = None
     return CallSite(
         node, name, receiver, arguments, creation, node.end_byte, callee.start_point.row + 1
@@ -264,17 +263,17 @@ def _call_site(captures: Captures) -> CallSite | None:
 def _call_parts(call: Node) -> CallParts:
     function = call.children[0]
     arguments = _arguments(_call_suffix(call))
-    text = _text(call)
+    text = text_of(call)
     if function.type == "navigation_expression":
         name = _navigation_name(function)
         return CallParts(
             function.child_by_field_name("target"),
-            _text(name) if name is not None else None,
+            text_of(name) if name is not None else None,
             arguments,
             text,
         )
     if function.type == "simple_identifier":
-        return CallParts(None, _text(function), arguments, text)
+        return CallParts(None, text_of(function), arguments, text)
     return CallParts(None, None, arguments, text)
 
 
@@ -344,12 +343,12 @@ def _binding_pairs(node: Node) -> list[tuple[Node, str | None, Node | None]]:
 
 def _type_annotation_text(annotation: Node) -> str | None:
     type_node = annotation.child_by_field_name("name")
-    return _text(type_node) if type_node is not None else None
+    return text_of(type_node) if type_node is not None else None
 
 
 def _typed_parameters(node: Node) -> list[LocalVariable]:
     return [
-        LocalVariable(_text(names[0]), _text(names[-1]), None)
+        LocalVariable(text_of(names[0]), text_of(names[-1]), None)
         for parameter in _parameters(node)
         if len(names := parameter.children_by_field_name("name")) > 1
     ]
@@ -382,7 +381,7 @@ class _SwiftRules(calls_core.RuleDefaults):
 
     def creation_name(self, parts: CallParts) -> str | None:
         if parts.name is not None and _is_type_initializer(parts.receiver, parts.name):
-            return _text(required(parts.receiver))
+            return text_of(required(parts.receiver))
         return None
 
     def call_parts(self, call: Node) -> CallParts:
@@ -400,7 +399,7 @@ class _SwiftRules(calls_core.RuleDefaults):
 
     def lambda_parameter_names(self, node: Node) -> list[str]:
         return [
-            _text(names[0])
+            text_of(names[0])
             for parameter in _descendants(node, "lambda_parameter")
             if len(names := parameter.children_by_field_name("name")) <= 1
         ]
@@ -418,24 +417,26 @@ class _SwiftRules(calls_core.RuleDefaults):
             single = len(names) == 1
             annotation = _type_annotation_of(node) if single else None
             initializer = node.child_by_field_name("value") if single else None
-            variables.extend(LocalVariable(_text(name), annotation, initializer) for name in names)
+            variables.extend(
+                LocalVariable(text_of(name), annotation, initializer) for name in names
+            )
         elif kind == "for_statement":
             variables.extend(_for_variables(node))
         elif kind in _CONDITIONAL_STATEMENTS:
             variables.extend(
-                LocalVariable(_text(name), annotation, initializer)
+                LocalVariable(text_of(name), annotation, initializer)
                 for name, annotation, initializer in _binding_pairs(node)
             )
         elif kind == "switch_pattern":
             # case .a(let e) の e は型を書かないので、同名のフィールドを隠すためだけに記録する
             variables.extend(
-                LocalVariable(_text(name), None, None) for name in _pattern_identifiers(node)
+                LocalVariable(text_of(name), None, None) for name in _pattern_identifiers(node)
             )
         elif kind == "function_declaration":
             variables.extend(_typed_parameters(node))
         elif kind in _LAMBDAS:
             variables.extend(
-                LocalVariable(_text(names[0]), _text(names[-1]), None)
+                LocalVariable(text_of(names[0]), text_of(names[-1]), None)
                 for parameter in _descendants(node, "lambda_parameter")
                 if len(names := parameter.children_by_field_name("name")) > 1
             )
@@ -449,8 +450,10 @@ def _for_variables(node: Node) -> list[LocalVariable]:
     # for case let k as Foo in ... は、キャストの型が k の型になる
     cast = next((c for c in pattern.children if c.type == "as"), None)
     cast_type = pattern.child_by_field_name("name") if cast is not None else None
-    annotation = _text(cast_type) if cast_type is not None else None
-    return [LocalVariable(_text(name), annotation, None) for name in _pattern_identifiers(pattern)]
+    annotation = text_of(cast_type) if cast_type is not None else None
+    return [
+        LocalVariable(text_of(name), annotation, None) for name in _pattern_identifiers(pattern)
+    ]
 
 
 _RULES = _SwiftRules()
@@ -484,9 +487,6 @@ class SwiftAdapter:
     def composition_type_names(self, raw: str) -> list[str]:
         return type_names.swift_composition_type_names(raw)
 
-    def is_external_type_name(self, name: str) -> bool:
-        return type_names.capitalized_is_external_type(name)
-
     def anonymous_class_display(self, _qualified: str, /) -> str | None:
         # 無名クラスを型の名前で持たない言語
         return None
@@ -496,7 +496,7 @@ class SwiftAdapter:
         for node in import_nodes(self, root_node):
             module = next((c for c in node.children if c.type == "identifier"), None)
             if module is not None:
-                found.append(Import(_text(module), module.start_point.row + 1))
+                found.append(Import(text_of(module), module.start_point.row + 1))
         return found
 
     def technology_of(self, module: str) -> str:
@@ -524,7 +524,7 @@ class SwiftAdapter:
             declared = _declared(statement)
             # 入れ物の可視性より広くはならない
             visibility = (default if declared is None else declared).narrower(cap)
-            if statement.type in _TYPE_DECLARATIONS:
+            if statement.type in TYPE_DECLARATIONS:
                 self._type(statement, prefix, declared, visibility, cap, result=result)
             else:
                 self._member(statement, prefix, visibility, cap, result, in_protocol=in_protocol)
@@ -617,7 +617,7 @@ class SwiftAdapter:
                 self._add(
                     result,
                     statement,
-                    f"{prefix}{_text(identifier)}",
+                    f"{prefix}{text_of(identifier)}",
                     "variable",
                     visibility,
                     body=brace,
@@ -635,7 +635,7 @@ class SwiftAdapter:
             self._add(
                 result,
                 statement,
-                f"{prefix}{_text(name_node)}",
+                f"{prefix}{text_of(name_node)}",
                 "variable",
                 visibility,
                 body=None,
@@ -657,10 +657,10 @@ class SwiftAdapter:
         kind_node = required(kind_node)
         name_node = required(name_node)
         body = required(body)
-        name = "".join(_text(name_node).split())
+        name = "".join(text_of(name_node).split())
         qualified = f"{prefix}{name}"
         in_protocol = node.type == "protocol_declaration"
-        if _text(kind_node) == "extension":
+        if text_of(kind_node) == "extension":
             # extension 自体は宣言にせず、要素を拡張した型の名前の下に置く
             # 修飾子の無い extension は拡張先の可視性を狭めず、要素の既定だけが internal になる
             if declared is None:
@@ -684,7 +684,7 @@ class SwiftAdapter:
         keyword = next(c for c in node.children if c.type == "func")
         following = keyword.next_sibling
         following = required(following)
-        return _text(following)
+        return text_of(following)
 
     def _computed(self, node: Node) -> Node | None:
         for child in node.children:
@@ -790,6 +790,11 @@ class SwiftAdapter:
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return swift_regex.regex_scan(root_node, path)
 
+    def store_accesses(self, sources: Mapping[str, str], /) -> list[StoreAccess]:
+        return swift_stores.store_accesses(
+            sources, lambda source: parse(self, source.encode()).root_node
+        )
+
     def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
         return swift_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
 
@@ -819,7 +824,7 @@ class SwiftAdapter:
         self, container: Node, prefix: str, path: str, result: list[TypeDecl | MemberDecl]
     ) -> None:
         for statement in container.children:
-            if statement.type in _TYPE_DECLARATIONS:
+            if statement.type in TYPE_DECLARATIONS:
                 self._collect_type(statement, prefix, path, result)
             else:
                 # 最上位の関数、import、型の別名などは型に属さず、メンバにならない
@@ -828,14 +833,14 @@ class SwiftAdapter:
     def _collect_type(
         self, node: Node, prefix: str, path: str, result: list[TypeDecl | MemberDecl]
     ) -> None:
-        name = "".join(_text(required(node.child_by_field_name("name"))).split())
+        name = "".join(text_of(required(node.child_by_field_name("name"))).split())
         qualified = f"{prefix}{name}"
         simple = name.rsplit(".", 1)[-1]
         is_extension = False
         if node.type == "protocol_declaration":
             kind: TypeKind = "interface"
         else:
-            keyword = _text(required(node.child_by_field_name("declaration_kind")))
+            keyword = text_of(required(node.child_by_field_name("declaration_kind")))
             kind = _TYPE_KINDS[keyword]
             is_extension = keyword == "extension"
         line = node.start_point.row + 1
@@ -856,7 +861,7 @@ class SwiftAdapter:
         result: list[TypeDecl | MemberDecl],
     ) -> None:
         line = node.start_point.row + 1
-        if node.type in _TYPE_DECLARATIONS:
+        if node.type in TYPE_DECLARATIONS:
             self._collect_type(node, f"{owner}.", path, result)
         elif node.type in ("function_declaration", "protocol_function_declaration"):
             name = self.function_declaration_name(node)
@@ -896,7 +901,9 @@ class SwiftAdapter:
             member_kind: MemberKind = "property" if is_property else "field"
             body = self.body_of(node)
             result.extend(
-                MemberDecl(owner, _text(identifier), member_kind, annotation, (), line, node, body)
+                MemberDecl(
+                    owner, text_of(identifier), member_kind, annotation, (), line, node, body
+                )
                 for name_node in node.children_by_field_name("name")
                 for identifier in _bound_identifiers(name_node)
             )

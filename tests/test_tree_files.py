@@ -6,7 +6,10 @@ from typing import Any
 
 import pytest
 from review_fakes import with_map
-from test_bots import comment_for, repo  # noqa: F401 pytest が fixture を名前で引くため import が要る
+from test_bots import (  # noqa: F401 pytest が fixture を名前で引くため import が要る
+    comment_for,
+    repo,
+)
 
 from jigane.git.tree_files import (
     MAX_REVIEW_FILE_BYTES,

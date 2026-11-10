@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fakes import register_no_sequence_adapter
 from review_fakes import make_review
 from test_policy_classes import whole
 
@@ -140,16 +141,22 @@ def test_plain_class_assignments_without_annotation_are_not_fields(tmp_path: Pat
     assert _table(_range_review(tmp_path, before, after)) is None
 
 
-def test_only_python_reads_type_fields(tmp_path: Path) -> None:
-    java = "class A { int x; int y; }\n"
-    review = _range_review(tmp_path, {"B.java": java}, {"B.java": java, "A.java": java})
+def test_language_without_the_type_field_reader_has_no_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_no_sequence_adapter(monkeypatch)
+    source = "class A { int x; int y; }\n"
+    review = _range_review(tmp_path, {"b.nosq": source}, {"b.nosq": source, "a.nosq": source})
     assert _table(review) is None
 
 
-def test_python_rows_state_java_as_unsupported_when_languages_are_mixed(tmp_path: Path) -> None:
-    java = "class A { int x; int y; }\n"
+def test_python_rows_state_the_language_without_a_reader_as_unsupported_when_mixed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    register_no_sequence_adapter(monkeypatch)
+    source = "class A { int x; int y; }\n"
     before = {"b.py": "class B:\n    x: int\n    y: int\n"}
-    after = {**before, "a.py": "class A:\n    x: int\n    y: int\n", "J.java": java}
+    after = {**before, "a.py": "class A:\n    x: int\n    y: int\n", "j.nosq": source}
     review = _range_review(tmp_path, before, after)
     figure = _table(review)
     assert figure is not None
@@ -157,7 +164,7 @@ def test_python_rows_state_java_as_unsupported_when_languages_are_mixed(tmp_path
     unsupported = {
         u.key: [language.name for language in u.languages] for u in diagrams_of(review).unsupported
     }
-    assert unsupported["field_copies"] == ["Java"]
+    assert unsupported["field_copies"] == ["no-sequence"]
 
 
 def test_file_review_has_no_table(tmp_path: Path) -> None:
@@ -250,3 +257,39 @@ def test_swift_enum_cases_are_fields(tmp_path: Path) -> None:
     assert figure is not None
     assert [row.cells[0] for row in figure.rows] == ["`Phase`"]
     assert figure.rows[0].cells[4] == "`draft`、`review`"
+
+
+JAVA_BOOK = "class Book { String isbn; String title; int pages; }\n"
+JAVA_ROW = "class BookRow { String isbn; String title; int count; }\n"
+
+
+def test_java_class_sharing_instance_fields_is_a_row(tmp_path: Path) -> None:
+    figure = _table(
+        _range_review(
+            tmp_path,
+            {"Book.java": JAVA_BOOK},
+            {"Book.java": JAVA_BOOK, "Row.java": JAVA_ROW},
+        )
+    )
+    assert figure is not None
+    assert [row.cells for row in figure.rows] == [
+        ("`BookRow`", "Row.java:1", "`Book`", "Book.java:1", "`isbn`、`title`", "2")
+    ]
+
+
+CSHARP_BOOK = "class Book { public string Isbn; public string Title; public int Pages; }\n"
+CSHARP_ROW = "class BookRow { public string Isbn; public string Title; public int Count; }\n"
+
+
+def test_csharp_class_sharing_instance_fields_is_a_row(tmp_path: Path) -> None:
+    figure = _table(
+        _range_review(
+            tmp_path,
+            {"Book.cs": CSHARP_BOOK},
+            {"Book.cs": CSHARP_BOOK, "Row.cs": CSHARP_ROW},
+        )
+    )
+    assert figure is not None
+    assert [row.cells for row in figure.rows] == [
+        ("`BookRow`", "Row.cs:1", "`Book`", "Book.cs:1", "`Isbn`、`Title`", "2")
+    ]

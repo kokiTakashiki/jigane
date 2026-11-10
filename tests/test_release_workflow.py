@@ -165,9 +165,24 @@ def test_github_release_does_not_read_the_notes_from_the_local_tag() -> None:
     assert "--repo" in create_step_words()
 
 
-def test_github_release_notes_are_the_tag_name() -> None:
+def test_github_release_body_is_the_release_notes_file_of_the_tag() -> None:
     words = create_step_words()
-    assert words[words.index("--notes") + 1] == '"$TAG"'
+    assert words[words.index("--notes-file") + 1] == '"docs/releases/${TAG}.md"'
+    assert "--notes" not in words
+
+
+def test_verify_requires_the_release_notes_file_before_build() -> None:
+    verify = jobs()["verify"]
+    check = step_index(verify, lambda step: "docs/releases/${TAG}" in step.get("run", ""))
+    checkout = step_index(verify, lambda step: "actions/checkout@" in step.get("uses", ""))
+    body = str(verify["steps"][check]["run"])
+    lines = [line.strip() for line in body.splitlines()]
+    opening = lines.index('if [ ! -s "$notes" ]; then')
+    closing = lines.index("fi", opening)
+    assert "exit 1" in lines[opening + 1 : closing]
+    assert "GH_TOKEN" not in verify["steps"][check].get("env", {})
+    assert checkout < check
+    assert "verify" in needs_of(jobs()["build"])
 
 
 # 以下は、行の読み方がすり抜けた書き方を、構文木の読み方が正しく扱うことを一時の例で確かめる。

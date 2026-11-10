@@ -7,7 +7,7 @@ import pytest
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.reviews.lifecycle import create_feature_review
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.store import ReviewId, ReviewKind, check_new_review_id
 
 
 @pytest.fixture
@@ -23,8 +23,8 @@ def test_list_json_carries_pull_request_title_and_null_for_feature_review(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     created = create_feature_review(project, ["src"], "payment")
-    diff_directory = ReviewId(
-        created.id.owner, created.id.repo, "5", ReviewKind.PULL_REQUEST
+    diff_directory = check_new_review_id(
+        ReviewId(created.id.owner, created.id.repo, "5", ReviewKind.PULL_REQUEST)
     ).directory()
     shutil.copytree(created.id.directory(), diff_directory)
     meta_path = diff_directory / "review.json"

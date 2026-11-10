@@ -34,8 +34,8 @@ from jigane.reviews.lifecycle import (
     Review,
     ReviewError,
     ReviewOrigin,
-    load_pairs,
 )
+from jigane.reviews.stored_pairs import load_pairs
 
 SHARD_BYTES = 30_000
 # 既定のシャード数の上限。小さな差分はこの数までで収まる

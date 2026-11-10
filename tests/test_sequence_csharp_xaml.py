@@ -2,9 +2,9 @@ from pathlib import Path
 
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.csharp_xaml import handler_names
-from jigane.sequence.diagram import EmptyEntryKind, EntryEvidence, build_diagrams
+from jigane.sequence.diagram import DiagramInputs, EmptyEntryKind, EntryEvidence
 from jigane.sequence.index import build_index
-from jigane.sequence.review_diagrams import sequences_of
+from jigane.sequence.review_diagrams import build_diagrams, sequences_of
 from jigane.sequence.roots import key_of, select_roots
 
 CODE = """
@@ -28,7 +28,7 @@ def _kinds(root: Path, code_path: str) -> dict[str, EmptyEntryKind]:
     index = build_index(root, [code_path], adapter)
     changed = {key_of(m): m for m in index.callables.values()}
     selection = select_roots(index, changed, adapter)
-    model = build_diagrams(index, selection, [])
+    model = build_diagrams(DiagramInputs(index, selection, []))
     return {d["root"]: EntryEvidence.from_dict(d).kind() for d in model["diagrams"]}
 
 

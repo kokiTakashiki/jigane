@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,8 +11,16 @@ from review_fakes import save_review_of_kind
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
 from jigane.commands.subcommands.delete import remove_review_directory
-from jigane.reviews.lifecycle import ReviewError, create_feature_review, list_reviews, load_review
-from jigane.storage.store import LOCK_FILE, ReviewId, ReviewKind, data_home, review_lock
+from jigane.reviews.catalog import list_reviews, load_review
+from jigane.reviews.lifecycle import ReviewError, create_feature_review
+from jigane.storage import review_creation as creation_module
+from jigane.storage.locking import LOCK_FILE, review_lock
+from jigane.storage.store import (
+    ReviewId,
+    ReviewKind,
+    check_review_id,
+    data_home,
+)
 
 
 @pytest.fixture
@@ -69,8 +78,26 @@ def test_guard_refuses_a_path_outside_home(tmp_path: Path) -> None:
     owner.mkdir(parents=True)
     (owner / "r").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="データの場所の外"):
-        remove_review_directory(ReviewId("o", "r", "k", ReviewKind.FEATURE))
+        remove_review_directory(check_review_id(ReviewId("o", "r", "k", ReviewKind.FEATURE)))
     assert (outside / "keep.txt").is_file()
+
+
+@pytest.mark.usefixtures("project")
+def test_guard_refuses_a_last_component_junction_outside_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    review_id = ReviewId("o", "r", "k", ReviewKind.FEATURE)
+    parent = data_home() / "o" / "r"
+    parent.mkdir(parents=True)
+    link = parent / f"{ReviewKind.FEATURE.directory_prefix}k"
+    link.symlink_to(outside, target_is_directory=True)
+    # Windows のジャンクションは is_symlink が偽で is_junction が真になる。その見え方を作る
+    monkeypatch.setattr(Path, "is_symlink", lambda _self: False)
+    monkeypatch.setattr(Path, "is_junction", lambda self: self == link)
+    with pytest.raises(ValueError, match="データの場所の外"):
+        check_review_id(review_id)
 
 
 @pytest.mark.usefixtures("project")
@@ -207,6 +234,30 @@ def test_delete_removes_a_broken_record_by_its_full_id(project: Path, broken: st
     review_id = save_review_of_kind(project, "doomed", ReviewKind.FEATURE)
     (review_id.directory() / "review.json").write_text(broken, encoding="utf-8")
     with pytest.raises(ReviewError):
-        load_review(review_id)
+        load_review(check_review_id(review_id))
     assert main(["delete", str(review_id), "--yes"]) == EXIT_OK
     assert not review_id.directory().exists()
+
+
+def test_delete_removes_the_claim_lock_file(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "doomed")
+    lock_path = creation_module._claim_lock_path(review.id)
+    assert lock_path.is_file()
+    assert main(["delete", str(review.id), "--yes"]) == EXIT_OK
+    assert not lock_path.exists()
+    assert create_feature_review(project, ["src"], "doomed").id.key == "doomed"
+
+
+def test_remove_refuses_a_directory_swapped_for_a_link_after_issue(
+    project: Path, tmp_path: Path
+) -> None:
+    review = create_feature_review(project, ["src"], "swapped")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("x", encoding="utf-8")
+    directory = review.id.directory()
+    shutil.rmtree(directory)
+    directory.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="データの場所の外"):
+        remove_review_directory(review.id)
+    assert (outside / "keep.txt").is_file()

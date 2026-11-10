@@ -9,19 +9,19 @@ import pytest
 
 from jigane.judgment_map.classification import FilePair
 from jigane.reviews import lifecycle as review_module
-from jigane.reviews.lifecycle import (
+from jigane.reviews import review_formats
+from jigane.reviews.catalog import load_review_at, read_review_at
+from jigane.reviews.lifecycle import create_feature_review
+from jigane.reviews.review_formats import (
     PAIRS_FORMAT,
     REGIONS_FORMAT,
     REVIEW_FORMAT,
-    create_feature_review,
     dump_pairs,
     dump_regions,
     dump_review,
     load_regions,
-    load_review_at,
     load_review_meta,
     read_pairs,
-    read_review_at,
 )
 from jigane.storage.review_error import ReviewError
 
@@ -119,7 +119,7 @@ def test_review_v1_shape_upgrades_to_the_keys_the_current_writer_writes(
 
 def test_review_upgrade_fills_defaults_and_does_not_touch_the_input() -> None:
     raw = MINIMAL_REVIEW_V1["feature"]
-    upgraded = review_module._REVIEW_UPGRADES[1](raw)
+    upgraded = review_formats._REVIEW_UPGRADES[1](raw)
     assert "content_warnings" not in raw
     assert upgraded["content_warnings"] == ["w"]
     assert upgraded["declaration"]["warnings"] == []
@@ -128,7 +128,7 @@ def test_review_upgrade_fills_defaults_and_does_not_touch_the_input() -> None:
 
 
 def test_review_upgrade_splits_the_merged_pull_request_value() -> None:
-    upgraded = review_module._REVIEW_UPGRADES[1](
+    upgraded = review_formats._REVIEW_UPGRADES[1](
         MINIMAL_REVIEW_V1["pull_request_with_merged_source"]
     )
     assert upgraded["pull_request"] == PULL_REQUEST_FIELDS
@@ -140,7 +140,7 @@ def test_review_v2_drops_linked_issues_from_pull_request() -> None:
         **MINIMAL_REVIEW_V1["pull_request_with_separated_source"],
         "format": 2,
     }
-    upgraded = review_module._REVIEW_UPGRADES[2](raw)
+    upgraded = review_formats._REVIEW_UPGRADES[2](raw)
     assert upgraded["pull_request"] == {
         "url": PULL_REQUEST_FIELDS["url"],
         "number": 1,
@@ -151,26 +151,26 @@ def test_review_v2_drops_linked_issues_from_pull_request() -> None:
 
 
 def test_review_v2_keeps_a_record_without_pull_request() -> None:
-    upgraded = review_module._REVIEW_UPGRADES[2]({"pull_request": None, "id": "x"})
+    upgraded = review_formats._REVIEW_UPGRADES[2]({"pull_request": None, "id": "x"})
     assert upgraded == {"pull_request": None, "id": "x"}
 
 
 def test_review_v1_merged_source_reads_through_to_the_current_version() -> None:
     raw = MINIMAL_REVIEW_V1["pull_request_with_merged_source"]
-    loaded = review_module.load_review_meta(raw)
+    loaded = review_formats.load_review_meta(raw)
     assert set(loaded["pull_request"]) == {"url", "number", "title"}
     assert loaded["diff_source"] == DIFF_FIELDS
 
 
 def test_review_upgrade_keeps_a_separated_pull_request_as_it_is() -> None:
     raw = MINIMAL_REVIEW_V1["pull_request_with_separated_source"]
-    assert review_module._REVIEW_UPGRADES[1](raw) == raw
+    assert review_formats._REVIEW_UPGRADES[1](raw) == raw
 
 
 def test_review_round_trips_through_the_write_boundary(project: Path) -> None:
     created = create_feature_review(project, ["src"], "payment")
     located = read_review_at(created.id.directory())
-    review_module._write_review_file(located.directory, located.review)
+    review_module.write_review_file(located.directory, located.review)
     stored = json.loads((located.directory / "review.json").read_text(encoding="utf-8"))
     assert stored["format"] == REVIEW_FORMAT
     assert load_review_at(located.directory) == located.review
@@ -209,7 +209,7 @@ def test_pairs_v1_array_upgrades_to_the_current_shape() -> None:
         FilePair(None, "b.py"),
         FilePair("c.py", None),
     ]
-    assert review_module._PAIRS_UPGRADES[1](raw) == {"pairs": raw}
+    assert review_formats._PAIRS_UPGRADES[1](raw) == {"pairs": raw}
 
 
 def test_pairs_round_trip() -> None:
@@ -282,7 +282,7 @@ def test_review_v3_drops_the_derivable_and_write_only_keys() -> None:
         "content_warnings": ["w"],
         "declaration": {**DECLARATION_V1, "source_label": "x", "warnings": []},
     }
-    upgraded = review_module._REVIEW_UPGRADES[3](raw)
+    upgraded = review_formats._REVIEW_UPGRADES[3](raw)
     assert upgraded == {
         "id": raw["id"],
         "content_warnings": ["w"],

@@ -9,8 +9,8 @@
 from tree_sitter import Node
 
 from jigane.languages.base import TypeFields
+from jigane.languages.swift_nodes import TYPE_KEYWORDS
 
-_TYPE_KEYWORDS = frozenset({"struct", "class", "actor", "enum"})
 _BODIES = frozenset({"class_body", "enum_class_body"})
 _TYPE_LEVEL_MODIFIERS = frozenset({b"static", b"class"})
 
@@ -58,7 +58,7 @@ def type_fields_of(root: Node, path: str) -> list[TypeFields]:
     for node in root.children:
         if node.type != "class_declaration":
             continue
-        if not any(child.type in _TYPE_KEYWORDS for child in node.children):
+        if not any(child.type in TYPE_KEYWORDS for child in node.children):
             # extension も class_declaration で表され、キーワードで型の宣言と見分ける
             continue
         name = node.child_by_field_name("name")

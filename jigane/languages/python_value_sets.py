@@ -19,6 +19,7 @@ import ast
 from collections.abc import Iterator
 
 from jigane.languages.base import ValueSet
+from jigane.languages.python_ast import parse_python
 from jigane.languages.value_set_core import MAX_VALUE_LENGTH, MIN_VALUES, ordered_value_sets
 
 _SEQUENCE_NODES = (ast.Tuple, ast.Set, ast.List)
@@ -129,12 +130,8 @@ def _found(tree: ast.Module) -> Iterator[tuple[frozenset[str], int, str | None, 
 
 def value_sets(source: str, path: str) -> list[ValueSet]:
     """ファイルの値の組を、定義の行の順に返す。構文として読めないファイルは空。"""
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, RecursionError, MemoryError, ValueError):
-        # 読めないファイルの組は拾えない。表は他のファイルの組で成り立つので、止めない。
-        # 入れ子の深い式は RecursionError、巨大な入力は MemoryError、
-        # NUL 文字は ValueError で落ちる。
-        # parse の後の走査は ast.walk なので深さで再帰せず、ここで囲めば足りる
+    tree = parse_python(source)
+    if tree is None:
+        # parse の後の走査は ast.walk なので深さで再帰せず、parse の失敗だけを見れば足りる
         return []
     return ordered_value_sets(_found(tree), path)

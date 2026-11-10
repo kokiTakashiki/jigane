@@ -10,7 +10,7 @@ from language_plugin_support import Installer, approved, legacy_record
 
 from jigane import commands
 from jigane.languages import registry
-from jigane.languages.plugins import EnabledLanguage
+from jigane.languages.enabled import EnabledLanguage
 from jigane.skills.language_support import support_of
 from jigane.skills.policy_figures import REGISTRY, LanguageAgnostic
 
@@ -492,9 +492,21 @@ _EXTRA = {
         "StoreAccessReader",
         "TypeFieldReader",
     },
-    "csharp": {"MarkupBindingAdapter"},
-    "java": {"DiscriminatorReader"},
-    "swift": {"DiscriminatorReader", "FilePathAdapter", "PublicNameReader", "TypeFieldReader"},
+    "csharp": {
+        "DiscriminatorReader",
+        "FilePathAdapter",
+        "MarkupBindingAdapter",
+        "PublicNameReader",
+        "TypeFieldReader",
+    },
+    "java": {"DiscriminatorReader", "FilePathAdapter", "PublicNameReader", "TypeFieldReader"},
+    "swift": {
+        "DiscriminatorReader",
+        "FilePathAdapter",
+        "PublicNameReader",
+        "StoreAccessReader",
+        "TypeFieldReader",
+    },
 }
 _ALL_INTERFACES = {
     "SequenceAdapter",
@@ -527,9 +539,9 @@ def test_builtin_interfaces_match_the_implementation(
 _JAVA_UNSUPPORTED = {"commands", "file_paths", "stores", "field_copies", "callers"}
 _UNSUPPORTED_FIGURES = {
     "python": set(),
-    "java": _JAVA_UNSUPPORTED,
-    "swift": _JAVA_UNSUPPORTED - {"file_paths", "field_copies", "callers"},
-    "csharp": _JAVA_UNSUPPORTED | {"discriminators"},
+    "java": _JAVA_UNSUPPORTED - {"file_paths", "field_copies", "callers"},
+    "swift": _JAVA_UNSUPPORTED - {"file_paths", "stores", "field_copies", "callers"},
+    "csharp": _JAVA_UNSUPPORTED - {"file_paths", "field_copies", "callers"},
 }
 
 

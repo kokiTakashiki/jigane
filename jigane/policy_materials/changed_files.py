@@ -30,7 +30,8 @@ from jigane.markdown.cells import markdown_table
 from jigane.policy_materials.declarations import ScopedDeclaration, region_declarations
 from jigane.policy_materials.moved_declarations import PlacedDeclaration, find_moved
 from jigane.preconditions.required import required
-from jigane.reviews.lifecycle import Review, ReviewError, load_pairs
+from jigane.reviews.lifecycle import Review, ReviewError
+from jigane.reviews.stored_pairs import load_pairs
 
 _FIRST_PRINTABLE_CODE = 32  # 空白。これより小さい文字は制御文字
 _DELETE_CODE = 127

@@ -5,14 +5,14 @@ import pytest
 from review_fakes import write_fake_review
 
 from jigane.groups.definitions import MACRO, MICRO
-from jigane.reviews.copying import copy_review_directory
-from jigane.reviews.lifecycle import (
+from jigane.reviews.catalog import (
     LocatedReview,
-    ReviewError,
     load_review_at,
     read_review_at,
     set_repository_root,
 )
+from jigane.reviews.copying import copy_review_directory
+from jigane.reviews.lifecycle import ReviewError
 from jigane.skills.pipeline import (
     PolicyGroupRun,
     ShardedGroupRun,

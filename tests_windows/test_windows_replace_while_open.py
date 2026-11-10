@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from jigane.storage import store
-from jigane.storage.store import StoredFileInUseError, write_text_atomic
+from jigane.storage import atomic_write
+from jigane.storage.atomic_write import StoredFileInUseError, write_text_atomic
 
 
 def test_write_succeeds_while_another_handle_reads_the_file(tmp_path: Path) -> None:
@@ -32,8 +32,8 @@ def test_write_succeeds_while_another_handle_reads_the_file(tmp_path: Path) -> N
 def test_write_names_the_file_when_the_reader_never_closes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(store, "REPLACE_RETRY_COUNT", 3)
-    monkeypatch.setattr(store, "REPLACE_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(atomic_write, "REPLACE_RETRY_COUNT", 3)
+    monkeypatch.setattr(atomic_write, "REPLACE_RETRY_SECONDS", 0.01)
     path = tmp_path / "findings.json"
     path.write_text("old", encoding="utf-8")
     with path.open(encoding="utf-8") as reader:

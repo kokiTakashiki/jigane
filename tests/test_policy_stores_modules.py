@@ -130,7 +130,7 @@ def test_unique_name_is_bound_when_no_import_leads_to_it(tmp_path: Path) -> None
 def test_unsupported_language_note_appears_with_the_table(tmp_path: Path) -> None:
     files = {
         "s.py": 'import json\n\n\ndef save(path):\n    json.dump({"k": 1}, open("t.json", "w"))\n',
-        "A.swift": "struct A {}\n",
+        "A.java": "class A {}\n",
     }
     texts = section_texts(
         AssemblyInput.load(project_review(tmp_path, files)), FigureSlot.AFTER_TREE
@@ -138,7 +138,7 @@ def test_unsupported_language_note_appears_with_the_table(tmp_path: Path) -> Non
     store = next(t for t in texts if t.startswith("### 保存物の書く側と読む側"))
     assert "t.json" in store
     assert (
-        "対応外の言語: Swift（jigane の Swift の解析は、この表の読み取りにまだ対応していない）。"
+        "対応外の言語: Java（jigane の Java の解析は、この表の読み取りにまだ対応していない）。"
         in store
     )
 

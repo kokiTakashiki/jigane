@@ -24,7 +24,7 @@ from jigane.git.tree_files import read_tree_bytes
 from jigane.judgment_map.allow_annotation import split_rows
 from jigane.judgment_map.classification import Segment
 from jigane.regex.gate_tags import REGEX_ANNOTATION_ID, annotation_entry, detect_tags, regex_entry
-from jigane.storage.store import write_text_atomic
+from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
 
 GATES_FILE = "gates.json"

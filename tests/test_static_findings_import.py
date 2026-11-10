@@ -27,7 +27,7 @@ from jigane.static_analysis.intake import (
     static_warnings,
 )
 from jigane.static_analysis.models import DropReason
-from jigane.storage.store import ReviewId
+from jigane.storage.store import CheckedReviewId
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def repo(repo_template: dict[str, str], tmp_path: Path) -> dict[str, str]:
     return {**repo_template, "root": str(root)}
 
 
-def _static_ids(review_id: ReviewId) -> set[str]:
+def _static_ids(review_id: CheckedReviewId) -> set[str]:
     stored = json.loads((review_id.directory() / "map.json").read_text(encoding="utf-8"))
     segments = stored.get("current_form", stored)["segments"]
     return {finding for segment in segments for finding in segment["static_finding_ids"]}

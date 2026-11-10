@@ -265,8 +265,9 @@ class _Extractor:
         found = self.index.find_type(name, self.path)
         if found is not None:
             return found
-        # 規則 8: 上のどれにも当たらない大文字始まりの識別子は、索引に無い型の静的な呼び出し
-        return name if self.index.adapter.is_external_type_name(name) else None
+        # 規則 8: 上のどれにも当たらない識別子は、綴りが大文字始まりでも型とみなさない。
+        # 型が決まらない受け手として、呼び出しは未解決になる
+        return None
 
     def _constructed(self, kind: object) -> TypeInfo | None:
         """受け手の無い Foo() が生成を意味する言語で、Foo が索引の型なら、その型。

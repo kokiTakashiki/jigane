@@ -27,8 +27,9 @@ from jigane.languages.concurrency_core import (
     StatelessWalk,
     is_ui_thread,
     line_of,
-    text_of,
 )
+from jigane.languages.csharp_nodes import CALLABLE_BODIES, LAMBDAS, TYPE_DECLARATIONS
+from jigane.languages.node_text import text_or_empty
 
 _UI_THREAD = UI_THREAD
 _THREAD_POOL = QueueDomain("スレッドプール")
@@ -64,25 +65,12 @@ _UI_TYPES = frozenset(
         "Editor",
     }
 )
-_TYPE_DECLARATIONS = frozenset(
-    {"class_declaration", "struct_declaration", "record_declaration", "interface_declaration"}
-)
 # 別の本体になる宣言。ラムダは Task.Run などへ渡されたときだけ、渡された先の本体として降りる
-_SKIPPED = frozenset(
-    {"lambda_expression", "anonymous_method_expression", "local_function_statement"}
-)
-_MEMBER_BODIES = frozenset(
-    {
-        "method_declaration",
-        "constructor_declaration",
-        "local_function_statement",
-        "accessor_declaration",
-        "lambda_expression",
-        "anonymous_method_expression",
-    }
-)
-_LAMBDAS = frozenset({"lambda_expression", "anonymous_method_expression"})
+_SKIPPED = LAMBDAS | {"local_function_statement"}
+_MEMBER_BODIES = CALLABLE_BODIES | LAMBDAS
 _DISPATCH_NAMES = frozenset({"Invoke", "BeginInvoke", "InvokeAsync"})
+# 受け手の名前にこの語を含めば Dispatcher とみなす。大文字と小文字は区別しない
+_DISPATCHER_WORD = "dispatcher"
 _MAIN_THREAD_NAMES = frozenset({"BeginInvokeOnMainThread", "InvokeOnMainThreadAsync"})
 _WAIT_NAMES = frozenset({"Wait", "WaitAll", "WaitAny"})
 _TASK_FACTORY = re.compile(r"(?:\w+\.)*(?:Task\.Factory|TaskFactory)")
@@ -93,10 +81,10 @@ def _simple_name(node: Node | None) -> str | None:
     if node is None:
         return None
     if node.type == "identifier":
-        return text_of(node)
+        return text_or_empty(node)
     if node.type == "generic_name":
         first = next((c for c in node.children if c.type == "identifier"), None)
-        return text_of(first) if first is not None else None
+        return text_or_empty(first) if first is not None else None
     if node.type == "qualified_name":
         return _simple_name(node.child_by_field_name("name"))
     return None
@@ -113,7 +101,7 @@ def _callee(call: Node) -> tuple[str | None, str | None, Node | None]:
         receiver = function.child_by_field_name("expression")
         name = _simple_name(function.child_by_field_name("name"))
         if receiver is not None and name is not None:
-            return text_of(receiver), name, receiver
+            return text_or_empty(receiver), name, receiver
     return None, None, None
 
 
@@ -130,7 +118,7 @@ def _lambda_body(node: Node) -> Node | None:
 
 
 def is_async(member_node: Node) -> bool:
-    return any(m.type == "modifier" and text_of(m) == "async" for m in member_node.children)
+    return any(m.type == "modifier" and text_or_empty(m) == "async" for m in member_node.children)
 
 
 def _declared_bases(type_node: Node) -> list[str]:
@@ -152,7 +140,7 @@ def _await(x: Extractor[None], node: Node) -> list[ConcurrencyStep]:
     while inner is not None and _callee(inner)[1] == "ConfigureAwait":
         arguments = _positional(inner)
         leaves_context = leaves_context or (
-            len(arguments) == 1 and text_of(arguments[0]) == "false"
+            len(arguments) == 1 and text_or_empty(arguments[0]) == "false"
         )
         function = inner.child_by_field_name("function")
         receiver = function.child_by_field_name("expression") if function else None
@@ -188,8 +176,13 @@ def _property(x: Extractor[None], node: Node) -> list[ConcurrencyStep]:
         and parent.child_by_field_name("function") == node
     )
     receiver = node.child_by_field_name("expression")
-    if name is not None and text_of(name) == "Result" and not called and receiver is not None:
-        steps.append(BlockingWait(f"{text_of(receiver)}.Result", line_of(node)))
+    if (
+        name is not None
+        and text_or_empty(name) == "Result"
+        and not called
+        and receiver is not None
+    ):
+        steps.append(BlockingWait(f"{text_or_empty(receiver)}.Result", line_of(node)))
     return steps
 
 
@@ -248,7 +241,7 @@ def _continuation(
 
     スケジューラが無ければ継続はスレッドプールで走る。
     """
-    on_caller = any("FromCurrentSynchronizationContext" in text_of(a) for a in arguments[1:])
+    on_caller = any("FromCurrentSynchronizationContext" in text_or_empty(a) for a in arguments[1:])
     domain = x.domain if on_caller else _THREAD_POOL
     body = _body(x, arguments[0], domain)
     if awaited:
@@ -273,7 +266,7 @@ def _thread_creation(call: Node, receiver: Node) -> Node | None:
         return receiver
     if receiver.type not in ("identifier", "member_access_expression"):
         return None
-    variable = text_of(receiver).removeprefix("this.")
+    variable = text_or_empty(receiver).removeprefix("this.")
     scope = call
     while scope.parent is not None and scope.type not in _MEMBER_BODIES:
         scope = scope.parent
@@ -327,6 +320,10 @@ def _task_special(
     return None
 
 
+def _names_dispatcher(receiver: str) -> bool:
+    return _DISPATCHER_WORD in receiver.lower()
+
+
 def _thread_special(
     x: Extractor[None],
     call: Node,
@@ -346,7 +343,7 @@ def _thread_special(
         return [QueueDispatch(_body(x, arguments[0], _UI_THREAD), line, str(name))]
     # lambda を渡さない `callback.Invoke(x)` はデリゲートの呼び出しなので、投げ込みにしない
     via_ui = receiver is not None and (
-        "dispatcher" in receiver.lower() or (bool(arguments) and arguments[0].type in _LAMBDAS)
+        _names_dispatcher(receiver) or (bool(arguments) and arguments[0].type in LAMBDAS)
     )
     if name in _DISPATCH_NAMES and arguments and via_ui:
         return [QueueDispatch(_body(x, arguments[0], _UI_THREAD), line, str(name))]
@@ -366,7 +363,7 @@ def _special(
 
 class _Rules(StatelessWalk):
     skipped = _SKIPPED
-    type_declarations = _TYPE_DECLARATIONS
+    type_declarations = TYPE_DECLARATIONS
 
     def is_main_thread(self, domain: Isolation) -> bool:
         return is_ui_thread(domain)
@@ -381,7 +378,7 @@ class _Rules(StatelessWalk):
         return _declared_bases(type_node)
 
     def lambda_body(self, node: Node) -> Node | None:
-        return _lambda_body(node) if node.type in _LAMBDAS else None
+        return _lambda_body(node) if node.type in LAMBDAS else None
 
     def visit(self, extractor: Extractor[None], node: Node) -> list[ConcurrencyStep] | None:
         if node.type == "await_expression":
@@ -428,10 +425,10 @@ def _delegate_variable(creation: Node) -> str | None:
         parent = parent.parent
     if parent is not None and parent.type == "variable_declarator":
         name = parent.child_by_field_name("name")
-        return text_of(name) if name is not None else None
+        return text_or_empty(name) if name is not None else None
     if parent is not None and parent.type == "assignment_expression":
         left = parent.child_by_field_name("left")
-        return text_of(left).removeprefix("this.") if left is not None else None
+        return text_or_empty(left).removeprefix("this.") if left is not None else None
     return None
 
 
@@ -446,7 +443,7 @@ def _delegate_begin_invoked(declaration: Node, variable: str) -> bool:
             continue
         receiver, name, _ = _callee(current)
         function = current.child_by_field_name("function")
-        if function is not None and text_of(function) == variable:
+        if function is not None and text_or_empty(function) == variable:
             return False
         if receiver is None or receiver.removeprefix("this.") != variable:
             continue
@@ -460,9 +457,9 @@ def _delegate_begin_invoked(declaration: Node, variable: str) -> bool:
 def _is_invoked_in_worker_lambda(target: Node) -> bool:
     """`Method()` の呼び出しがラムダの中にあって、そのラムダがワーカーへ渡されているか。"""
     lambda_node = target.parent
-    while lambda_node is not None and lambda_node.type not in _LAMBDAS | {"method_declaration"}:
+    while lambda_node is not None and lambda_node.type not in LAMBDAS | {"method_declaration"}:
         lambda_node = lambda_node.parent
-    if lambda_node is None or lambda_node.type not in _LAMBDAS:
+    if lambda_node is None or lambda_node.type not in LAMBDAS:
         return False
     call = _enclosing_call(lambda_node)
     return call is not None and _is_worker_dispatch(call)
@@ -486,7 +483,7 @@ def _is_worker_reference(reference: Node, declaration: Node) -> bool:
     parent = target.parent
     if parent is not None and parent.type == "member_access_expression":
         owner = parent.child_by_field_name("expression")
-        if owner is None or text_of(owner) != "this":
+        if owner is None or text_or_empty(owner) != "this":
             return False
         target, parent = parent, parent.parent
     if parent is not None and parent.type == "invocation_expression":
@@ -504,11 +501,11 @@ def _only_dispatched(method: Node, context: IsolationContext) -> bool:
     """
     name_node = method.child_by_field_name("name")
     owner = method.parent
-    while owner is not None and owner.type not in _TYPE_DECLARATIONS:
+    while owner is not None and owner.type not in TYPE_DECLARATIONS:
         owner = owner.parent
     if name_node is None or owner is None:
         return False
-    name = text_of(name_node)
+    name = text_or_empty(name_node)
     declarations = [owner]
     owner_name = _simple_name(owner.child_by_field_name("name"))
     if owner_name is not None:
@@ -520,7 +517,11 @@ def _only_dispatched(method: Node, context: IsolationContext) -> bool:
         while stack:
             current = stack.pop()
             stack.extend(current.children)
-            if current.type != "identifier" or text_of(current) != name or current == name_node:
+            if (
+                current.type != "identifier"
+                or text_or_empty(current) != name
+                or current == name_node
+            ):
                 continue
             references += 1
             worker += _is_worker_reference(current, declaration)

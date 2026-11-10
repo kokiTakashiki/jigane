@@ -1,26 +1,29 @@
 import re
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping
 
 from tree_sitter import Node
 
 from jigane.languages import (
     calls_core,
     java_concurrency,
+    java_discriminators,
+    java_file_paths,
+    java_public_names,
     java_string_comparisons,
+    java_type_fields,
     java_value_sets,
     type_names,
 )
 from jigane.languages.base import (
     Argument,
     BodyBounds,
-    Branch,
-    BranchArm,
     CallParts,
     CallSite,
     ConcurrencyStep,
     Declaration,
     DeclarationKind,
     DeferredSite,
+    FilePathPattern,
     Import,
     Isolation,
     IsolationContext,
@@ -29,14 +32,14 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
+    PublicName,
     ReceiverKind,
     RegexScan,
-    Return,
     Sharing,
     Step,
     StringComparison,
     TypeDecl,
-    TypeKind,
+    TypeFields,
     ValueSet,
     Visibility,
     import_nodes,
@@ -45,35 +48,13 @@ from jigane.languages.base import (
     split_declaration,
 )
 from jigane.languages.calls_core import Captures
+from jigane.languages.java_nodes import METHOD_NODES, TYPE_KINDS, TYPE_NODES, declared_visibility
 from jigane.languages.java_regex import regex_scan as _regex_scan
+from jigane.languages.node_text import text_of
 from jigane.languages.queries import load_queries
 from jigane.preconditions.required import required
 
-_TYPE_NODES = frozenset(
-    {
-        "class_declaration",
-        "interface_declaration",
-        "enum_declaration",
-        "record_declaration",
-        "annotation_type_declaration",
-    }
-)
-_METHOD_NODES = frozenset(
-    {
-        "method_declaration",
-        "constructor_declaration",
-        "compact_constructor_declaration",
-        "annotation_type_element_declaration",
-    }
-)
 _FIELD_NODES = frozenset({"field_declaration", "constant_declaration"})
-_TYPE_KINDS: dict[str, TypeKind] = {
-    "class_declaration": "class",
-    "interface_declaration": "interface",
-    "enum_declaration": "enum",
-    "record_declaration": "record",
-    "annotation_type_declaration": "interface",
-}
 # ラムダの本体と、無名クラスと局所クラスの本体。本体の呼び出しは遅延参照として別に報告する
 _DEFERRED_BODIES = frozenset({"lambda_expression", "class_body"})
 _COMMENTS = frozenset({"line_comment", "block_comment"})
@@ -88,108 +69,6 @@ def _anonymous_name(ordinal: int) -> str:
     return f"<anonymous{ordinal}>"
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
-def _statements(node: Node) -> list[Node]:
-    # 波括弧の無い腕と枝は、文一つがそのまま本体になる
-    return list(node.named_children) if node.type == "block" else [node]
-
-
-def _member_text(expression: Node | None) -> str | None:
-    # 値は Kind.RANGE の形のメンバ参照だけを残す。それ以外の式は値なしの終わりとして扱う
-    return (
-        _text(expression) if expression is not None and expression.type == "field_access" else None
-    )
-
-
-def _steps(statements: list[Node], *, is_value: bool) -> list[Step]:
-    """文の並びから Return と Branch だけを残す。is_value は switch 式の腕の中であることを示す。"""
-    steps: list[Step] = []
-    for statement in statements:
-        kind = statement.type
-        if kind in ("return_statement", "yield_statement"):
-            expression = statement.named_children[0] if statement.named_children else None
-            if expression is not None and expression.type == "switch_expression":
-                steps.append(_switch_branch(expression, is_value=True))
-            else:
-                steps.append(Return(_member_text(expression)))
-        elif kind == "throw_statement":
-            steps.append(Return(None))
-        elif kind == "if_statement":
-            steps.append(_if_branch(statement))
-        elif kind == "switch_expression":
-            steps.append(_switch_branch(statement, is_value=False))
-        elif kind == "expression_statement" and is_value and statement.named_children:
-            steps.append(Return(_member_text(statement.named_children[0])))
-        else:
-            # 他の文は分岐も終わりも作らない。ループや try の中の分岐は読まない
-            continue
-    return steps
-
-
-def _if_branch(statement: Node) -> Branch:
-    """if の偽の腕に、else if の連なりを入れ子にして入れる。"""
-    condition = statement.child_by_field_name("condition")
-    consequence = statement.child_by_field_name("consequence")
-    alternative = statement.child_by_field_name("alternative")
-    text = _text(condition)[1:-1].strip() if condition is not None else "?"
-    arms = [
-        BranchArm(
-            "yes", tuple(_steps(_statements(consequence), is_value=False)) if consequence else ()
-        )
-    ]
-    if alternative is None:
-        return Branch(text, tuple(arms), "no")
-    arms.append(BranchArm("no", tuple(_steps(_statements(alternative), is_value=False))))
-    return Branch(text, tuple(arms), None)
-
-
-def _switch_branch(statement: Node, *, is_value: bool) -> Branch:
-    subject = next(
-        (c for c in statement.named_children if c.type == "parenthesized_expression"), None
-    )
-    block = next((c for c in statement.named_children if c.type == "switch_block"), None)
-    arms: list[BranchArm] = []
-    labels: list[str] = []
-    for clause in block.named_children if block is not None else []:
-        label = next((c for c in clause.named_children if c.type == "switch_label"), None)
-        if label is None:
-            continue
-        labels.append(_text(label).removeprefix("case ").strip())
-        if clause.type == "switch_rule":
-            body = clause.named_children[-1]
-            nodes = [] if body is label else _statements(body)
-        else:
-            nodes = [c for c in clause.named_children if c is not label]
-            if not nodes:
-                # 本体が空のラベルは次のラベルへ落ちるので、次の腕の名前に束ねる
-                continue
-        name = ", ".join(labels) if labels != ["default"] else "default"
-        arms.append(
-            BranchArm(
-                f"case {name}" if name != "default" else name,
-                tuple(_steps(nodes, is_value=is_value)),
-            )
-        )
-        labels = []
-    subject_text = _text(subject)[1:-1].strip() if subject is not None else ""
-    return Branch(f"switch {subject_text}".strip(), tuple(arms), None)
-
-
-def _declared(node: Node, default: Visibility) -> Visibility:
-    modifiers = next((c for c in node.children if c.type == "modifiers"), None)
-    if modifiers is None:
-        return default
-    types = {c.type for c in modifiers.children}
-    if "private" in types:
-        return Visibility.FILE
-    if types & {"public", "protected"}:
-        return Visibility.PUBLIC
-    return default
-
-
 def _is_abstract(node: Node) -> bool:
     """修飾子に abstract が書かれているか。"""
     modifiers = next((c for c in node.children if c.type == "modifiers"), None)
@@ -199,14 +78,14 @@ def _is_abstract(node: Node) -> bool:
 def _name(node: Node) -> str:
     name_node = node.child_by_field_name("name")
     name_node = required(name_node)
-    return _text(name_node)
+    return text_of(name_node)
 
 
 def _annotation(type_node: Node | None) -> str | None:
     # var は型を初期化式から決めるので、注記を持たない
-    if type_node is None or _text(type_node) == "var":
+    if type_node is None or text_of(type_node) == "var":
         return None
-    return _text(type_node)
+    return text_of(type_node)
 
 
 def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]:
@@ -221,9 +100,9 @@ def _call_parts(call: Node) -> CallParts:
     name = call.child_by_field_name("name")
     return CallParts(
         call.child_by_field_name("object"),
-        _text(name) if name is not None else None,
+        text_of(name) if name is not None else None,
         _arguments(call),
-        _text(call),
+        text_of(call),
     )
 
 
@@ -233,7 +112,7 @@ def _call_site(captures: dict[str, list[Node]]) -> CallSite:
     receiver = captures["receiver"][0] if "receiver" in captures else None
     return CallSite(
         node,
-        _text(callee),
+        text_of(callee),
         receiver,
         _arguments(node, captures["arguments"][0]),
         node.type == "object_creation_expression",
@@ -251,7 +130,9 @@ def _parameters(plist: Node | None) -> tuple[ParameterDecl, ...]:
             type_node = p.child_by_field_name("type")
             name_node = p.child_by_field_name("name")
             if type_node is not None and name_node is not None:
-                result.append(ParameterDecl(_text(name_node), _text(type_node), optional=False))
+                result.append(
+                    ParameterDecl(text_of(name_node), text_of(type_node), optional=False)
+                )
         elif p.type == "spread_parameter":
             # 可変長の引数は 0 個でも呼べる
             declarator = next((c for c in p.children if c.type == "variable_declarator"), None)
@@ -260,7 +141,7 @@ def _parameters(plist: Node | None) -> tuple[ParameterDecl, ...]:
             )
             if declarator is not None and type_node is not None:
                 name_node = required(declarator.child_by_field_name("name"))
-                result.append(ParameterDecl(_text(name_node), _text(type_node), optional=True))
+                result.append(ParameterDecl(text_of(name_node), text_of(type_node), optional=True))
         else:
             # 受け手の仮引数 `Foo this` など。呼び出しの引数に対応しない
             continue
@@ -271,11 +152,11 @@ def _bases(node: Node) -> tuple[str, ...]:
     bases: list[str] = []
     for child in node.children:
         if child.type == "superclass" and child.named_children:
-            bases.append(_text(child.named_children[0]))
+            bases.append(text_of(child.named_children[0]))
         elif child.type in ("super_interfaces", "extends_interfaces"):
             type_list = next((c for c in child.children if c.type == "type_list"), None)
             if type_list is not None:
-                bases.extend(_text(t) for t in type_list.named_children)
+                bases.extend(text_of(t) for t in type_list.named_children)
     return tuple(bases)
 
 
@@ -292,7 +173,7 @@ def _anonymous_creations(node: Node) -> Iterator[Node]:
     for child in node.children:
         if child.type == "object_creation_expression" and _anonymous_body(child) is not None:
             yield child
-        elif child.type in _TYPE_NODES:
+        elif child.type in TYPE_NODES:
             # 局所クラスの本体は、無名クラスの入口を持たない（宣言としても索引にも載せない）
             continue
         else:
@@ -308,13 +189,13 @@ def _lambda_parameter_names(lambda_node: Node) -> list[str]:
     if parameters is None:
         return []
     if parameters.type == "identifier":
-        return [_text(parameters)]
+        return [text_of(parameters)]
     names: list[str] = []
     for p in parameters.named_children:
         if p.type == "identifier":
-            names.append(_text(p))
+            names.append(text_of(p))
         elif p.type == "formal_parameter":
-            names.append(_text(required(p.child_by_field_name("name"))))
+            names.append(text_of(required(p.child_by_field_name("name"))))
         else:
             # 可変長の仮引数など。名前を束縛しても受け手の解決に影響しない
             continue
@@ -340,7 +221,7 @@ class _JavaRules(calls_core.RuleDefaults):
 
     def method_group(self, captures: Captures) -> DeferredSite:
         node = captures["method_group"][0]
-        return DeferredSite(node, _text(node.children[-1]), node.children[0], "method_group")
+        return DeferredSite(node, text_of(node.children[-1]), node.children[0], "method_group")
 
     def call_parts(self, call: Node) -> CallParts:
         return _call_parts(call)
@@ -356,7 +237,7 @@ class _JavaRules(calls_core.RuleDefaults):
         if node.type == "local_variable_declaration":
             type_node = node.child_by_field_name("type")
             for declarator in node.children_by_field_name("declarator"):
-                name = _text(required(declarator.child_by_field_name("name")))
+                name = text_of(required(declarator.child_by_field_name("name")))
                 value = declarator.child_by_field_name("value")
                 variables.append(LocalVariable(name, _annotation(type_node), value))
         elif node.type in ("enhanced_for_statement", "resource", "catch_formal_parameter"):
@@ -366,15 +247,15 @@ class _JavaRules(calls_core.RuleDefaults):
                 type_node = node.child_by_field_name("type") or next(
                     (c for c in node.children if c.type == "catch_type"), None
                 )
-                multi = type_node is not None and "|" in _text(type_node)
+                multi = type_node is not None and "|" in text_of(type_node)
                 annotation = None if multi else _annotation(type_node)
                 value = node.child_by_field_name("value")
-                variables.append(LocalVariable(_text(name_node), annotation, value))
+                variables.append(LocalVariable(text_of(name_node), annotation, value))
         elif node.type == "instanceof_expression":
             name_node = node.child_by_field_name("name")
             if name_node is not None:
                 right = node.child_by_field_name("right")
-                variables.append(LocalVariable(_text(name_node), _annotation(right), None))
+                variables.append(LocalVariable(text_of(name_node), _annotation(right), None))
         return variables
 
 
@@ -409,9 +290,6 @@ class JavaAdapter:
     def composition_type_names(self, _raw: str, /) -> list[str]:
         return []
 
-    def is_external_type_name(self, name: str) -> bool:
-        return type_names.capitalized_is_external_type(name)
-
     def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
         return _regex_scan(root_node, path)
 
@@ -423,6 +301,25 @@ class JavaAdapter:
             parse(self, source.encode()).root_node, path
         )
 
+    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+        return java_type_fields.type_fields_of(lambda: parse(self, text.encode()).root_node, path)
+
+    def file_path_patterns(
+        self, root_node: Node, _source: bytes, path: str, /
+    ) -> list[FilePathPattern]:
+        return java_file_paths.file_path_patterns(root_node, path)
+
+    def added_public_names(
+        self,
+        before: Mapping[str, str],
+        after: Mapping[str, str],
+        changed: Collection[str],
+        /,
+    ) -> list[PublicName]:
+        return java_public_names.added_public_names_of(
+            lambda source: parse(self, source.encode()).root_node, before, after, changed
+        )
+
     def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
         found: list[Import] = []
         for node in import_nodes(self, root_node):
@@ -430,7 +327,7 @@ class JavaAdapter:
                 (c for c in node.children if c.type in ("scoped_identifier", "identifier")), None
             )
             if module is not None:
-                found.append(Import(_text(module), module.start_point.row + 1))
+                found.append(Import(text_of(module), module.start_point.row + 1))
         return found
 
     def technology_of(self, module: str) -> str:
@@ -441,14 +338,14 @@ class JavaAdapter:
         return {}
 
     def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
-        return _steps(_statements(body_node), is_value=False)
+        return java_discriminators.discriminator_steps(body_node)
 
     def type_members(
         self, root_node: Node, _source: bytes, path: str, /
     ) -> list[TypeDecl | MemberDecl]:
         result: list[TypeDecl | MemberDecl] = []
         for node in root_node.children:
-            if node.type in _TYPE_NODES:
+            if node.type in TYPE_NODES:
                 self._collect_type(node, "", path, result)
             else:
                 # package、import、モジュール宣言は型を持たない
@@ -502,7 +399,7 @@ class JavaAdapter:
             TypeDecl(
                 qualified,
                 name,
-                _TYPE_KINDS[node.type],
+                TYPE_KINDS[node.type],
                 _bases(node),
                 path,
                 line,
@@ -541,7 +438,7 @@ class JavaAdapter:
             parameters: tuple[ParameterDecl, ...],
             body: Node | None = None,
         ) -> MemberDecl:
-            annotation = _text(type_node) if type_node is not None else None
+            annotation = text_of(type_node) if type_node is not None else None
             return MemberDecl(
                 owner,
                 name,
@@ -554,7 +451,7 @@ class JavaAdapter:
                 abstract=kind == "method" and _is_abstract(node),
             )
 
-        if node.type in _TYPE_NODES:
+        if node.type in TYPE_NODES:
             self._collect_type(node, f"{owner}.", path, result)
         elif node.type == "method_declaration":
             result.append(
@@ -605,7 +502,7 @@ class JavaAdapter:
             type_node = creation.child_by_field_name("type")
             name = _anonymous_name(ordinal)
             owner = f"{qualified}.{name}"
-            bases = (_text(type_node),) if type_node is not None else ()
+            bases = (text_of(type_node),) if type_node is not None else ()
             result.append(
                 TypeDecl(owner, name, "class", bases, path, creation.start_point.row + 1, creation)
             )
@@ -651,8 +548,8 @@ class JavaAdapter:
                 self._collect(member, prefix, cap, default, result)
                 continue
             # 修飾子の無い要素は、class では package-private、interface では public
-            visibility = _declared(member, default).narrower(cap)
-            if member.type in _TYPE_NODES:
+            visibility = declared_visibility(member, default).narrower(cap)
+            if member.type in TYPE_NODES:
                 qualified = f"{prefix}{_name(member)}"
                 result.append(self._declaration(member, qualified, "class", visibility))
                 body = member.child_by_field_name("body")
@@ -668,7 +565,7 @@ class JavaAdapter:
                     Visibility.PUBLIC if is_interface else Visibility.INTERNAL,
                     result,
                 )
-            elif member.type in _METHOD_NODES:
+            elif member.type in METHOD_NODES:
                 qualified = f"{prefix}{_name(member)}"
                 result.append(self._declaration(member, qualified, "method", visibility))
                 self._collect_anonymous_declarations(member, qualified, result)

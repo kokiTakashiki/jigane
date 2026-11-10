@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from jigane.findings.records import KEY_THEME
+
 _MAX_KEPT_ITEMS = 3
 _EXPECTED_ARGV_LENGTH = 3  # プログラム名と二つの引数
 
@@ -22,7 +24,7 @@ ENUM_KEYS = frozenset(
         "kind", "level", "severity", "triage", "group", "viewpoint", "mode", "state",
         "change_kind", "declaration_kind", "visibility", "verdict", "role", "shape",
         "record_kind", "cost_source", "terminal_reason", "perspective", "confidence",
-        "cause", "theme",
+        "cause", KEY_THEME,
         "stale_groups", "finding_ids", "picked", "held",
     }
 )  # fmt: skip

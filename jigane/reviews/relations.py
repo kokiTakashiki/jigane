@@ -3,13 +3,9 @@
 import re
 from datetime import datetime
 
-from jigane.reviews.lifecycle import (
-    ARCHIVED_INCLUDE,
-    RangeOrigin,
-    Review,
-    list_reviews,
-    split_range,
-)
+from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_reviews
+from jigane.reviews.lifecycle import RangeOrigin, Review
+from jigane.reviews.range_head import split_range
 from jigane.storage.store import ReviewKind
 
 _TRAILING_DIGITS = re.compile(r"-?[0-9]+$")

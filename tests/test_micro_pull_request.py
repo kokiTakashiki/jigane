@@ -6,7 +6,8 @@ from fakes import MicroFake, clear_policy, d_finding, settings_for
 from pr_support import URL, advance_head
 
 from jigane.commands.subcommands.refresh import refresh_review
-from jigane.reviews.lifecycle import ReviewError, create_pull_request_review, load_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import ReviewError, create_pull_request_review
 from jigane.skills import micro, shards
 from jigane.skills.assembly import AssemblyInput
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.technology_list.changes import UNCHANGED, change_of
+from jigane.text.distribution_names import normalize_distribution
 
 PACKAGE = "package"
 PRODUCT = "product"
@@ -76,10 +77,6 @@ class Platform:
     path: str
     platform: str
     minimum: str
-
-
-def normalize_python(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _line_of(text: str, offset: int) -> int:
@@ -409,8 +406,8 @@ def match(dependencies: Sequence[Dependency], language: str, technology: str) ->
     key = technology.lower()
     candidates = [d for d in dependencies if d.language == language]
     if language == "python":
-        wanted = normalize_python(technology)
-        return next((d for d in candidates if normalize_python(d.name) == wanted), None)
+        wanted = normalize_distribution(technology)
+        return next((d for d in candidates if normalize_distribution(d.name) == wanted), None)
     if language == "swift":
         wanted_forms = {key, key.replace("-", "_")}
         return next(

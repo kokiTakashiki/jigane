@@ -395,3 +395,91 @@ def test_a_version_1_history_with_an_unknown_group_reads_as_corrupt(tmp_path: Pa
     assert loaded.rounds == {}
     assert len(loaded.warnings) == 1
     assert HISTORY_FILE in loaded.warnings[0].description()
+
+
+def _stale_with_a_current_finding(review: Review) -> str:
+    directory = _pick_then_lose(review)
+    merge_group(directory, MACRO, group_result([_finding(2)], ThemeUpdate((), 1)), None)
+    return str(review.id)
+
+
+@pytest.mark.parametrize(
+    ("verb", "extra", "heading"),
+    [
+        ("pick", [], "最終的な指摘に加えました: F2"),
+        ("hold", [], "保留にしました: F2"),
+        ("object", ["--reason", "r"], "異議を記録しました: F2"),
+    ],
+)
+def test_a_recording_operation_names_the_recorded_finding_and_hides_the_stale_body(
+    review: Review, capsys: pytest.CaptureFixture[str], verb: str, extra: list[str], heading: str
+) -> None:
+    name = _stale_with_a_current_finding(review)
+    capsys.readouterr()
+    assert main([verb, name, "F2", *extra]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == heading
+    out = "\n".join(lines)
+    assert "古い選択 1 件（今の指摘に無い番号）: F1。本文は jigane show で確かめられます" in out
+    assert "claim1" not in out
+    assert "body1" not in out
+
+
+def test_unpick_names_the_removed_finding_and_hides_the_stale_body(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = _stale_with_a_current_finding(review)
+    main(["pick", name, "F2"])
+    capsys.readouterr()
+    assert main(["unpick", name, "F2"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "最終的な指摘から外しました: F2"
+    assert "古い選択 1 件" in out
+    assert "claim1" not in out
+
+
+def test_show_still_prints_the_stale_body(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = _stale_with_a_current_finding(review)
+    capsys.readouterr()
+    assert main(["show", name]) == 0
+    assert "claim1" in capsys.readouterr().out
+
+
+def test_a_recording_operation_without_a_stale_selection_has_no_stale_line(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = review.id.directory()
+    merge_group(directory, MACRO, group_result([_finding(2)], ThemeUpdate((), 1)), None)
+    capsys.readouterr()
+    assert main(["hold", str(review.id), "F2"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "保留にしました: F2"
+    assert "古い選択" not in out
+
+
+@pytest.mark.parametrize(
+    ("verb", "undo", "extra", "heading"),
+    [
+        ("hold", "unhold", [], "保留を外しました: F2"),
+        ("object", "unobject", ["--reason", "r"], "異議を外しました: F2"),
+    ],
+)
+def test_an_undoing_operation_names_the_removed_finding_and_hides_the_stale_body(
+    review: Review,
+    capsys: pytest.CaptureFixture[str],
+    verb: str,
+    undo: str,
+    extra: list[str],
+    heading: str,
+) -> None:
+    name = _stale_with_a_current_finding(review)
+    main([verb, name, "F2", *extra])
+    capsys.readouterr()
+    assert main([undo, name, "F2"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == heading
+    assert "古い選択 1 件（今の指摘に無い番号）: F1。本文は jigane show で確かめられます" in out
+    assert "claim1" not in out
+    assert "body1" not in out

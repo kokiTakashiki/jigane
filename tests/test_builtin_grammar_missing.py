@@ -90,3 +90,15 @@ def test_require_ready_passes_with_only_the_four_builtin_libraries(
         (library / f"libtree_sitter_{stem}.so").write_bytes(b"")
     monkeypatch.setattr(grammars, "cache_root", lambda: tmp_path)
     registry.require_ready()
+
+
+def test_require_ready_stops_when_a_builtin_library_is_duplicated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = grammars.library_dir(tmp_path)
+    library.mkdir(parents=True)
+    (library / "libtree_sitter_python.so").write_bytes(b"")
+    (library / "libtree_sitter_python.dylib").write_bytes(b"")
+    monkeypatch.setattr(grammars, "cache_root", lambda: tmp_path)
+    with pytest.raises(grammars.GrammarError, match="複数あります"):
+        registry.require_ready()

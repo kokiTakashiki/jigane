@@ -1,4 +1,4 @@
-"""根ごとのシーケンス図のモデルを組み、JSON と Mermaid の文面へ書き出す（4.2.3〜4.2.6 節）。"""
+"""根ごとのシーケンス図のモデルを組む（4.2.3〜4.2.6 節）。"""
 
 import re
 from collections import deque
@@ -16,7 +16,6 @@ from jigane.sequence.roots import (
     Key,
     Root,
     RootSelection,
-    Side,
     calls_with_bindings,
     implementations,
     is_interface_member,
@@ -42,9 +41,6 @@ UNRESOLVED_EXPRESSION_WIDTH = 40
 # 「変更に関わらない呼び出し」の注記に並べる呼び先の名前の上限。注記を一行に収めるため
 COLLAPSED_NAME_LIMIT = 5
 _HEAD_NAME = re.compile(r"[^\W\d]\w*")
-# 参加者の名札に並べる判断の箇所の数。ツリー図の札（TAG_CAP）と同じ 3 件にして、
-# 名札が参加者の名前より長くならない幅に収める
-PARTICIPANT_TAG_CAP = 3
 
 
 @dataclass(frozen=True)
@@ -155,14 +151,24 @@ class EntryEvidence:
 
 @dataclass
 class Diagram:
-    root: str
-    path: str
-    line: int
+    root_member: Member
     labels: list[str]
     participants: list[Participant] = field(default_factory=list)
     arrows: list[Arrow] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     evidence: EntryEvidence = field(default_factory=EntryEvidence)
+
+    @property
+    def root(self) -> str:
+        return self.root_member.qualified_name
+
+    @property
+    def path(self) -> str:
+        return self.root_member.path
+
+    @property
+    def line(self) -> int:
+        return self.root_member.line
 
 
 class RegionLabels:
@@ -318,7 +324,7 @@ class _Builder:
         self.beyond_unresolved_targets = 0
         self.folded = False
         member = root.member
-        diagram = Diagram(member.qualified_name, member.path, member.line, list(root.labels))
+        diagram = Diagram(member, list(root.labels))
         self.diagram = diagram
         self.collapsed = 0
         self.collapsed_repository_calls = 0
@@ -590,184 +596,90 @@ class _Builder:
             self.unresolved_targets.add(expression)
 
 
-def build_diagrams(
-    index: Index,
-    selection: RootSelection,
-    regions: Sequence[Region],
-    depth: int = DEFAULT_DEPTH,
-    *,
-    full: bool = False,
-    roots: Sequence[Root] | None = None,
-    relations: bool = True,
-) -> dict[str, Any]:
-    """根ごとの図と、J の番号の逆引きと、どの図にも現れない判断の箇所を持つモデルを返す。"""
-    chosen = list(selection.roots if roots is None else roots)
+@dataclass(frozen=True)
+class ArrowHit:
+    """判断の箇所が当たる矢印。diagram は図の根の修飾名、arrow はその図の矢印の 1 始まりの位置。"""
+
+    diagram: str
+    arrow: int
+
+
+@dataclass(frozen=True)
+class ParticipantHit:
+    """判断の箇所が当たる参加者。diagram は図の根の修飾名、participant は参加者の修飾名。"""
+
+    diagram: str
+    participant: str
+
+
+@dataclass(frozen=True)
+class UnreachableRegion:
+    """どの図の矢印にも参加者にも当たらない判断の箇所。"""
+
+    id: str
+    path: str
+    qualified_name: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class DiagramSetNotes:
+    """DiagramSet の図以外の項目。J の番号の逆引き、どの図にも現れない判断の箇所、落とした根。"""
+
+    region_index: Mapping[str, tuple[ArrowHit | ParticipantHit, ...]]
+    unreachable_regions: tuple[UnreachableRegion, ...]
+    dropped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DiagramSet:
+    """根ごとの図と、図以外の項目（DiagramSetNotes）。JSON の辞書にする前の形。"""
+
+    diagrams: tuple[Diagram, ...]
+    notes: DiagramSetNotes
+
+
+@dataclass(frozen=True)
+class DiagramInputs:
+    """図の構築の入力。索引、選んだ根、判断の箇所、辿る深さ、絞り込みの有無。"""
+
+    index: Index
+    selection: RootSelection
+    regions: Sequence[Region]
+    depth: int = DEFAULT_DEPTH
+    full: bool = False
+
+
+def construct_diagrams(inputs: DiagramInputs, *, relations: bool = True) -> DiagramSet:
+    """根ごとの図と、J の番号の逆引きと、どの図にも現れない判断の箇所を作る。
+
+    relations が偽のとき、関係の矢印を足さない。変更前の図は「変更した宣言へ届くか」を比べるため。
+    """
+    index, selection, regions = inputs.index, inputs.selection, inputs.regions
+    depth, full = inputs.depth, inputs.full
+    chosen = list(selection.roots)
     labels = RegionLabels(index, regions)
     reach = Reachability(index, selection.changed, [r.member for r in chosen])
     builder = _Builder(index, selection, labels, reach, depth, full=full, relations=relations)
     diagrams = [builder.build(root) for root in chosen]
-    reverse: dict[str, list[dict[str, Any]]] = {}
+    reverse: dict[str, list[ArrowHit | ParticipantHit]] = {}
     for diagram in diagrams:
         for position, arrow in enumerate(diagram.arrows, start=1):
             if arrow.region is not None:
-                reverse.setdefault(arrow.region, []).append(
-                    {"diagram": diagram.root, "arrow": position, "participant": None}
-                )
+                reverse.setdefault(arrow.region, []).append(ArrowHit(diagram.root, position))
         for participant in diagram.participants:
             for region_id in participant.regions:
                 reverse.setdefault(region_id, []).append(
-                    {
-                        "diagram": diagram.root,
-                        "arrow": None,
-                        "participant": participant.qualified_name,
-                    }
+                    ParticipantHit(diagram.root, participant.qualified_name)
                 )
     unreachable = [
-        {
-            "id": required(region.id),
-            "path": region.path,
-            "qualified_name": region.qualified_name,
-            "summary": region.summary,
-        }
+        UnreachableRegion(required(region.id), region.path, region.qualified_name, region.summary)
         for region in regions
         if required(region.id) not in reverse
     ]
-    return {
-        "side": Side.AFTER,
-        "diagrams": [diagram_to_dict(d) for d in diagrams],
-        "region_index": reverse,
-        "unreachable_regions": unreachable,
-        "dropped": [m.qualified_name for m in selection.dropped],
-    }
-
-
-def diagram_to_dict(diagram: Diagram) -> dict[str, Any]:
-    return {
-        "root": diagram.root,
-        "path": diagram.path,
-        "line": diagram.line,
-        "labels": diagram.labels,
-        "participants": [
-            {
-                "alias": p.alias,
-                "qualified_name": p.qualified_name,
-                "display": p.display,
-                "external": p.external,
-                "regions": p.regions,
-            }
-            for p in diagram.participants
-        ],
-        "arrows": [
-            {
-                "sender": a.sender,
-                "receiver": a.receiver,
-                "name": a.name,
-                "depth": a.depth,
-                "path": a.path,
-                "line": a.line,
-                "status": a.status,
-                "region": a.region,
-            }
-            for a in diagram.arrows
-        ],
-        "notes": diagram.notes,
-        **diagram.evidence.to_dict(),
-    }
-
-
-def _arrow_signature(arrow: Mapping[str, Any]) -> tuple[str, str, str]:
-    return arrow["sender"], arrow["receiver"], arrow["name"]
-
-
-def mark_differences(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> None:
-    """変更前と変更後の矢印の列を最長共通部分列で突き合わせ、対比の印 mark を付ける（4.2.4 項）。
-
-    組は（送り手、受け手、呼び出しの名前）で、行番号は使わない。
-    """
-    old = [_arrow_signature(a) for a in before]
-    new = [_arrow_signature(a) for a in after]
-    # lengths[i][j] は old[i:] と new[j:] の最長共通部分列の長さ
-    lengths = [[0] * (len(new) + 1) for _ in range(len(old) + 1)]
-    for i in range(len(old) - 1, -1, -1):
-        for j in range(len(new) - 1, -1, -1):
-            lengths[i][j] = (
-                lengths[i + 1][j + 1] + 1
-                if old[i] == new[j]
-                else max(lengths[i + 1][j], lengths[i][j + 1])
-            )
-    for arrow in before:
-        arrow["mark"] = "removed"
-    for arrow in after:
-        arrow["mark"] = "added"
-    i = j = 0
-    while i < len(old) and j < len(new):
-        if old[i] == new[j]:
-            before[i]["mark"] = after[j]["mark"] = "same"
-            i += 1
-            j += 1
-        elif lengths[i + 1][j] >= lengths[i][j + 1]:
-            i += 1
-        else:
-            j += 1
-
-
-MARK_SUFFIX = {"added": "（追加）", "removed": "（削除）"}
-
-
-def mermaid_text(value: str) -> str:
-    return value.replace(";", ",").replace("#", "").replace("\n", " ")
-
-
-def region_ids(diagram: Mapping[str, Any]) -> list[str]:
-    """図の一枚に札として載る判断の箇所の番号。`to_mermaid` が書く順で、重複は除く。"""
-    found = [r for p in diagram["participants"] for r in p["regions"]]
-    found += [a["region"] for a in diagram["arrows"] if a["region"]]
-    return list(dict.fromkeys(found))
-
-
-def participant_tag(regions: Sequence[str]) -> str:
-    """参加者の名札の判断の箇所。上限を超えたら先頭から上限の数だけ並べ、残りは件数にする。"""
-    if len(regions) <= PARTICIPANT_TAG_CAP:
-        return "".join(f" [{r}]" for r in regions)
-    shown = " ".join(regions[:PARTICIPANT_TAG_CAP])
-    return f" [{shown} ほか {len(regions) - PARTICIPANT_TAG_CAP} 件]"
-
-
-def to_mermaid(diagram: Mapping[str, Any]) -> str:
-    """図のモデルの一枚を、決まった規則で Mermaid の文面にする。"""
-    alias = {p["qualified_name"]: p["alias"] for p in diagram["participants"]}
-    lines = ["sequenceDiagram"]
-    lines.extend(
-        f"    participant {p['alias']} as {mermaid_text(p['display'])}"
-        f"{participant_tag(p['regions'])}"
-        for p in diagram["participants"]
+    notes = DiagramSetNotes(
+        {region: tuple(entries) for region, entries in reverse.items()},
+        tuple(unreachable),
+        tuple(m.qualified_name for m in selection.dropped),
     )
-    for arrow in diagram["arrows"]:
-        operator = "--x" if arrow["status"] == "unresolved" else "->>"
-        tag = f" [{arrow['region']}]" if arrow["region"] else ""
-        sender, receiver = alias[arrow["sender"]], alias[arrow["receiver"]]
-        mark = MARK_SUFFIX.get(arrow.get("mark", "same"), "")
-        lines.append(
-            f"    {sender}{operator}{receiver}: {mermaid_text(arrow['name'])}(){tag}{mark}"
-        )
-    first = diagram["participants"][0]["alias"]
-    lines.extend(
-        f"    Note over {first}: {mermaid_text(note)}"
-        for note in [*diagram["labels"], *diagram["notes"]]
-    )
-    return "\n".join(lines) + "\n"
-
-
-def select_diagrams(
-    model: dict[str, Any], root: str | None = None, region: str | None = None
-) -> dict[str, Any]:
-    if region is not None:
-        hits = {entry["diagram"] for entry in model["region_index"].get(region, [])}
-        return {
-            **model,
-            "diagrams": [d for d in model["diagrams"] if d["root"] in hits],
-            "region_index": {k: v for k, v in model["region_index"].items() if k == region},
-        }
-    if root is not None:
-        return {**model, "diagrams": [d for d in model["diagrams"] if d["root"] == root]}
-    return model
+    return DiagramSet(tuple(diagrams), notes)

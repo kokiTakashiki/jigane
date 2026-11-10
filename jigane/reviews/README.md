@@ -6,7 +6,11 @@
 
 | モジュール | 役割 |
 | --- | --- |
-| `lifecycle` | レビューの作成、更新、保存、読み込みを持ちます |
+| `lifecycle` | レビューの作成、更新、保存を持ちます |
+| `resolution` | 識別子の入力（完全な形、短い形、名前だけ）を保存済みのレビューの一つに決めます。catalog の上に載ります |
+| `catalog` | 保存済みのレビューの読み出し、一覧、アーカイブの印を持ちます |
+| `review_formats` | review.json、regions.json、pairs.json の版と、版の移し、読み書きの形を持ちます |
+| `stored_pairs` | 保存した pairs.json を読み、変更したファイルの対を返します |
 | `relations` | 同じ変更を重ねた別のレビューの探索を持ちます |
 | `selection` | 指摘の選別（採用、見送り、保留）の記録を持ちます |
 | `group_state` | 群ごとの実行の状態を持ちます |
@@ -17,7 +21,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`pull_request_context`、`static_analysis`、`storage`
+読むサブパッケージ：`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`pull_request_context`、`static_analysis`、`storage`、`text`
 
 読まれるサブパッケージ：`commands`、`design`、`policy_materials`、`publishing`、`sequence`、`skills`、`technology_list`
 

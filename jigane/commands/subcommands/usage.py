@@ -29,7 +29,9 @@ from jigane.groups.definitions import GROUP_BY_ID, GROUP_IDS, GroupId
 from jigane.llm_runs.cost import total_by_source
 from jigane.llm_runs.launch_failure import StoredInvocation
 from jigane.llm_runs.usage_table import ROLE_LABELS, TOTAL_ROLE, UsageField
-from jigane.reviews.lifecycle import Review, load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.resolution import resolve_review
 from jigane.skills import macro, pipeline, security
 
 _MIN_ROUNDS_TO_COMPARE = 2

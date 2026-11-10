@@ -15,14 +15,9 @@ from jigane.pull_request_context.background import (
     PastCommit,
     PastPullRequest,
 )
-from jigane.reviews.lifecycle import (
-    RangeRefs,
-    ReviewError,
-    create_range_review,
-    default_range_name,
-    load_review,
-    split_range,
-)
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import ReviewError, create_range_review, default_range_name
+from jigane.reviews.range_head import RangeRefs, split_range
 
 
 def _history_repo(tmp_path: Path, *, extra_plain_commits: int = 0) -> Path:

@@ -1,19 +1,23 @@
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from jigane.git.revision import CommitSha
 from jigane.pull_request_context import fetching as pull_request
 from jigane.reviews import lifecycle as review_module
-from jigane.reviews.lifecycle import (
-    STAGING_PREFIX,
-    ReviewError,
-    create_feature_review,
-    create_range_review,
-    list_reviews,
-)
+from jigane.reviews.catalog import list_reviews
+from jigane.reviews.lifecycle import ReviewError, create_feature_review, create_range_review
+from jigane.storage import review_creation as creation_module
 from jigane.storage.review_error import ReviewExistsError
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.store import (
+    STAGING_PREFIX,
+    CheckedReviewId,
+    ReviewId,
+    ReviewKind,
+    check_new_review_id,
+)
 
 
 @pytest.fixture
@@ -46,7 +50,7 @@ def test_failure_while_extracting_second_tree_leaves_nothing(
     original = pull_request.extract_tree
     calls: list[Path] = []
 
-    def extract_then_fail(source_dir: Path, commit: str, destination: Path) -> None:
+    def extract_then_fail(source_dir: Path, commit: CommitSha, destination: Path) -> None:
         calls.append(destination)
         if len(calls) == 2:
             raise RuntimeError("途中で失敗")
@@ -83,7 +87,7 @@ def test_success_puts_everything_in_place_and_stores_final_paths(
 
 
 def test_residue_without_review_file_is_replaced(repo: Path) -> None:
-    residue = ReviewId("octo", "hello", "mine", ReviewKind.RANGE).directory()
+    residue = check_new_review_id(ReviewId("octo", "hello", "mine", ReviewKind.RANGE)).directory()
     (residue / "trees/base").mkdir(parents=True)
     (residue / "trees/base/stale.py").write_text("stale\n", encoding="utf-8")
     (residue / "changes.diff").write_text("stale\n", encoding="utf-8")
@@ -104,10 +108,10 @@ def test_existing_review_is_kept_and_rejected(repo: Path, tmp_path: Path) -> Non
 def test_create_lost_to_a_concurrent_create_keeps_the_winner(
     repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = review_module._install_staging
+    original = creation_module._install_staging
     winner: list[Path] = []
 
-    def install_after_winner(staging: Path, final: Path, review_id: ReviewId) -> None:
+    def install_after_winner(staging: Path, final: Path, review_id: CheckedReviewId) -> None:
         if not winner:
             # 先に同じ名前の作成が改名を済ませた状況
             winner.append(final)
@@ -115,7 +119,7 @@ def test_create_lost_to_a_concurrent_create_keeps_the_winner(
             (final / "review.json").write_text("winner", encoding="utf-8")
         original(staging, final, review_id)
 
-    monkeypatch.setattr(review_module, "_install_staging", install_after_winner)
+    monkeypatch.setattr(creation_module, "_install_staging", install_after_winner)
     with pytest.raises(ReviewError, match="既にあります"):
         create_range_review(repo, "main..feature", "mine")
     assert (winner[0] / "review.json").read_text(encoding="utf-8") == "winner"
@@ -125,30 +129,37 @@ def test_create_lost_to_a_concurrent_create_keeps_the_winner(
 def test_staging_directory_is_not_listed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     create_range_review(repo, "main..feature", "mine")
     seen: list[list[str]] = []
-    original = review_module._install_staging
+    original = creation_module._install_staging
 
-    def list_while_staged(staging: Path, final: Path, review_id: ReviewId) -> None:
+    def list_while_staged(staging: Path, final: Path, review_id: CheckedReviewId) -> None:
         assert staging.name.startswith(STAGING_PREFIX)
         assert (staging / "review.json").is_file()
         seen.append([str(review.id) for review in list_reviews()])
         original(staging, final, review_id)
 
-    monkeypatch.setattr(review_module, "_install_staging", list_while_staged)
+    monkeypatch.setattr(creation_module, "_install_staging", list_while_staged)
     create_feature_review(repo, ["edit.py"], "feat")
     assert seen == [["octo/hello@mine"]]
 
 
-def test_removal_refuses_paths_outside_the_review_directory(tmp_path: Path) -> None:
-    review_id = ReviewId("octo", "hello", "mine", ReviewKind.RANGE)
-    home = tmp_path / "home"
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    sibling = home / "octo" / "hello" / "@other"
-    sibling.mkdir(parents=True)
-    for path, staging in ((home, False), (outside, False), (sibling, False), (sibling, True)):
-        with pytest.raises(ReviewError):
-            review_module._remove_directory_in_home(path, review_id, staging=staging)
-        assert path.is_dir()
+@pytest.mark.parametrize(
+    ("relative_path", "remover"),
+    [
+        ("home", creation_module._remove_leftover_directory),
+        ("outside", creation_module._remove_leftover_directory),
+        ("home/octo/hello/@other", creation_module._remove_leftover_directory),
+        ("home/octo/hello/@other", creation_module._remove_staging_directory),
+    ],
+)
+def test_removal_refuses_paths_outside_the_review_directory(
+    tmp_path: Path, relative_path: str, remover: Callable[[Path, CheckedReviewId], None]
+) -> None:
+    review_id = check_new_review_id(ReviewId("octo", "hello", "mine", ReviewKind.RANGE))
+    path = tmp_path / relative_path
+    path.mkdir(parents=True)
+    with pytest.raises(ReviewError):
+        remover(path, review_id)
+    assert path.is_dir()
 
 
 def test_range_review_over_existing_raises_review_exists_error(repo: Path) -> None:
@@ -162,25 +173,25 @@ def test_range_review_over_existing_raises_review_exists_error(repo: Path) -> No
 def test_range_create_lost_to_a_concurrent_create_raises_review_exists_error(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = review_module._install_staging
+    original = creation_module._install_staging
 
-    def install_after_winner(staging: Path, final: Path, review_id: ReviewId) -> None:
+    def install_after_winner(staging: Path, final: Path, review_id: CheckedReviewId) -> None:
         final.mkdir()
         (final / "review.json").write_text("winner", encoding="utf-8")
         original(staging, final, review_id)
 
-    monkeypatch.setattr(review_module, "_install_staging", install_after_winner)
+    monkeypatch.setattr(creation_module, "_install_staging", install_after_winner)
     with pytest.raises(ReviewExistsError) as raised:
         create_range_review(repo, "main..feature", "mine")
     assert str(raised.value.review_id) == "octo/hello@mine"
 
 
 def test_pull_request_install_over_existing_raises_review_exists_error(tmp_path: Path) -> None:
-    review_id = ReviewId("octo", "hello", "7", ReviewKind.PULL_REQUEST)
+    review_id = check_new_review_id(ReviewId("octo", "hello", "7", ReviewKind.PULL_REQUEST))
     final = tmp_path / "final"
     final.mkdir()
     (final / "review.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ReviewExistsError) as raised:
-        review_module._install_staging(tmp_path / "staging", final, review_id)
+        creation_module._install_staging(tmp_path / "staging", final, review_id)
     assert raised.value.review_id == review_id
     assert "作者の修正は refresh で取り込んでください" in str(raised.value)

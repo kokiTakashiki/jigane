@@ -1,15 +1,10 @@
-import errno
 import os
 import re
 import sys
-import threading
-import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
-from enum import StrEnum
+from dataclasses import dataclass, field, fields
+from enum import Enum, StrEnum
 from pathlib import Path
-from typing import assert_never
+from typing import NamedTuple, assert_never
 
 # GitHub の owner と repo に使える文字（英数字、-、_、.）に限る。先頭は . と - を除く。
 # `.` と `..` だけの部分や `.` で始まる部分がデータの置き場の外を指すのを防ぐ
@@ -54,6 +49,10 @@ def ensure_data_home() -> Path:
     # Windows の chmod は読み取り専用の印にしか効かず、0o700 を渡しても害はない
     home.chmod(0o700)
     return home
+
+
+class ReviewError(Exception):
+    """レビューの読み書きで、利用者へそのまま伝える失敗。"""
 
 
 class ReviewKind(StrEnum):
@@ -179,6 +178,52 @@ class ReviewKind(StrEnum):
         raise ValueError(f"レビューの識別子の区切りが不正です: {separator!r}")
 
 
+# 作成の途中の置き場の名前の頭。本物のレビューの名前は先頭が英数字か _ なので重ならない
+STAGING_PREFIX = ".creating-"
+# 作成の請求のロックのファイルを置く、置き場の根の直下のディレクトリ名
+CLAIMS_DIRECTORY = ".claims"
+REVIEW_FILE = "review.json"
+
+
+def fold_name(name: str) -> str:
+    """大文字と小文字を畳んだ、名前を比べるための鍵。重なりの判定と請求の名前はこの鍵で揃える。"""
+    return name.casefold()
+
+
+class _SpellingTwin(NamedTuple):
+    name: str
+    existing: str
+    parent: Path
+
+
+def _folded_twin(parent: Path, name: str) -> str | None:
+    """parent の下に、name と大文字と小文字だけが違う名前があればその名前を返す。
+
+    綴りが完全に一致する名前があれば None。大文字と小文字を区別しないファイルシステムでは
+    二つの綴りが同じ場所を指すので、実在の確認は存在検査でなく一覧の名前の比較で行う。
+    """
+    try:
+        entries = [entry.name for entry in parent.iterdir()]
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if name in entries:
+        return None
+    folded = fold_name(name)
+    for entry in entries:
+        if fold_name(entry) == folded:
+            return entry
+    return None
+
+
+def _spelling_twin(directory: Path) -> _SpellingTwin | None:
+    """三つの部分のうち、綴り違いの既存を持つ最初の (名前, 既存の名前, 親)。"""
+    for part in (directory.parent.parent, directory.parent, directory):
+        twin = _folded_twin(part.parent, part.name)
+        if twin is not None:
+            return _SpellingTwin(part.name, twin, part.parent)
+    return None
+
+
 def check_new_key(kind: ReviewKind, key: str) -> None:
     """新しく作るレビューのキーの検査。作るときにだけ掛け、保存済みの識別子の解釈には掛けない。
 
@@ -221,13 +266,25 @@ def _kind_of(text: str, separator: str, key: str) -> ReviewKind:
     return kind
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ReviewId:
     owner: str
     repo: str
     # PR は番号、範囲とファイルのレビューと設計書は名前。ディレクトリ名として同じ位置に入る
     key: str
     kind: ReviewKind
+
+    def _identity(self) -> tuple[str, str, str, ReviewKind]:
+        return (self.owner, self.repo, self.key, self.kind)
+
+    def __eq__(self, other: object) -> bool:
+        """比べの規則はここだけに置く。検査済みの子（CheckedReviewId）も同じ規則で比べる。"""
+        if isinstance(other, ReviewId):
+            return self._identity() == other._identity()
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._identity())
 
     def __post_init__(self) -> None:
         for label, part in (("owner", self.owner), ("repo", self.repo)):
@@ -256,134 +313,146 @@ class ReviewId:
     def __str__(self) -> str:
         return f"{self.owner}/{self.repo}{self.kind.separator}{self.key}"
 
-    def directory(self) -> Path:
-        home = data_home()
-        path = home / self.owner / self.repo / f"{self.kind.directory_prefix}{self.key}"
-        # 各部分の検査を通っていても、シンボリックリンクで外へ出る場合を拒む二重の守り
-        if not path.resolve().is_relative_to(home.resolve()):
-            raise ValueError(f"レビューの置き場がデータの場所の外にあります: {path}")
-        return path
+
+def _review_path(review_id: ReviewId) -> Path:
+    """識別子が指す保存先。値からの計算だけで、ファイルシステムは引かない。"""
+    home = data_home()
+    return (
+        home
+        / review_id.owner
+        / review_id.repo
+        / f"{review_id.kind.directory_prefix}{review_id.key}"
+    )
 
 
-LOCK_FILE = ".lock"
-# ロックを握れるまで待つ上限。保存の一続きは LLM を呼ばず短いので、これを越えて握られているなら
-# 握り続けている側の異常と見て待つのをやめる
-LOCK_TIMEOUT_SECONDS = 30.0
-LOCK_POLL_SECONDS = 0.05
+def _reject_outside_home(path: Path) -> None:
+    """各部分の検査を通っていても、シンボリックリンクで外へ出る場合を拒む二重の守り。
 
-if sys.platform == "win32":
-    import msvcrt
-else:
-    import fcntl
-
-
-class LockTimeoutError(Exception):
-    pass
-
-
-def _try_lock(descriptor: int) -> bool:
-    """OS のファイルロックを待たずに取る。取れなければ False。"""
-    if sys.platform == "win32":
-        # msvcrt.locking は現在のファイルの位置から nbytes の範囲を錠にする。
-        # 位置 0 から 1 バイトを使う。
-        # ファイルの終わりを越える範囲も錠にできるので、中身が空のままでよい
-        try:
-            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-    else:
-        # fcntl は win32 では import されないので、この腕でだけ使う
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            if error.errno in (errno.EACCES, errno.EAGAIN):
-                return False
-            raise
-    return True
-
-
-def _unlock(descriptor: int) -> None:
-    if sys.platform == "win32":
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-    else:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-
-
-@contextmanager
-def review_lock(
-    directory: Path,
-    *,
-    timeout: float = LOCK_TIMEOUT_SECONDS,
-    poll: float = LOCK_POLL_SECONDS,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> Iterator[None]:
-    """レビューのディレクトリの状態のファイルを読み、直し、保存する一続きを排他にする。
-
-    ロックは OS のファイルロックで取る。持ち主のプロセスが落ちれば OS が外すので、
-    古いロックを見分けて奪う処理は要らない。
+    末尾は作成の競合で改名されうるので、親を解決し、末尾はリンクのときだけ解決する。
+    Windows のジャンクションは is_symlink が偽を返すので、リンクとして別に見る
     """
-    lock_path = directory / LOCK_FILE
-    # ロックのファイルは解放しても消さない。消すと、消す前に開いていた待ち手が消えた後の
-    # inode を握り、新しく作られたファイルを握る別の持ち主と同時に臨界区間に入る
-    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    is_link = path.is_symlink() or path.is_junction()
+    resolved = path.resolve() if is_link else path.parent.resolve() / path.name
+    if not resolved.is_relative_to(data_home().resolve()):
+        raise ValueError(f"レビューの置き場がデータの場所の外にあります: {path}")
+
+
+class ReviewExistsError(ReviewError):
+    """作ろうとしたレビューの識別子が、既にあるレビューと重なった。
+
+    呼ぶ側は誤りとして止めず、`review_id` のレビューを開ける。
+    ReviewError と同じモジュールに置くのは、保存側の作成の操作がこれを上げるため。
+    文面は識別子の種類から作る。detail は理由の補足で、あれば文面の後ろに付ける。
+    """
+
+    def __init__(self, review_id: ReviewId, *, detail: str = "") -> None:
+        super().__init__(f"{_existing_review_message(review_id)}{detail}")
+        self.review_id = review_id
+
+
+def _existing_review_message(review_id: ReviewId) -> str:
+    match review_id.kind:
+        case ReviewKind.PULL_REQUEST:
+            return (
+                f"レビューが既にあります: {review_id}。作者の修正は refresh で取り込んでください"
+            )
+        case ReviewKind.RANGE:
+            return (
+                f"レビューが既にあります: {review_id}。作り直すには refresh してください。"
+                "別のレビューを残すなら --name で別の名前を付けてください"
+            )
+        case ReviewKind.FEATURE | ReviewKind.DESIGN_DOC:
+            return f"レビューが既にあります: {review_id}"
+        case _:
+            assert_never(review_id.kind)
+
+
+@dataclass(frozen=True, eq=False)
+class CheckedReviewId(ReviewId):
+    """綴りの検査を通った識別子。作れるのは検査の関数だけで、直接の生成は TypeError になる。
+
+    保証するのは、保存先の owner、repo、ディレクトリ名に、大文字と小文字だけが違う既存の名前が
+    無いこと。保存先が存在することは保証しない（作成前の識別子も同じ保証で発行する）。
+    比べの規則は ReviewId のものを使い、この型は検査の印だけを足す。
+    保存先がデータの場所の外へ逸脱しないことは発行の時点で確かめ、発行から使うまでの間に
+    差し替えられたリンクは拒まない（データの場所は利用者のホームの下で、差し替えられる者は
+    レビューの中身そのものを書き換えられる）。消す操作だけは、壊す直前に検査し直す。
+    既存のレビューを読む入口の関数は、生の ReviewId でなくこの型を受ける。
+    """
+
+    # 検査で確かめた保存先。比べと hash には入れない
+    _directory: Path = field(init=False, repr=False, compare=False, hash=False)
+
+    def __post_init__(self) -> None:
+        raise TypeError("CheckedReviewId は check_review_id か check_new_review_id で作ります")
+
+    def directory(self) -> Path:
+        """検査で確かめた保存先。ファイルシステムは引かない。"""
+        return self._directory
+
+
+class _SpellingUse(Enum):
+    OPEN = "open"
+    CREATE = "create"
+
+
+def _check_spelling(path: Path, use: _SpellingUse) -> None:
+    """保存先の綴りだけを見る。読む前と作成前の違いは、拒むときの文面だけ。"""
+    twin = _spelling_twin(path)
+    if twin is not None:
+        match use:
+            case _SpellingUse.OPEN:
+                raise ReviewError(
+                    f"保存先 {twin.name!r} は開きません。"
+                    f"大文字と小文字だけが違う保存先 {twin.existing!r} があります"
+                    f"（{twin.parent}）。保存した綴りのとおりに指定してください"
+                )
+            case _SpellingUse.CREATE:
+                raise ReviewError(
+                    f"保存先 {twin.name!r} は、大文字と小文字だけが違う既存の保存先 "
+                    f"{twin.existing!r} と重なるため作れません（{twin.parent}）。"
+                    "別の名前を付けてください"
+                )
+            case _:
+                assert_never(use)
+
+
+def _issue_checked(review_id: ReviewId, use: _SpellingUse) -> CheckedReviewId:
+    """検査済みの識別子を発行する。外への逸脱を綴りより先に検査する。"""
+    path = _review_path(review_id)
+    _reject_outside_home(path)
+    _check_spelling(path, use)
+    issued = object.__new__(CheckedReviewId)
+    for spec in fields(ReviewId):
+        object.__setattr__(issued, spec.name, getattr(review_id, spec.name))
+    object.__setattr__(issued, "_directory", path)
+    return issued
+
+
+def check_review_id(review_id: ReviewId) -> CheckedReviewId:
+    """既存のレビューを開く前の検査。綴り違いの既存があれば ReviewError。"""
+    return _issue_checked(review_id, _SpellingUse.OPEN)
+
+
+def check_new_review_id(review_id: ReviewId) -> CheckedReviewId:
+    """作成前の検査。綴り違いの既存と重なれば ReviewError。"""
+    return _issue_checked(review_id, _SpellingUse.CREATE)
+
+
+def open_review_directory(review_id: ReviewId) -> Path:
+    """既存のレビューの保存先。綴り違いの既存があれば開かずに理由を示す。"""
+    return check_review_id(review_id).directory()
+
+
+def new_review_id(owner: str, repo: str, name: str, kind: ReviewKind) -> CheckedReviewId:
+    """新しい識別子を、名前の規則、綴りの重なり、既存の有無の順に確かめて作る。"""
     try:
-        deadline = clock() + timeout
-        while not _try_lock(descriptor):
-            if clock() >= deadline:
-                raise LockTimeoutError(f"レビューのロックを握れません: {lock_path}")
-            sleep(poll)
-        try:
-            yield
-        finally:
-            _unlock(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-# Windows で置き換え先を読みの手が開いている間は、os.replace が WinError 5 で落ちる。
-# 読みの手は短く閉じるので、間隔を置いて試し直す。待ちの和は COUNT * SECONDS で 2 秒
-REPLACE_RETRY_COUNT = 40
-REPLACE_RETRY_SECONDS = 0.05
-WINDOWS_ACCESS_DENIED = 5
-
-
-class StoredFileInUseError(OSError):
-    """読みの手が開いているため、保存物を置き換えられなかった。"""
-
-
-def _is_access_denied(error: PermissionError) -> bool:
-    """Windows で、置き換え先が開かれているときの WinError 5 か。"""
-    if sys.platform == "win32":
-        return error.winerror == WINDOWS_ACCESS_DENIED
-    # POSIX の rename は開いているファイルを置き換えられるので、権限の誤りは試し直さない
-    return False
-
-
-def _replace_retrying(temporary: Path, path: Path) -> None:
-    for attempt in range(REPLACE_RETRY_COUNT + 1):
-        try:
-            temporary.replace(path)
-        except PermissionError as error:
-            if not _is_access_denied(error):
-                raise
-            if attempt == REPLACE_RETRY_COUNT:
-                raise StoredFileInUseError(
-                    f"保存物を置き換えられません: {path}。"
-                    "読む側（show やエディタなど）が開いたままかもしれません"
-                ) from error
-            time.sleep(REPLACE_RETRY_SECONDS)
-        else:
-            return
-
-
-def write_text_atomic(path: Path, text: str) -> None:
-    """一時のファイルに書いてから置き換える。途中で落ちても壊れたファイルを残さない。"""
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        temporary.write_text(text, encoding="utf-8")
-        _replace_retrying(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+        check_new_key(kind, name)
+        review_id = ReviewId(owner, repo, name, kind)
+        ReviewId.parse(str(review_id))
+    except ValueError as error:
+        raise ReviewError(str(error)) from error
+    checked = check_new_review_id(review_id)
+    if (checked.directory() / REVIEW_FILE).is_file():
+        raise ReviewExistsError(review_id)
+    return checked

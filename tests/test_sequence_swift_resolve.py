@@ -5,9 +5,11 @@ from review_fakes import changed_segment, region_of
 from jigane.languages.base import CallSite, SequenceAdapter
 from jigane.languages.swift import SwiftAdapter
 from jigane.preconditions.required import required
-from jigane.sequence.diagram import build_diagrams, to_mermaid
+from jigane.sequence.diagram import DiagramInputs
+from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.index import Index, Member, TypeKey, build_index
 from jigane.sequence.resolve import External, Extraction, Resolved, Unresolved, extract_calls
+from jigane.sequence.review_diagrams import build_diagrams
 from jigane.sequence.roots import changed_members, select_roots
 
 PATH = "Run.swift"
@@ -117,7 +119,7 @@ def test_diagram_is_generated(tmp_path: Path) -> None:
     changed = changed_members(index, segments, adapter, include_tests=False)
     selection = select_roots(index, changed, adapter)
     regions = [region_of({"id": "J1", "path": PATH, "qualified_name": "Runner.run"})]
-    model = build_diagrams(index, selection, regions)
+    model = build_diagrams(DiagramInputs(index, selection, regions))
     text = to_mermaid(model["diagrams"][0])
     assert "Runner" in text
     assert "Engine" in text

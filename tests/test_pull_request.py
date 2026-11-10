@@ -9,6 +9,7 @@ from pr_support import commit_all, git
 
 from jigane.git import process
 from jigane.git.process import CommandError
+from jigane.git.revision import CommitSha, parse_commit_sha
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context import fetching as pull_request
 from jigane.pull_request_context.fetching import (
@@ -19,6 +20,10 @@ from jigane.pull_request_context.fetching import (
     fetch_pull_request,
     parse_pull_request_url,
 )
+
+
+def _sha(text: str) -> CommitSha:
+    return parse_commit_sha("x", text)
 
 
 @pytest.fixture
@@ -68,7 +73,7 @@ def test_changed_file_pairs_and_extract(repo: Path, tmp_path: Path) -> None:
     (repo / "old name.txt").rename(repo / "新しい名前.txt")
     head = commit_all(repo, "head")
 
-    pairs = changed_file_pairs(repo, base, head)
+    pairs = changed_file_pairs(repo, _sha(base), _sha(head))
 
     assert sorted(pairs, key=repr) == sorted(
         [
@@ -83,7 +88,7 @@ def test_changed_file_pairs_and_extract(repo: Path, tmp_path: Path) -> None:
     destination = tmp_path / "out"
     destination.mkdir()
     (destination / "stale.txt").write_text("stale", encoding="utf-8")
-    extract_tree(repo, base, destination)
+    extract_tree(repo, _sha(base), destination)
     assert not (destination / "stale.txt").exists()
     assert (destination / "edit.txt").read_text(encoding="utf-8") == "before\n"
     assert (destination / "gone.txt").exists()
@@ -95,7 +100,7 @@ def test_type_change(repo: Path) -> None:
     (repo / "link").unlink()
     (repo / "link").symlink_to("elsewhere")
     head = commit_all(repo, "head")
-    assert changed_file_pairs(repo, base, head) == [FilePair("link", "link")]
+    assert changed_file_pairs(repo, _sha(base), _sha(head)) == [FilePair("link", "link")]
 
 
 def test_merge_base_ignores_base_branch_progress(repo: Path) -> None:
@@ -108,11 +113,14 @@ def test_merge_base_ignores_base_branch_progress(repo: Path) -> None:
     (repo / "main.txt").write_text("m\n", encoding="utf-8")
     base = commit_all(repo, "main progress")
 
-    metadata = PullRequestMetadata("o", "r", 1, "u", "t", "b", base, head, "dev")
+    metadata = PullRequestMetadata(
+        "o", "r", 1, "u", "t", "b", parse_commit_sha("x", base), parse_commit_sha("x", head), "dev"
+    )
     # origin への fetch を、検査用のリポジトリ自身への fetch に置き換える
     git(repo, "remote", "add", "origin", str(repo))
-    assert fetch_pull_request(repo, metadata) == fork_point
-    assert changed_file_pairs(repo, fork_point, head) == [FilePair(None, "feature.txt")]
+    assert str(fetch_pull_request(repo, metadata)) == fork_point
+    pairs = changed_file_pairs(repo, _sha(fork_point), _sha(head))
+    assert pairs == [FilePair(None, "feature.txt")]
 
 
 def test_extract_rejects_escaping_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -128,7 +136,7 @@ def test_extract_rejects_escaping_paths(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
     destination = tmp_path / "out"
     with pytest.raises(tarfile.FilterError):
-        extract_tree(tmp_path, "HEAD", destination)
+        extract_tree(tmp_path, parse_commit_sha("x", "a" * 40), destination)
     assert not (tmp_path / "escaped.txt").exists()
 
 
@@ -144,7 +152,7 @@ def test_fetch_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
                 "title": "表題",
                 "body": "本文",
                 "baseRefOid": "b" * 40,
-                "headRefOid": "h" * 40,
+                "headRefOid": "c" * 40,
                 "author": {"login": "dev"},
             }
         )
@@ -152,8 +160,8 @@ def test_fetch_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
     metadata = fetch_metadata("o", "r", 5)
     assert calls[0][:6] == ["gh", "pr", "view", "5", "-R", "o/r"]
-    assert metadata.base_sha == "b" * 40
-    assert metadata.head_sha == "h" * 40
+    assert str(metadata.base_sha) == "b" * 40
+    assert str(metadata.head_sha) == "c" * 40
     assert metadata.title == "表題"
     assert metadata.author == "dev"
     # closingIssuesReferences は要求しない（背景から issue を外した）

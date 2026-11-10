@@ -9,7 +9,8 @@ from pr_support import commit_all
 
 from jigane import commands
 from jigane.design.review_documents import create_design_doc_review
-from jigane.reviews.lifecycle import load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
 from jigane.storage.store import ReviewId, ReviewKind
 
 IDENTIFIER = "octo/hello+shop"

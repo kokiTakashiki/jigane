@@ -7,6 +7,7 @@ import sys
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, overload
 
@@ -215,6 +216,14 @@ def _single_viewpoint(invocation: claude.Invocation) -> str | None:
     return enums[0][0] if enums else None
 
 
+class MacroFailure(StrEnum):
+    """MacroFake がどの起動を失敗させるか。"""
+
+    EVERYTHING = "everything"
+    DIAGRAM = "diagram"
+    PRINCIPLES = "principles"
+
+
 class MacroFake:
     """図の形の起動（図の起動と原則ごとの起動）を受ける偽の起動関数。
 
@@ -225,13 +234,11 @@ class MacroFake:
         self,
         findings: list[dict[str, Any]],
         *,
-        fail_discovery: bool = False,
         output: dict[str, Any] | None = None,
-        fail_principles: bool = False,
+        fails: MacroFailure | None = None,
     ) -> None:
         self.findings = findings
-        self.fail_principles = fail_principles
-        self.fail_discovery = fail_discovery
+        self.fails = fails
         self.output = output
         self.calls: list[claude.Invocation] = []
 
@@ -251,11 +258,11 @@ class MacroFake:
     def __call__(self, invocation: claude.Invocation) -> claude.InvocationResult:
         self.calls.append(invocation)
         only = _single_viewpoint(invocation)
-        if only is not None and self.fail_principles:
+        if self.fails is MacroFailure.EVERYTHING:
             raise claude.ClaudeInvocationError("boom", RECORD)
-        if self.fail_discovery and only is None:
+        if self.fails is MacroFailure.PRINCIPLES and only is not None:
             raise claude.ClaudeInvocationError("boom", RECORD)
-        if self.fail_discovery:
+        if self.fails is MacroFailure.DIAGRAM and only is None:
             raise claude.ClaudeInvocationError("boom", RECORD)
         if self.output is not None and only is None:
             return claude.InvocationResult(self.output, RECORD)

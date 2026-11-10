@@ -230,4 +230,4 @@
 
 - read_review_at（review.py:1633）は review.json と map.json を必須とし、background.json、gates.json を load_background、load_gates で読む（approval.json は承認の制約を外してから読まない）。各サンプルにはこの 5 つを添えた（元に無いファイルは添えていない）。
 - regions.json の鍵（path::qualified::kind）と map.json の regions[].key は同じ置き換えで揃えた。findings の evidence.path と map の path、pairs.json の要素、gates の鍵のパス部も同一の対応表で揃えた。ただし対象ファイル以外（たとえば findings.json のサンプルに添えない regions.json）は含まれず、突き合わせの検査には元のレビューが持つ regions.json などを別途添える必要がある。
-- review.json の diff_source、pull_request、local_range、targets、design_doc の組は read_stored_sources と _origin_from_stored が整合を検査するため、構造（null か否か）は元のまま残した。
+- review.json の diff_source、pull_request、local_range、targets、design_doc の組は read_stored_sources と origin_from_stored が整合を検査するため、構造（null か否か）は元のまま残した。

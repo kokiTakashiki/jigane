@@ -6,15 +6,8 @@ import json
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.views.review import origin_lines, total_lines
-from jigane.reviews.lifecycle import (
-    ARCHIVED_EXCLUDE,
-    ARCHIVED_ONLY,
-    DesignDocOrigin,
-    PullRequestOrigin,
-    RangeOrigin,
-    is_archived,
-    list_reviews,
-)
+from jigane.reviews.catalog import ARCHIVED_EXCLUDE, ARCHIVED_ONLY, is_archived, list_reviews
+from jigane.reviews.lifecycle import DesignDocOrigin, PullRequestOrigin, RangeOrigin
 from jigane.text.terminal import sanitize_text
 
 

@@ -13,18 +13,19 @@ from jigane.judgment_map.classification import build_judgment_map
 from jigane.judgment_map.configuration import Config
 from jigane.judgment_map.map_kind import MAP_FILE, dump_map
 from jigane.reviews import lifecycle as review_module
+from jigane.reviews import review_formats
+from jigane.reviews.catalog import load_review, read_review_at
 from jigane.reviews.lifecycle import (
     FeatureOrigin,
     PullRequestInfo,
     PullRequestOrigin,
     RangeOrigin,
     ReviewError,
-    load_review,
     read_stored_sources,
 )
 from jigane.skills import macro, sharded, shards
 from jigane.skills.assembly import AssemblyInput
-from jigane.storage.store import ReviewKind
+from jigane.storage.store import REVIEW_FILE, ReviewKind
 
 INFO = PullRequestInfo("https://github.com/octo/hello/pull/7", 7, "支払い")
 
@@ -32,7 +33,7 @@ INFO = PullRequestInfo("https://github.com/octo/hello/pull/7", 7, "支払い")
 def _round_trip(review: review_module.Review) -> review_module.Review:
     directory = review.id.directory()
     directory.mkdir(parents=True)
-    review_module._write_review_file(directory, review)
+    review_module.write_review_file(directory, review)
     (directory / MAP_FILE).write_text(json.dumps(dump_map(review.map_kind)), encoding="utf-8")
     return load_review(review.id)
 
@@ -83,7 +84,7 @@ def test_legacy_pull_request_value_is_split_by_the_upgrade() -> None:
         "warnings": [],
         "pull_request": legacy,
     }
-    upgraded = review_module._REVIEW_UPGRADES[1](raw)
+    upgraded = review_formats._REVIEW_UPGRADES[1](raw)
     source, info = read_stored_sources(upgraded["pull_request"], upgraded["diff_source"])
     assert source is not None
     assert source.base_tree == "/t"
@@ -141,7 +142,7 @@ def test_mode_is_derived_and_a_conflicting_stored_value_is_ignored(tmp_path: Pat
     ):
         assert original.mode == expected
         loaded = _round_trip(original)
-        meta_path = loaded.id.directory() / review_module.REVIEW_FILE
+        meta_path = loaded.id.directory() / REVIEW_FILE
         stored = json.loads(meta_path.read_text(encoding="utf-8"))
         assert "mode" not in stored
         # 版 3 の review.json は format が 3 で、導ける項目の mode を食い違う値で持つ
@@ -273,7 +274,7 @@ def test_shards_are_built_from_the_three_source_shapes(
     )
     directory = review.id.directory()
     directory.mkdir(parents=True)
-    (directory / review_module.PAIRS_FILE).write_text(
+    (directory / review_formats.PAIRS_FILE).write_text(
         json.dumps([["edit.py", "edit.py"]]), encoding="utf-8"
     )
     units = shards.build_units(review)
@@ -312,7 +313,12 @@ def test_stored_fields_keep_the_shape_of_each_origin(tmp_path: Path) -> None:
         tmp_path, ["a.py"], base_tree=tmp_path / "base", kind=ReviewKind.RANGE
     ).to_dict()
     assert range_review["pull_request"] is None
-    assert set(range_review["local_range"]) == {"range_text", "working_directory"}
+    assert set(range_review["local_range"]) == {
+        "range_text",
+        "working_directory",
+        "git_directory",
+        "head_tracking",
+    }
     assert range_review["diff_source"]["base_tree"] == str(tmp_path / "base")
 
 
@@ -326,12 +332,12 @@ def test_inconsistent_stored_fields_are_a_review_error(tmp_path: Path) -> None:
     )
     directory = tmp_path / "stored"
     directory.mkdir()
-    review_module._write_review_file(directory, review)
+    review_module.write_review_file(directory, review)
     (directory / MAP_FILE).write_text(json.dumps(dump_map(review.map_kind)), encoding="utf-8")
-    path = directory / review_module.REVIEW_FILE
+    path = directory / REVIEW_FILE
     meta = json.loads(path.read_text(encoding="utf-8"))
     meta["diff_source"] = None
     meta["pull_request"] = {**meta["pull_request"]}
     path.write_text(json.dumps(meta), encoding="utf-8")
     with pytest.raises(ReviewError):
-        review_module.read_review_at(directory)
+        read_review_at(directory)

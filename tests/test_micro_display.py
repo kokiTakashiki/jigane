@@ -7,7 +7,10 @@ from typing import Any
 import pytest
 from fakes import MicroFake, clear_policy, d_finding
 from review_fakes import stored_finding
-from test_triage import project, with_severity  # noqa: F401 pytest が fixture を名前で引くため import が要る
+from test_triage import (  # noqa: F401 pytest が fixture を名前で引くため import が要る
+    project,
+    with_severity,
+)
 
 from jigane.commands import main
 from jigane.commands.output import display_category_table

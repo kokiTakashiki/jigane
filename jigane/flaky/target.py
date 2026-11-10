@@ -7,6 +7,7 @@ from enum import Enum
 
 from tree_sitter import Node
 
+from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -49,10 +50,6 @@ class Shape:
     call_name: Callable[[Node], str | None]
     # 自分の型のメンバーを `self.x` や `Self.x` と書いた参照から、メンバーの名前を返す
     member_name: Callable[[Node], str | None] = lambda _node: None
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
 
 
 def _walk(node: Node) -> Iterator[Node]:
@@ -154,7 +151,7 @@ def resolve(node: Node, shape: Shape, depth: int = 0) -> Target:
     if node.type in shape.strings:
         return _scan(node, shape, bare_host_allowed=depth == 0)
     root = _root(node)
-    name = _text(node) if node.type in shape.identifiers else shape.member_name(node)
+    name = text_of(node) if node.type in shape.identifiers else shape.member_name(node)
     if name is not None:
         initializers = [value for n, value in shape.bindings(root) if n == name]
         return _combine([resolve(value, shape, depth + 1) for value in initializers])

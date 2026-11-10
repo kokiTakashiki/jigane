@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import RECORD_ROW, MacroFake, discovered, settings_for
+from fakes import RECORD_ROW, MacroFailure, MacroFake, discovered, settings_for
 from pr_support import commit_all
 
 from jigane.commands import main
@@ -14,8 +14,9 @@ from jigane.findings.records import triaged_dicts
 from jigane.groups.policy_runs import PolicyRole, PolicyShape, role_of
 from jigane.llm_runs import pricing
 from jigane.policy_materials.missing import MissingMaterial
-from jigane.reviews.lifecycle import Review, ReviewError, load_review
-from jigane.skills import macro, macro_principles_run
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import Review, ReviewError
+from jigane.skills import macro, macro_principles_run, policy_launch
 from jigane.skills.assembly import AssemblyInput
 
 DOCUMENT = "# 題\n\n## 1. 序論\n\n`Cart` を持つ。\n\n" + "長い段落。\n" * 400 + "末尾の一行。\n"
@@ -142,7 +143,7 @@ def test_estimate_uses_the_design_prompt(repo: Path, capsys: pytest.CaptureFixtu
     prompt = macro.macro_plan(AssemblyInput.load(review)).build_prompt()
     assert "### 設計書の全文" in prompt
     assert estimate["materials_bytes"] == len(prompt.encode("utf-8"))
-    assert estimate["discovery_input_tokens"] == pricing.estimate_input_tokens(
+    assert estimate["discovery_input_tokens"] == pricing.billed_input_tokens(
         len(prompt.encode("utf-8"))
     )
     assert estimate["planned_invocations"] == 1
@@ -207,3 +208,12 @@ def test_role_of_covers_every_shape() -> None:
     assert role_of(PolicyShape.SINGLE) == PolicyRole.SINGLE
     with pytest.raises(ValueError, match="廃止"):
         role_of(PolicyShape.FULL)
+
+
+def test_a_failed_design_launch_keeps_the_design_role_in_the_record(repo: Path) -> None:
+    review = create_design_doc_review(repo, DOCUMENT_PATH)
+    with pytest.raises(policy_launch.LaunchFailed):
+        _run(review, MacroFake([], fails=MacroFailure.DIAGRAM))
+    runs = json.loads((review.id.directory() / "runs.json").read_text("utf-8"))
+    (failure,) = runs["macro"]["launch_failures"]
+    assert failure["role"] == PolicyRole.DESIGN.value

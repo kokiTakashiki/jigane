@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand, build_git_command
+from jigane.git.revision import resolve_commit_sha
 
 # これを超える数のファイルを変えたコミットは、一括の整形や移動なので数えない
 MAX_FILES_PER_COMMIT = 30
@@ -43,20 +45,20 @@ class CoChange:
 def _history_records(git_dir: Path, revision: str) -> list[list[str]]:
     """revision から辿れるコミットを新しい順に、各コミットが触れたパスの並びで返す。"""
     output = process.run_command(
-        [
-            "git",
-            "-c",
-            "core.quotepath=off",
-            "log",
-            "--no-merges",
-            "-M",
-            "--name-status",
-            # 制御文字は引数に直接渡せないので、git に展開させる
-            "--format=%x1e",
-            revision,
-            # revision がファイル名と取り違えられないよう区切る
-            "--",
-        ],
+        build_git_command(
+            GitSubcommand.LOG,
+            global_options=["-c", "core.quotepath=off"],
+            options=[
+                "--no-merges",
+                "-M",
+                "--name-status",
+                # 制御文字は引数に直接渡せないので、git に展開させる
+                "--format=%x1e",
+            ],
+            revisions=[resolve_commit_sha(git_dir, revision)],
+            # 空のパスの並びでも、revision の後ろに区切りを置く
+            pathspecs=[],
+        ),
         cwd=git_dir,
     )
     return [

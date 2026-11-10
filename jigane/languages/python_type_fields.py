@@ -7,6 +7,7 @@
 import ast
 
 from jigane.languages.base import TypeFields
+from jigane.languages.python_ast import parse_python
 
 ENUM_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"})
 
@@ -33,13 +34,9 @@ def _field_names(cls: ast.ClassDef) -> tuple[str, ...]:
 
 def type_fields_of(text: str, path: str) -> list[TypeFields]:
     """ファイルのトップレベルの型を、文書順に返す。読めないファイルは空。"""
-    try:
-        module = ast.parse(text)
-    except (SyntaxError, RecursionError, MemoryError, ValueError):
-        # 構文として読めないファイルの型は、表に載せられない。
-        # 入れ子の深い式は RecursionError、巨大な入力は MemoryError、
-        # NUL 文字は ValueError で落ちる。
-        # parse の後は module.body の直下しか読まないので、ここで囲めば足りる
+    module = parse_python(text)
+    if module is None:
+        # parse の後は module.body の直下しか読まないので、parse の失敗だけを見れば足りる
         return []
     return [
         TypeFields(node.name, path, node.lineno, fields)

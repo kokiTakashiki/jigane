@@ -14,9 +14,10 @@ from jigane.judgment_map.map_kind import CodeMap
 from jigane.judgment_map.region_table import LineCounts, Region, RegionTable
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.python import PythonAdapter
-from jigane.sequence.diagram import build_diagrams, to_mermaid
+from jigane.sequence.diagram import DiagramInputs
+from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.index import Index, build_index
-from jigane.sequence.review_diagrams import build_model
+from jigane.sequence.review_diagrams import build_diagrams, build_model
 from jigane.sequence.roots import (
     UNREACHABLE_ENTRY_LABEL,
     RootSelection,
@@ -126,7 +127,7 @@ def test_entry_point_is_a_root_even_when_a_changed_function_calls_it(tmp_path: P
 
 
 def _model(index: Index, depth: int = 4, *, full: bool = False) -> dict[str, Any]:
-    return build_diagrams(index, _selection(index), _regions(), depth, full=full)
+    return build_diagrams(DiagramInputs(index, _selection(index), _regions(), depth, full=full))
 
 
 def _diagram(model: dict[str, Any]) -> dict[str, Any]:
@@ -184,7 +185,7 @@ def test_unreachable_regions_are_listed(index: Index) -> None:
 
 def test_mermaid_for_a_small_fixture(index: Index) -> None:
     selection = _selection(index, ["Service.Run", "Service.Helper"])
-    model = build_diagrams(index, selection, _regions())
+    model = build_diagrams(DiagramInputs(index, selection, _regions()))
     assert model["diagrams"][0]["root"] == "Service.Run"
     assert to_mermaid(model["diagrams"][0]) == (
         "sequenceDiagram\n"

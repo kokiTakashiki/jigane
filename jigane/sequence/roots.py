@@ -2,8 +2,6 @@
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Literal
 
 from jigane.figures.models import NoteText
 from jigane.judgment_map.classification import Segment
@@ -11,18 +9,11 @@ from jigane.languages.base import SequenceAdapter
 from jigane.languages.registry import is_test_path
 from jigane.sequence.index import Index, Member, TypeKey
 from jigane.sequence.resolve import Call, Extraction, Resolved, extract_calls
+from jigane.sequence.side import Side, TreeSide
 
 UNREACHABLE_ENTRY_LABEL = "呼び手を静的に見つけられない入口の候補"
 
 Key = tuple[str, int]
-
-
-class Side(StrEnum):
-    """図や変更の集合をどちらの木から取るか。値は CLI の --side の文字列と JSON の side に出る。"""
-
-    BEFORE = "before"
-    AFTER = "after"
-    BOTH = "both"
 
 
 class SequenceError(ValueError):
@@ -57,7 +48,7 @@ def changed_members(
     adapter: SequenceAdapter,
     *,
     include_tests: bool,
-    side: Literal[Side.BEFORE, Side.AFTER] = Side.AFTER,
+    side: TreeSide = Side.AFTER,
 ) -> dict[Key, Member]:
     """判断の地図の segment のうち、索引の木で本体を持つメソッドを索引のメンバへ写す。
 

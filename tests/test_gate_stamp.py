@@ -439,3 +439,22 @@ def test_gate_commands_name_tasks_defined_in_entrypoints(gate: gate_stamp.Gate, 
     guidance = gate_stamp.GATE_COMMANDS[gate]
     assert f"make {task}" in guidance
     assert f"just {task}" in guidance
+
+
+def test_ref_names_are_passed_after_end_of_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str], **_: object) -> str:
+        seen.append(args)
+        return "a" * 40
+
+    monkeypatch.setattr(gate_stamp, "run_command", fake_run)
+    evil = "--upload-pack=touch /tmp/x"
+    gate_stamp.peel_to_commit(evil)
+    gate_stamp.base_commit(gate_stamp.PushedRef(evil, evil))
+    gate_stamp.required_gate(gate_stamp.PushedRef(evil, evil))
+    assert seen
+    for args in seen:
+        values = [a for a in args if evil in a]
+        assert values
+        assert all(args.index("--end-of-options") < args.index(v) for v in values)

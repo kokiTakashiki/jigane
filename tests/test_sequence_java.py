@@ -19,7 +19,8 @@ from jigane.languages.base import (
 from jigane.languages.java import JavaAdapter
 from jigane.languages.registry import adapter_for
 from jigane.preconditions.required import required
-from jigane.sequence.diagram import build_diagrams, to_mermaid
+from jigane.sequence.diagram import DiagramInputs
+from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.index import Index, Member, TypeKey, build_index
 from jigane.sequence.resolve import (
     External,
@@ -29,6 +30,7 @@ from jigane.sequence.resolve import (
     Unresolved,
     extract_calls,
 )
+from jigane.sequence.review_diagrams import build_diagrams
 from jigane.sequence.roots import changed_members, select_roots
 
 _SOURCE = """
@@ -166,10 +168,10 @@ def test_static_call_on_a_type_name(index: Index) -> None:
     assert resolution.member.qualified_name == "Util.help"
 
 
-def test_unknown_capitalised_type_is_external_and_unknown_variable_is_unresolved(
+def test_unknown_capitalised_identifier_and_unknown_variable_are_unresolved(
     index: Index,
 ) -> None:
-    assert _only(index, "external") == External("Objects")
+    assert _only(index, "external") == Unresolved("Objects")
     assert _only(index, "unresolved") == Unresolved("thing")
 
 
@@ -355,7 +357,7 @@ def test_mermaid_for_a_change_across_two_classes(tmp_path: Path) -> None:
     changed = changed_members(index, segments, JavaAdapter(), include_tests=False)
     selection = select_roots(index, changed, JavaAdapter())
     regions = [region_of({"id": "J1", "path": "Repo.java", "qualified_name": "Repo.save"})]
-    model = build_diagrams(index, selection, regions)
+    model = build_diagrams(DiagramInputs(index, selection, regions))
     assert [d["root"] for d in model["diagrams"]] == ["Service.run"]
     assert to_mermaid(model["diagrams"][0]) == (
         "sequenceDiagram\n"
@@ -446,7 +448,7 @@ def test_anonymous_class_participant_has_no_angle_brackets(anonymous_index: Inde
     segments = [_anonymous_segment("Adapters.URL.<anonymous1>.read", 4)]
     changed = changed_members(anonymous_index, segments, JavaAdapter(), include_tests=False)
     selection = select_roots(anonymous_index, changed, JavaAdapter())
-    model = build_diagrams(anonymous_index, selection, [])
+    model = build_diagrams(DiagramInputs(anonymous_index, selection, []))
     participants = model["diagrams"][0]["participants"]
     # 外部の型 Reader だけを呼ぶ入口なので、外部の参加者が続く
     assert [p["display"] for p in participants] == ["URL の無名クラス 1", "Reader"]

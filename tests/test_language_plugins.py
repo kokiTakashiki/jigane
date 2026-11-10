@@ -14,22 +14,16 @@ from language_plugin_support import (
 )
 
 from jigane.languages import registry
-from jigane.languages.plugins import (
-    ApprovedContent,
-    EnabledFileError,
-    EnabledLanguage,
-    FileDigest,
+from jigane.languages.approval import ApprovedContent, FileDigest, LegacyApproval, RecordError
+from jigane.languages.enabled import EnabledFileError, EnabledLanguage, load_enabled, save_enabled
+from jigane.languages.plugins import discover
+from jigane.languages.states import (
     LanguageNotEnabled,
     LanguageReady,
     LanguageUnavailable,
-    LegacyApproval,
     ReasonKind,
-    RecordError,
-    discover,
-    load_enabled,
-    save_enabled,
-    validate_plugin,
 )
+from jigane.languages.validation import validate_plugin
 
 
 def test_builtins_are_ready_without_entry_points() -> None:

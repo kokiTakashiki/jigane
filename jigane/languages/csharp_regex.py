@@ -4,8 +4,9 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.csharp_nodes import CALLABLE_BODIES, STRING_LITERALS
+from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
-from jigane.preconditions.required import required
 
 _DECLARATOR_CHILD_COUNT = 2  # 識別子と初期化子
 
@@ -37,10 +38,6 @@ _ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{1,4}|.)",
 
 class _NotConstantError(Exception):
     """文字列の定数に解けない式。"""
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
 
 
 _READ_PARENTS = frozenset(
@@ -91,14 +88,7 @@ def _is_read(identifier: Node) -> bool:
 
 
 _LOCALS = LocalRules(
-    scopes=frozenset(
-        {
-            "method_declaration",
-            "constructor_declaration",
-            "local_function_statement",
-            "accessor_declaration",
-        }
-    ),
+    scopes=CALLABLE_BODIES,
     identifier="identifier",
     declaration=_declaration,
     top_level=_body,
@@ -146,7 +136,7 @@ def _last_name(node: Node | None) -> str | None:
     if node is None:
         return None
     if node.type == "identifier":
-        return _text(node)
+        return text_of(node)
     if node.type == "qualified_name":
         return _last_name(node.children[-1])
     return None
@@ -172,7 +162,7 @@ def _static_pattern_argument(arguments: Node | None) -> Node | None:
         name = argument.child_by_field_name("name") or _first_child_of(argument, "name_colon")
         if name is None:
             positional.append(argument)
-        elif _text(name).removesuffix(":").strip() == "pattern":
+        elif text_of(name).removesuffix(":").strip() == "pattern":
             return argument
     return positional[1] if len(positional) > 1 else None
 
@@ -243,10 +233,10 @@ def _concatenation(node: Node, *, resolve: bool) -> str:
 
 def _string_constant(node: Node) -> str:
     if node.type == "string_literal":
-        return _ESCAPE.sub(_unescape, _text(node)[1:-1])
+        return _ESCAPE.sub(_unescape, text_of(node)[1:-1])
     if node.type == "verbatim_string_literal":
-        return _text(node)[2:-1].replace('""', '"')
-    return _raw(_text(node))
+        return text_of(node)[2:-1].replace('""', '"')
+    return _raw(text_of(node))
 
 
 def _traced_constant(identifier: Node) -> str:
@@ -264,7 +254,7 @@ def _constant(node: Node, *, resolve: bool = True) -> str:
         return _constant(node.named_children[0], resolve=resolve)
     if node.type == "binary_expression":
         return _concatenation(node, resolve=resolve)
-    if node.type in {"string_literal", "verbatim_string_literal", "raw_string_literal"}:
+    if node.type in STRING_LITERALS:
         return _string_constant(node)
     if node.type == "identifier" and resolve:
         return _traced_constant(node)

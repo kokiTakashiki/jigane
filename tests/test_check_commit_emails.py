@@ -127,3 +127,16 @@ def test_range_starting_with_dash_is_rejected(tmp_path: Path, arguments: list[st
         checker.main(["--root", str(repo), *(a.format(path=target) for a in arguments)])
     assert raised.value.code == 2
     assert not target.exists()
+
+
+def test_range_is_passed_after_end_of_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    checker = load_checker()
+    seen: list[list[str]] = []
+
+    def fake_run(args: list[str], **_: object) -> str:
+        seen.append(args)
+        return ""
+
+    monkeypatch.setattr(checker, "run_command", fake_run)
+    checker.find_offenders(Path(), "--output=x")
+    assert seen[0].index("--end-of-options") < seen[0].index("--output=x")

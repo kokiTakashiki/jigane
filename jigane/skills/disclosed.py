@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from jigane.findings.discard import DisclosedNitReason, ExtractedConcern, places_of
-from jigane.findings.records import StoredFinding
+from jigane.findings.records import KEY_NIT_REASON, StoredFinding
 from jigane.llm_runs.finding_model import KEY_DISCLOSED_AT
 from jigane.preconditions.integers import non_negative_int
 
@@ -28,7 +28,7 @@ def disclosed_as_nit(candidate: dict[str, Any]) -> dict[str, Any]:
     reason = DisclosedNitReason(
         claim, ExtractedConcern(claim), places_of(candidate[KEY_DISCLOSED_AT])
     )
-    return {**rest, "severity": "nit", "nit_reason": reason.to_json()}
+    return {**rest, "severity": "nit", KEY_NIT_REASON: reason.to_json()}
 
 
 @dataclass(frozen=True)

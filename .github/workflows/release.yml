@@ -102,6 +102,17 @@ jobs:
         with:
           ref: ${{ steps.tag.outputs.sha }}
           persist-credentials: false
+      # PyPI へ公開した後に止まると中途半端な公開になるので、GitHub のリリースの本文になるお知らせの有無は、build の前のここで確かめる。
+      # 確かめるのは API 経由でなく checkout した木なので、GH_TOKEN は渡さない。
+      - name: リリースのお知らせのファイルが在って空でないことを確かめる
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${TAG}.md"
+          if [ ! -s "$notes" ]; then
+            echo "::error::${notes} が無いか空である。GitHub のリリースの本文にするお知らせを、タグの前に入れる"
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.11.32"
@@ -223,5 +234,5 @@ jobs:
             --repo "$REPOSITORY" \
             --verify-tag \
             --title "$TAG" \
-            --notes "$TAG" \
+            --notes-file "docs/releases/${TAG}.md" \
             TERMS.ja.md TERMS.en.md PRIVACY.ja.md PRIVACY.en.md artifacts/sbom.cdx.json

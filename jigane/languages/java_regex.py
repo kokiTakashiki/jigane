@@ -6,8 +6,8 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
-from jigane.preconditions.required import required
 
 _PATTERN_METHODS = frozenset({"compile", "matches"})
 _STRING_METHODS = frozenset({"matches", "replaceAll", "replaceFirst", "split"})
@@ -31,10 +31,6 @@ _SIMPLE_ESCAPES = {
     "\\": "\\",
 }
 _ESCAPE = re.compile(r"\\(u+[0-9a-fA-F]{4}|[0-3]?[0-7]{1,2}|\n|.)", re.DOTALL)
-
-
-def _text(node: Node) -> str:
-    return required(node.text).decode()
 
 
 def _walk(root: Node) -> Iterator[Node]:
@@ -124,7 +120,7 @@ def _concatenation(node: Node, *, resolve: bool) -> str | None:
     operator = node.child_by_field_name("operator")
     left = node.child_by_field_name("left")
     right = node.child_by_field_name("right")
-    if operator is None or _text(operator) != "+" or left is None or right is None:
+    if operator is None or text_of(operator) != "+" or left is None or right is None:
         return None
     left_value = _constant(left, resolve=resolve)
     right_value = _constant(right, resolve=resolve)
@@ -145,7 +141,7 @@ def _constant(node: Node, *, resolve: bool = True) -> str | None:
     `resolve` が真なら、局所の識別子を宣言の初期値へ一段だけたどる。
     """
     if node.type == "string_literal":
-        raw = _text(node)
+        raw = text_of(node)
         return _text_block(raw) if raw.startswith('"""') else _unescape(raw[1:-1])
     if node.type == "parenthesized_expression" and node.named_child_count == 1:
         return _constant(node.named_children[0], resolve=resolve)
@@ -158,8 +154,8 @@ def _constant(node: Node, *, resolve: bool = True) -> str | None:
 
 def _is_pattern_class(owner: Node) -> bool:
     if owner.type == "identifier":
-        return _text(owner) == "Pattern"
-    return owner.type == "field_access" and _text(owner).endswith(".regex.Pattern")
+        return text_of(owner) == "Pattern"
+    return owner.type == "field_access" and text_of(owner).endswith(".regex.Pattern")
 
 
 def _first_argument(invocation: Node) -> Node | None:
@@ -181,7 +177,7 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         argument = _first_argument(node)
         if owner is None or name_node is None or argument is None:
             continue
-        name = _text(name_node)
+        name = text_of(name_node)
         line = node.start_point.row + 1
         value = _constant(argument)
         if _is_pattern_class(owner) and name in _PATTERN_METHODS:

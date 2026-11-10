@@ -10,16 +10,18 @@ from jigane.git.process import CommandError, run_command
 from jigane.groups.definitions import MACRO, MICRO, SECURITY, GroupId
 from jigane.llm_runs.claude import ClaudeInvocationError, parse_record
 from jigane.reviews.lifecycle import ReviewError
+from jigane.skills.discovery_errors import DiscoveryError
 from jigane.skills.mcp import SecurityConfigError
-from jigane.skills.pipeline import DiscoveryError
+from jigane.storage.atomic_write import StoredFileInUseError
+from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
-from jigane.storage.store import LockTimeoutError, ReviewId, ReviewKind, StoredFileInUseError
+from jigane.storage.store import ReviewId, ReviewKind
 
 MINE = ReviewId("o", "r", "mine", ReviewKind.RANGE)
 
 LISTED = [
     ReviewError("r"),
-    ReviewExistsError(MINE, "r"),
+    ReviewExistsError(MINE),
     CommandError(["tool", "x"], "e"),
     ClaudeInvocationError("c", parse_record({}, 0.5)),
     LockTimeoutError("l"),
@@ -144,7 +146,7 @@ def test_json_decode_error_is_corrupt_state() -> None:
 
 
 def test_review_exists_failure_carries_the_existing_review_id() -> None:
-    failure = failures.describe(ReviewExistsError(MINE, "レビューが既にあります: o/r@mine"))
+    failure = failures.describe(ReviewExistsError(MINE))
     assert failure.kind == "review_exists"
     assert failure.to_dict()["review"] == "o/r@mine"
 
@@ -157,7 +159,7 @@ def test_main_prints_the_review_key_for_an_overlapping_new_review(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def overlap(*_: object) -> int:
-        raise ReviewExistsError(MINE, "レビューが既にあります: o/r@mine")
+        raise ReviewExistsError(MINE)
 
     monkeypatch.setattr("jigane.commands.subcommands.list.run", overlap)
     assert commands.main(["list", "--json"]) == 2

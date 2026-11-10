@@ -22,7 +22,7 @@ from tree_sitter import Language, Parser
 
 if TYPE_CHECKING:
     # plugin.py は base.py を経て本モジュールを読み込むため、型の注釈にだけ使う
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
     from jigane.languages.plugin import GrammarSpec, LanguagePlugin
 
@@ -31,8 +31,9 @@ HASHES_PATH = Path(__file__).with_name("grammar-hashes.json")
 GRAMMARS = ("python", "java", "swift", "csharp")
 # パックの共有ライブラリのファイル名は、言語名と一致しない言語がある
 _LIBRARY_STEMS = {"csharp": "c_sharp"}
-_SETUP_ACTION = "`jigane languages fetch` を走らせ直してください（開発の木では `make setup`）"
-_FETCH_ACTION = "`jigane languages fetch` を走らせてください"
+FETCH_COMMAND = "jigane languages fetch"
+_SETUP_ACTION = f"`{FETCH_COMMAND}` を走らせ直してください（開発の木では `make setup`）"
+_FETCH_ACTION = f"`{FETCH_COMMAND}` を走らせてください"
 # 文法名は共有ライブラリを探す glob に入る。プラグインのコードが決める文字列なので、字種を絞る
 _GRAMMAR_NAME = re.compile(r"[a-z0-9_]+")
 
@@ -129,6 +130,16 @@ def require_present(root: Path, grammar: str) -> None:
     """
     if library_path(root, grammar) is None:
         raise GrammarError(f"文法 {grammar} が {library_dir(root)} にありません", _SETUP_ACTION)
+
+
+def builtin_absence(root: Path, grammar: str) -> str | None:
+    """組み込みの文法の共有ライブラリが置き場に無いだけなら、その説明文。他は None。"""
+    try:
+        if library_path(root, grammar) is not None:
+            return None
+    except GrammarError:
+        return None
+    return str(GrammarError(f"文法 {grammar} が {library_dir(root)} にありません", _SETUP_ACTION))
 
 
 def _declaration_error(grammar: str, spec: "GrammarSpec") -> GrammarError | None:
@@ -249,22 +260,41 @@ def get_language(target: GrammarTarget) -> Language:
     return pack.get_language(target.name)
 
 
-def fetch(external: "Iterable[LanguagePlugin]" = ()) -> list[FetchFailure]:
+def is_absent(root: Path, target: GrammarTarget) -> bool:
+    """文法の共有ライブラリが置き場に無いだけか。宣言の誤りや複数あるなどの別の誤りがあれば偽。"""
+    try:
+        if isinstance(target, DeclaredGrammar) and _declaration_error(target.name, target.spec):
+            return False
+        return library_path(root, target.name) is None
+    except GrammarError:
+        return False
+
+
+def fetch(
+    external: "Iterable[LanguagePlugin]" = (), names: "Collection[str] | None" = None
+) -> list[FetchFailure]:
     """組み込みと追加の言語の文法を固定の置き場へ取得し、取得の直後に照合する。
 
+    `names` を渡すと、その名前の言語だけを対象にする。None ならすべて。
     追加の言語の取得と照合の誤りは、その言語の分だけを返して他へ進む。
     組み込みの文法の誤りは、これまで通り例外にする。
     """
     root = cache_root()
     os.environ[CACHE_ENV] = str(root)
     _checked.clear()
-    pack.download(list(GRAMMARS))
+    selected_builtin = [name for name in GRAMMARS if names is None or name in names]
+    if selected_builtin:
+        pack.download(selected_builtin)
     failures: list[FetchFailure] = []
     fetched: dict[str, GrammarError | None] = {}
-    for target in targets(external):
+    selected_external = [
+        plugin for plugin in external if names is None or plugin.adapter.name in names
+    ]
+    for target in targets(selected_external):
         match target:
             case BuiltinGrammar():
-                target.verify(root)
+                if target.name in selected_builtin:
+                    target.verify(root)
             case DeclaredGrammar():
                 if target.name not in fetched:
                     fetched[target.name] = _download_external(target)

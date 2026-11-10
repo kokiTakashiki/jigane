@@ -16,6 +16,7 @@ from pydantic import BaseModel, ValidationError
 from jigane.design.division import division_text
 from jigane.findings.discard import KEY_FROM_CONCERN, PassedConcern, ShardConcerns
 from jigane.findings.records import (
+    KEY_THEME,
     GroupResult,
     StoredFinding,
     ThemeUpdate,
@@ -28,7 +29,8 @@ from jigane.findings.records import (
     triaged,
 )
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, GroupId
-from jigane.llm_runs import claude, pricing
+from jigane.llm_runs import claude
+from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import (
     DISCOVERY_ROLE,
@@ -45,12 +47,14 @@ from jigane.policy_materials.design_doc import (
     attachment_sections,
 )
 from jigane.reviews.attachments import VersionDrift, drift_notice
-from jigane.reviews.lifecycle import Review, scope_files
+from jigane.reviews.catalog import scope_files
+from jigane.reviews.lifecycle import Review
 from jigane.skills import (
     adversarial,
     bundle_disclosed,
     config_head,
     disclosed,
+    discovery_errors,
     history,
     input_budget,
     macro,
@@ -148,9 +152,7 @@ def withheld_notice(paths: tuple[str, ...]) -> str | None:
 
 
 @dataclass(frozen=True)
-class ShardedRun:
-    findings: tuple[TriagedFinding, ...]
-    run_state: pipeline.ShardedGroupRun
+class ShardedRun(pipeline.GroupRunResult[pipeline.ShardedGroupRun]):
     # 実行を止めないが利用者へ知らせる、保存した版との食い違い。出し方は呼び側（CLI）が決める
     drifts: tuple[VersionDrift, ...] = ()
     # 秘密のファイル名に当たるため、プロンプトに載せず送らなかったパス
@@ -467,8 +469,10 @@ def estimate_sharded[E: ShardedEstimate](
     plan = planned.plan
     prompts = planned.prompts
     sizes = [shard.size for shard in plan.shards]
+    # 見積もりの課金の式は、実行前の検査と同じ組から引く。組が渡されない呼び出しは群の既定
+    tokens_basis = budget or resolve_run_defaults(group, None, None).budget
     return estimate_type(
-        discovery_input_tokens=pricing.estimate_input_tokens(sum(sizes)),
+        discovery_input_tokens=tokens_basis.prompt_tokens(sum(sizes)),
         past_run=pipeline.past_run(review, group),
         note=note,
         policy_notice=order.policy_notice(review),
@@ -633,7 +637,7 @@ def run_sharded(
                 prompt, settings, role=DISCOVERY_ROLE, index=index
             )
             if check.stop is not None:
-                raise pipeline.InputBudgetError(
+                raise discovery_errors.InputBudgetError(
                     spec.group, check.stop.message() + UNFIT_GUIDE, check.stop
                 )
 
@@ -654,7 +658,7 @@ def run_sharded(
         if stops:
             # 起動しなかった理由が失敗の原因なので、一つめの文を添える。
             # 全シャードが同じ上限で止まる
-            raise pipeline.InputBudgetError(
+            raise discovery_errors.InputBudgetError(
                 spec.group,
                 f"全 {total} シャードの発見役が失敗しました"
                 f"（{len(stops)} 個は起動しませんでした）。"
@@ -662,7 +666,9 @@ def run_sharded(
                 + (UNFIT_GUIDE if planned.grown_unfit else ""),
                 stops[0],
             )
-        raise pipeline.DiscoveryError(spec.group, f"全 {total} シャードの発見役が失敗しました")
+        raise discovery_errors.DiscoveryError(
+            spec.group, f"全 {total} シャードの発見役が失敗しました"
+        )
 
     drops = pipeline.DropCounts()
     candidates, outside = _prepare(
@@ -703,7 +709,7 @@ def run_sharded(
         lambda candidate: {
             **candidate,
             "group": spec.group,
-            "theme": None,
+            KEY_THEME: None,
             "triage": None,
         },
     )
@@ -728,7 +734,7 @@ def run_sharded(
             lambda candidate: {
                 **candidate,
                 "group": spec.group,
-                "theme": None,
+                KEY_THEME: None,
                 "triage": Triage.UNVERIFIED.value,
             },
         )
@@ -790,7 +796,7 @@ def run_sharded(
         target_files=len(units),
         reviewed_files=reviewed_files,
         budget_stops=(
-            *(stop.as_record() for stop in stops),
+            *(stop.stored() for stop in stops),
             *outcome.budget_stops,
         ),
     )

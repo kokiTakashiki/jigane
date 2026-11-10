@@ -9,8 +9,9 @@ from jigane.commands import consent
 from jigane.groups.definitions import MICRO
 from jigane.llm_runs import claude
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import estimator, micro, pipeline, sharded, shards
+from jigane.skills import discovery_errors, estimator, micro, sharded, shards
 from jigane.skills.assembly import AssemblyInput
+from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
 from jigane.skills.mcp import NO_MCP
 
 FILE_BYTES = 50_000
@@ -110,7 +111,13 @@ def test_run_estimate_and_consent_use_the_same_grown_count(seven_files: Path) ->
 
     estimate = micro.estimate_micro(assembly, MICRO, budget)
     assert estimator.estimate_of(assembly, MICRO, budget=budget).discovery_calls == 7
-    plan = consent.launch_plan(assembly, MICRO, settings_for(fake, max_budget_usd=limit))
+    settings = settings_for(fake, max_budget_usd=limit)
+    plan = consent.launch_plan(
+        estimator.estimate_of(assembly, MICRO, budget=settings.budget),
+        GroupExpectation(0.2, 2.5, VerifierMultiplierSource.DEFAULT),
+        MICRO,
+        settings,
+    )
     micro.run_micro(assembly, settings_for(fake, max_budget_usd=limit))
 
     assert estimate.discovery_calls == 7
@@ -128,7 +135,7 @@ def test_unfit_diff_stays_at_eight_and_is_declined_before_any_call(nine_files: P
     settings = settings_for(fake, max_budget_usd=0.05)
 
     planned = sharded.plan_shards(assembly, MICRO, NO_MCP, settings.budget)
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         micro.run_micro(assembly, settings)
 
     assert len(planned.plan.shards) == shards.MAX_GROWN_SHARDS
@@ -145,7 +152,7 @@ def test_a_single_large_file_is_declined_with_the_same_guide(
     _, assembly = load(make_project(tmp_path / "shop", 1))
     fake = MicroFake({})
 
-    with pytest.raises(pipeline.InputBudgetError):
+    with pytest.raises(discovery_errors.InputBudgetError):
         micro.run_micro(assembly, settings_for(fake, max_budget_usd=0.01))
 
     assert fake.calls == []
@@ -165,7 +172,7 @@ def test_partial_stop_after_growing_is_declined_before_any_call(
     settings = settings_for(fake, max_budget_usd=small)
 
     planned = sharded.plan_shards(assembly, MICRO, NO_MCP, settings.budget)
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         micro.run_micro(assembly, settings)
 
     assert planned.grown_unfit

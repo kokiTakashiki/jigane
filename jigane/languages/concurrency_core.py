@@ -26,10 +26,6 @@ class CallSources(Protocol):
     def call_sites(self, body_node: Node, source: bytes) -> list[CallSite | DeferredSite]: ...
 
 
-def text_of(node: Node) -> str:
-    return (node.text or b"").decode()
-
-
 def line_of(node: Node) -> int:
     return node.start_point.row + 1
 

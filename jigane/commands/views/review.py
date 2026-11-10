@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any, assert_never
 
 from jigane.design.review_documents import attachment_candidates
-from jigane.findings.records import HistoryLoad
+from jigane.findings.records import HistoryLoad, load_findings_state
 from jigane.gates.entry import Allowed, FlakyDetail, RegexDetail
+from jigane.groups.definitions import GROUPS
 from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.kinds import Kind
 from jigane.judgment_map.map_kind import CodeMap, DesignDocMap
@@ -321,7 +322,9 @@ def has_gate_violation(review: Review) -> bool:
     return review.gates is not None and review.gates.blocks_exit
 
 
-def selection_lines(review: Review, history: HistoryLoad) -> list[str]:
+def selection_lines(
+    review: Review, history: HistoryLoad, *, include_stale_text: bool = True
+) -> list[str]:
     directory = review.id.directory()
     summary = selection_module.summary(directory, history)
     lines = [
@@ -330,7 +333,13 @@ def selection_lines(review: Review, history: HistoryLoad) -> list[str]:
             f"異議 {len(summary['objections'])} 件"
         ),
     ]
-    if summary["stale"]:
+    if summary["stale"] and not include_stale_text:
+        # 記録の操作の出力に別の指摘の本文が混ざると、どの指摘に記録したかを読み違える
+        lines.append(
+            f"古い選択 {len(summary['stale'])} 件（今の指摘に無い番号）: "
+            f"{', '.join(summary['stale'])}。本文は jigane show で確かめられます"
+        )
+    elif summary["stale"]:
         lines.append(
             f"古い選択（今の指摘に無い番号）: {', '.join(summary['stale'])}"
             "。スキルの再実行で番号が新しくなりました"
@@ -344,3 +353,18 @@ def selection_lines(review: Review, history: HistoryLoad) -> list[str]:
             if detail.in_history
         )
     return lines
+
+
+def group_guide_lines(review: Review) -> list[str]:
+    """群を付けない表示の末尾に出す、指摘を一件ずつ見る打ち方の案内。指摘のある群だけを並べる。"""
+    state = load_findings_state(review.id.directory())
+    entries = [
+        f"  jigane show {review.id} {group.identifier}"
+        f"（{group.label}の指摘 {len(state.groups[group.identifier])} 件）"
+        for group in GROUPS
+        if state.groups.get(group.identifier)
+    ]
+    if not entries:
+        # 指摘の無いことは、未実行かどうかと合わせて、群を付けた表示が答える
+        return []
+    return ["指摘を一件ずつ見るには、次のどれかを打ってください。", *entries]

@@ -1,5 +1,6 @@
 import argparse
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,7 @@ import pytest
 from review_fakes import make_review
 
 from jigane.commands.subcommands import technology_list as technology_command
+from jigane.git.tree_files import walk_tree_files
 from jigane.languages.base import Import, ImportAdapter, parse
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.java import JavaAdapter
@@ -683,6 +685,71 @@ def test_short_section_caps_listed_places_of_a_still_used_technology(tmp_path: P
         _write(Path(review.repository_root), {f"src/{name}.py": "import csv\n"})
     text = materials.short_section_text(review)
     assert "src/a.py、src/b.py、src/c.py ほか 2 件" in text
+
+
+def test_model_carries_still_used_places_and_both_tables_show_them(tmp_path: Path) -> None:
+    review = _removed_csv_review(tmp_path, reader_uses_csv=True)
+    model = build_model(review)
+    assert model["still_used_elsewhere"] == {"python/csv": ["src/reader.py"]}
+    row = next(r for r in model["sections"][0]["rows"] if r[0] == "csv")
+    assert "他では使い続けている: src/reader.py" in row[6]
+    assert "他では使い続けている: src/reader.py" in materials.short_section_text(review)
+    assert json.dumps(model["sections"], ensure_ascii=False).count("src/reader.py") == 1
+
+
+def test_model_has_empty_still_used_and_does_not_walk_tree_without_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    after, before = tmp_path / "after", tmp_path / "before"
+    _write(after, {"src/a.py": "import csv\nimport json\n"})
+    _write(before, {"src/a.py": "import csv\n"})
+    review = make_review(after, ["src/a.py"], base_tree=before, kind=ReviewKind.RANGE)
+
+    walked: list[str] = []
+    real_walk = walk_tree_files
+
+    def recording_walk(root: Path, base: Path, **options: bool) -> Iterable[str]:
+        walked.append(str(root))
+        return real_walk(root, base, **options)
+
+    monkeypatch.setattr("jigane.technology_list.build.walk_tree_files", recording_walk)
+    assert build_model(review)["still_used_elsewhere"] == {}
+    assert walked == []
+
+
+def _swap_review(tmp_path: Path, added: list[str]) -> Review:
+    after, before = tmp_path / "after", tmp_path / "before"
+    _write(
+        after,
+        {
+            "src/writer.py": "".join(f"import {name}\n" for name in added),
+            "src/reader.py": "import csv\n",
+        },
+    )
+    _write(before, {"src/writer.py": "import csv\n", "src/reader.py": "import csv\n"})
+    return make_review(after, ["src/writer.py"], base_tree=before, kind=ReviewKind.RANGE)
+
+
+def _csv_change_cell(model: dict[str, Any]) -> str:
+    row = next(r for r in model["sections"][0]["rows"] if r[0] == "csv")
+    return str(row[6])
+
+
+def test_full_table_lists_technologies_added_in_the_same_change(tmp_path: Path) -> None:
+    model = build_model(_swap_review(tmp_path, ["json"]))
+    assert "同じ変更で増えた: json" in _csv_change_cell(model)
+    # 増えた行には付けない
+    json_row = next(r for r in model["sections"][0]["rows"] if r[0] == "json")
+    assert json_row[6] == "増えた"
+
+
+def test_full_table_caps_added_and_still_used_places(tmp_path: Path) -> None:
+    review = _swap_review(tmp_path, ["json", "os", "re", "sys", "abc"])
+    for name in "abcd":
+        _write(Path(review.repository_root), {f"src/{name}.py": "import csv\n"})
+    cell = _csv_change_cell(build_model(review))
+    assert "src/a.py、src/b.py、src/c.py ほか 2 件" in cell
+    assert "同じ変更で増えた: abc、json、os ほか 2 件" in cell
 
 
 def test_short_section_in_feature_review_skips_language_and_os(review: Review) -> None:

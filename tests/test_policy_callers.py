@@ -1,9 +1,11 @@
+import ast
 from collections.abc import Collection, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fakes import register_no_sequence_adapter
 from review_fakes import make_review
 from test_policy_classes import feature_review, whole
 from tree_sitter import Node
@@ -297,19 +299,21 @@ def _mixed_review(tmp_path: Path, extra: str, extra_text: str, python_text: str)
 
 
 def test_change_without_a_reader_has_no_section_and_names_the_language_as_unsupported(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    review = _mixed_review(tmp_path, "A.java", "class A { void run() {} }\n", "")
+    register_no_sequence_adapter(monkeypatch)
+    review = _mixed_review(tmp_path, "a.nosq", "class A { void run() {} }\n", "")
     (tmp_path / "after" / "m.py").unlink()
     assert policy_callers.caller_table(review) is None
     assert any(e.key == "callers" for e in unsupported_figures(review))
 
 
 def test_mixed_languages_list_python_rows_and_name_the_language_without_a_reader(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    register_no_sequence_adapter(monkeypatch)
     review = _mixed_review(
-        tmp_path, "A.java", "class A { void run() {} }\n", "def helper():\n    pass\n"
+        tmp_path, "a.nosq", "class A { void run() {} }\n", "def helper():\n    pass\n"
     )
     figure = policy_callers.caller_table(review)
     assert isinstance(figure, TableFigure)
@@ -319,8 +323,49 @@ def test_mixed_languages_list_python_rows_and_name_the_language_without_a_reader
         for s in section_texts(AssemblyInput.load(review), FigureSlot.AFTER_REGIONS)
         if policy_callers.SECTION_CALLERS in s
     )
-    assert "対応外の言語: Java" in section
+    assert "対応外の言語: no-sequence" in section
     assert any(e.key == "callers" for e in unsupported_figures(review))
+
+
+def test_java_change_lists_added_public_names_with_their_callers(tmp_path: Path) -> None:
+    (tmp_path / "before").mkdir()
+    (tmp_path / "after").mkdir()
+    (tmp_path / "before" / "Shop.java").write_text("", encoding="utf-8")
+    (tmp_path / "after" / "Shop.java").write_text(
+        "public class Shop {\n  public void open() {}\n}\n", encoding="utf-8"
+    )
+    (tmp_path / "before" / "Door.java").write_text("", encoding="utf-8")
+    (tmp_path / "after" / "Door.java").write_text(
+        "class Door {\n  void use(Shop shop) { shop.open(); }\n}\n", encoding="utf-8"
+    )
+    segments = [whole("Shop.java", 3), whole("Door.java", 3)]
+    review = make_review(
+        tmp_path / "after",
+        ["Shop.java", "Door.java"],
+        base_tree=tmp_path / "before",
+        judgment_map={"segments": segments, "regions": [], "line_counts": {}},
+        kind=ReviewKind.RANGE,
+    )
+    figure = policy_callers.caller_table(review)
+    assert isinstance(figure, TableFigure)
+    rows = {row.cells[0]: row.cells for row in figure.rows}
+    assert rows["`Shop.open`"][1:3] == ("メソッド", "Shop.java:2")
+    assert "Door.java の Door.use" in rows["`Shop.open`"][-1]
+    assert "Door.java の Door.use" in rows["`Shop`"][-1]
+
+
+def test_csharp_change_lists_added_public_names_and_their_callers(tmp_path: Path) -> None:
+    source = (
+        "public class Shop\n{\n    public void Add() {}\n    private void Hide() {}\n}\n"
+        "class Use\n{\n    void Run(Shop s) { s.Add(); }\n}\n"
+    )
+    review = _mixed_review(tmp_path, "A.cs", source, "")
+    figure = policy_callers.caller_table(review)
+    assert isinstance(figure, TableFigure)
+    rows = {row.cells[0]: row.cells for row in figure.rows}
+    assert set(rows) == {"`Shop`", "`Shop.Add`", "`Use`"}
+    assert "A.cs の Use.Run" in rows["`Shop.Add`"][-1]
+    assert not any(e.key == "callers" for e in unsupported_figures(review))
 
 
 class _FakeReaderAdapter:
@@ -379,3 +424,18 @@ def test_added_public_names_skip_a_file_with_a_deep_expression(terms: int) -> No
     after = {"deep.py": deep, "ok.py": "def helper(x):\n    return x\n"}
     found = added_public_names({}, after, set(after))
     assert [name.name for name in found] == ["helper"]
+
+
+def test_added_public_names_scan_each_changed_file_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    scanned: list[ast.Module] = []
+    original = ast.NodeVisitor.visit
+
+    def counting(self: ast.NodeVisitor, node: ast.AST) -> object:
+        if isinstance(node, ast.Module):
+            scanned.append(node)
+        return original(self, node)
+
+    monkeypatch.setattr(ast.NodeVisitor, "visit", counting)
+    after = {"a.py": "def one(x):\n    return x\n", "b.py": "def two(y):\n    return one(y)\n"}
+    added_public_names({}, after, set(after))
+    assert len(scanned) == len(after)

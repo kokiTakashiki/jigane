@@ -17,7 +17,7 @@ import sys
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, assert_never
 from urllib.parse import urlparse
 
 from markdown_it import MarkdownIt
@@ -352,13 +352,138 @@ def _callee_name(call: ast.Call) -> str:
     return callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", "")
 
 
-def _is_git_argv(node: ast.expr | None) -> bool:
-    return (
-        isinstance(node, ast.List)
-        and bool(node.elts)
-        and isinstance(node.elts[0], ast.Constant)
-        and node.elts[0].value == "git"
+class EndOfOptionsFirst(NamedTuple):
+    """並びの定数要素に --end-of-options があり、それより前に非定数の要素が無い形。"""
+
+    reason: str
+
+
+class FixedPrefix(NamedTuple):
+    """非定数の要素が f 文字列だけで、その先頭の定数が prefix で始まる形。"""
+
+    reason: str
+    prefix: str
+
+
+class PassThrough(NamedTuple):
+    """["git", *名前] の形だけ。呼び出し元の責任で外部由来の値を渡す。"""
+
+    reason: str
+
+
+AllowedArgv = EndOfOptionsFirst | FixedPrefix | PassThrough
+
+
+# 全要素が文字列定数でない git の argv リテラルを、build_git_command を経由せずに起動の口へ
+# 渡してよい (モジュール, 関数) と、その関数で許す形。載せた関数でも、形に合わない argv は
+# 違反になる。外部由来の値を載せる箇所は、ここに載せず build_git_command 経由に直す。
+VARIABLE_GIT_ARGV_ALLOWED: dict[tuple[str, str], AllowedArgv] = {
+    ("jigane.design.submodule_status", "recorded_commit"): FixedPrefix(
+        "`HEAD:<パス>` の 1 引数で、先頭が HEAD なのでオプションにならない。外部由来でない",
+        prefix="HEAD:",
+    ),
+    ("jigane.git.revision", "resolve_commit_sha"): EndOfOptionsFirst(
+        "revision の前に --end-of-options を前置済み。`^{commit}` の接尾辞があり、"
+        "build_git_command の revisions は検査済みの CommitSha しか取れないため通せない",
+    ),
+    ("jigane.git.repository", "_git"): PassThrough(
+        "呼び出し元の引数をそのまま渡す口。呼び出し元が固定の引数だけを渡す。"
+        "FB 候補: 副コマンドの型を取る口へ作り直す",
+    ),
+    ("jigane.reviews.range_head", "run_git"): PassThrough(
+        "呼び出し元の引数をそのまま渡す口。外部由来の値は呼び出し元が --end-of-options を置く。"
+        "FB 候補: 副コマンドの型を取る口へ作り直す",
+    ),
+}
+
+# git の引数を組む関数。どれも先頭に git を置いた並びを返す
+GIT_ARGV_BUILDERS = frozenset({"build_git_command"})
+GIT_ARGV_MODULE = "jigane.git.command_line"
+
+
+def _git_builder_names(tree: ast.AST, module: str) -> frozenset[str]:
+    """このファイルの中で GIT_ARGV_BUILDERS の関数を指す名前。
+
+    GIT_ARGV_MODULE の中の定義と、そこから `from … import` した名前（as の別名を含む）だけを
+    数える。同じ名前の別の関数は数えない。属性での参照（`command_line.build_git_command`）と
+    別名への代入は数えず、呼び出しの検査から外れて失敗になる。
+    """
+    if module == GIT_ARGV_MODULE:
+        return GIT_ARGV_BUILDERS
+    return frozenset(
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == GIT_ARGV_MODULE
+        for alias in node.names
+        if alias.name in GIT_ARGV_BUILDERS
     )
+
+
+def _is_str_constant(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _git_list_elements(node: ast.expr | None) -> list[ast.expr] | None:
+    """先頭が "git" の定数のリストならその要素。そうでなければ None。"""
+    if not (isinstance(node, ast.List) and node.elts):
+        return None
+    head = node.elts[0]
+    if isinstance(head, ast.Constant) and head.value == "git":
+        return node.elts
+    return None
+
+
+def _is_git_argv(node: ast.expr | None, builder_names: frozenset[str]) -> bool:
+    if isinstance(node, ast.Call):
+        return isinstance(node.func, ast.Name) and node.func.id in builder_names
+    elements = _git_list_elements(node)
+    return elements is not None and all(_is_str_constant(e) for e in elements)
+
+
+def _fixed_prefix_fstring(node: ast.expr, prefix: str) -> bool:
+    return (
+        isinstance(node, ast.JoinedStr)
+        and bool(node.values)
+        and isinstance(node.values[0], ast.Constant)
+        and isinstance(node.values[0].value, str)
+        and node.values[0].value.startswith(prefix)
+    )
+
+
+def _matches_allowed_shape(node: ast.expr | None, allowed: AllowedArgv) -> bool:
+    elements = _git_list_elements(node)
+    if elements is None:
+        return False
+    match allowed:
+        case PassThrough():
+            match elements:
+                case [_, ast.Starred(value=ast.Name())]:
+                    return True
+                case _:
+                    return False
+        case FixedPrefix(prefix=prefix):
+            return all(_is_str_constant(e) or _fixed_prefix_fstring(e, prefix) for e in elements)
+        case EndOfOptionsFirst():
+            for index, element in enumerate(elements):
+                if isinstance(element, ast.Constant) and element.value == "--end-of-options":
+                    return all(_is_str_constant(e) for e in elements[:index])
+            return False
+        case _:
+            assert_never(allowed)
+
+
+def _git_argv_verdict(
+    node: ast.expr | None, builder_names: frozenset[str], module: str, function: str
+) -> bool:
+    """起動の口の先頭の引数が、git の argv として許される形か。
+
+    全要素が定数、build_git_command の結果、VARIABLE_GIT_ARGV_ALLOWED に載せた関数での表の形の
+    いずれか。
+    """
+    if _is_git_argv(node, builder_names):
+        return True
+    allowed = VARIABLE_GIT_ARGV_ALLOWED.get((module, function))
+    return allowed is not None and _matches_allowed_shape(node, allowed)
 
 
 def _calls_named(tree: ast.AST, scope_name: str, called: str) -> bool:
@@ -392,7 +517,10 @@ def _claude_command_starts_with_binary(tree: ast.AST) -> bool:
 
 
 def check_commands(root: Path) -> list[str]:
-    """起動の口に渡る argv の先頭が、git の定数か、検査済みの gh と claude の口だけであること。
+    """起動の口に渡る argv が、次のいずれかだけであること。
+
+    全要素が定数の git のリスト、build_git_command の結果、VARIABLE_GIT_ARGV_ALLOWED に載せた
+    関数での表の形の git のリスト、check_allowed を通る gh の口、検査済みの claude の口。
 
     subprocess と os.system の直接の利用は ruff の banned-api が禁じているので、ここでは見ない。
     gh の形の照合（check_allowed）と claude の実行ファイルの解決は、その口が担う。ここは、
@@ -406,6 +534,7 @@ def check_commands(root: Path) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         where = path.relative_to(root).as_posix()
         callee_ids = set()
+        builder_names = _git_builder_names(tree, module)
         for node, scope in _scopes(tree):
             if isinstance(node, ast.Call) and _callee_name(node) in LAUNCHERS:
                 callee_ids.add(id(node.func))
@@ -415,10 +544,12 @@ def check_commands(root: Path) -> list[str]:
                     and scope == "_run"
                     and _calls_named(tree, "_run", "check_allowed")
                 )
-                if not (_is_git_argv(first) or via_gh):
+                if not (_git_argv_verdict(first, builder_names, module, scope) or via_gh):
                     problems.append(
                         f"{where}:{node.lineno}: {_callee_name(node)} の先頭の引数が"
-                        " git の定数でも、check_allowed を通る gh の口（gh.py の _run）でもない"
+                        " 全要素が定数の git でも、build_git_command の結果でも、"
+                        "VARIABLE_GIT_ARGV_ALLOWED の関数での表の形の git でも、"
+                        "check_allowed を通る gh の口（gh.py の _run）でもない"
                     )
         for node in ast.walk(tree):
             reference = _reference_name(node)

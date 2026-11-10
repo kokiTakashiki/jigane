@@ -9,7 +9,7 @@ from jigane.commands import failures
 from jigane.languages import registry
 from jigane.languages.base import Declaration
 from jigane.languages.plugin import Distribution
-from jigane.languages.plugins import LanguageReady, LanguageUnavailable, ReasonKind
+from jigane.languages.states import LanguageReady, LanguageUnavailable, ReasonKind
 
 
 class _FakeAdapter:

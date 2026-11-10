@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
-from fakes import MacroFake, discovered
+from fakes import MacroFake, discovered, run_command_stub
 from gates_support import write_gates_file
 from pr_support import commit_all, git, remove_tree
 from review_fakes import EXTRA_WARNING
@@ -24,6 +24,7 @@ from jigane.judgment_map.declaration import (
 )
 from jigane.pull_request_context.background import parse_background
 from jigane.reviews import lifecycle as review_module
+from jigane.reviews.catalog import list_reviews, load_review
 from jigane.reviews.lifecycle import (
     DeclaredInputs,
     DiffSource,
@@ -35,12 +36,10 @@ from jigane.reviews.lifecycle import (
     Review,
     ReviewError,
     create_range_review,
-    list_reviews,
-    load_pairs,
-    load_review,
-    resolve_range,
-    resolve_review,
 )
+from jigane.reviews.range_head import resolve_commit, resolve_range
+from jigane.reviews.resolution import resolve_review
+from jigane.reviews.stored_pairs import load_pairs
 from jigane.skills.macro import background_prompt_text
 from jigane.storage.store import ReviewKind
 
@@ -224,6 +223,8 @@ def test_range_review_stores_the_working_directory_root(repo: dict[str, str]) ->
     assert stored["local_range"] == {
         "range_text": "main..feature",
         "working_directory": review.origin.range.working_directory,
+        "git_directory": str((Path(repo["root"]) / ".git").resolve()),
+        "head_tracking": {"kind": "named_branch", "branch": "feature"},
     }
     assert set(stored["diff_source"]) == {"base_sha", "head_sha", "merge_base", "base_tree"}
 
@@ -244,13 +245,13 @@ def test_origin_from_stored_follows_the_stored_kind() -> None:
     local_range = LocalRange("a..b", "/x")
     feature, pr, rng = ReviewKind.FEATURE, ReviewKind.PULL_REQUEST, ReviewKind.RANGE
     assert (
-        review_module._origin_from_stored(feature, None, None, None, None, design_doc=None)
+        review_module.origin_from_stored(feature, None, None, None, None, design_doc=None)
         == FeatureOrigin()
     )
-    assert review_module._origin_from_stored(
+    assert review_module.origin_from_stored(
         pr, pull_request, None, source, None, design_doc=None
     ) == PullRequestOrigin(pull_request, source)
-    assert review_module._origin_from_stored(
+    assert review_module.origin_from_stored(
         rng, None, local_range, source, None, design_doc=None
     ) == RangeOrigin(local_range, source)
     for kind, info, stored_range, diff in (
@@ -261,9 +262,7 @@ def test_origin_from_stored_follows_the_stored_kind() -> None:
         (rng, pull_request, local_range, source),
     ):
         with pytest.raises(ReviewError):
-            review_module._origin_from_stored(
-                kind, info, stored_range, diff, None, design_doc=None
-            )
+            review_module.origin_from_stored(kind, info, stored_range, diff, None, design_doc=None)
 
 
 def test_new_range_cli_prints_the_review(
@@ -300,6 +299,142 @@ def test_refresh_without_change_is_not_updated(repo: dict[str, str]) -> None:
     review = create_range_review(Path(repo["root"]), "main..feature", "mine")
     result = refresh_review(review.id)
     assert result.updated is False
+
+
+_RESOLVED_HEAD_TEXT = "範囲の文字列を解き直しました"
+_FOLLOWED_HEAD_TEXT = "記録した枝の先端へ進めました"
+
+
+def _refresh_output(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    head: str,
+) -> str:
+    monkeypatch.chdir(root)
+    assert main(["new", "range", f"main..{head}", "--name", "mine"]) == EXIT_OK
+    capsys.readouterr()
+    assert main(["refresh", "mine"]) == EXIT_OK
+    return capsys.readouterr().out
+
+
+def test_refresh_of_a_range_at_a_sha_follows_the_recorded_branch(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = Path(repo["root"])
+    head_sha = git(root, "rev-parse", "HEAD")
+    monkeypatch.chdir(root)
+    assert main(["new", "range", f"main..{head_sha}", "--name", "mine"]) == EXIT_OK
+    _add_commit(root)
+    capsys.readouterr()
+    assert main(["refresh", "mine"]) == EXIT_OK
+    output = capsys.readouterr().out
+    assert "レビューを更新しました" in output
+    assert "先端: feature " in output
+    assert _FOLLOWED_HEAD_TEXT in output
+
+
+def test_refresh_of_a_range_at_a_tag_shows_the_head(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = Path(repo["root"])
+    git(root, "tag", "reviewed")
+    output = _refresh_output(root, monkeypatch, capsys, "reviewed")
+    assert "変更なし" in output
+    assert "先端: feature " in output
+    assert _FOLLOWED_HEAD_TEXT in output
+    assert _RESOLVED_HEAD_TEXT not in output
+
+
+def test_refresh_of_a_range_with_a_branch_head_updates_after_a_new_commit(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = Path(repo["root"])
+    monkeypatch.chdir(root)
+    assert main(["new", "range", "main..feature", "--name", "mine"]) == EXIT_OK
+    _add_commit(root)
+    capsys.readouterr()
+    assert main(["refresh", "mine"]) == EXIT_OK
+    output = capsys.readouterr().out
+    assert "レビューを更新しました" in output
+    assert _RESOLVED_HEAD_TEXT in output
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        "feature",
+        "HEAD",
+        "feature~0",
+        "HEAD^0",
+        "origin/feature",
+        "refs/heads/feature",
+        "heads/feature",
+        "refs/remotes/origin/feature",
+        "feature@{u}",
+        "@{u}",
+        "HEAD@{0}",
+        "HEAD@{1}",
+    ],
+)
+def test_refresh_without_change_of_a_moving_head_names_how_the_head_was_chosen(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    head: str,
+) -> None:
+    root = Path(repo["root"])
+    git(root, "update-ref", "refs/remotes/origin/feature", git(root, "rev-parse", "HEAD"))
+    git(root, "branch", "--set-upstream-to=origin/feature", "feature")
+    # HEAD@{1} が変更のある範囲を指すよう、HEAD の reflog に直前の先端を残す
+    _add_commit(root)
+    output = _refresh_output(root, monkeypatch, capsys, head)
+    assert "変更なし" in output
+    # feature~0 は枝の名前でなく、作ったときの今の枝の先端と一致するので、その枝を追う。
+    # 他の書き方は枝の名前か、追わない動く参照なので、範囲の文字列を解き直す
+    expected = _FOLLOWED_HEAD_TEXT if head == "feature~0" else _RESOLVED_HEAD_TEXT
+    assert expected in output
+
+
+def test_refresh_of_a_range_at_a_sha_moves_its_head_sha_to_the_branch_tip(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(repo["root"])
+    head_sha = git(root, "rev-parse", "HEAD")
+    monkeypatch.chdir(root)
+    assert main(["new", "range", f"main..{head_sha}", "--name", "mine"]) == EXIT_OK
+    _add_commit(root)
+    assert main(["refresh", "mine"]) == EXIT_OK
+    refreshed = load_review(resolve_review("octo/hello@mine")).diff_origin
+    assert refreshed is not None
+    assert refreshed.head_sha == git(root, "rev-parse", "HEAD")
+    assert refreshed.head_sha != head_sha
+
+
+def test_refresh_json_of_a_range_at_a_sha_shows_the_head(
+    repo: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = Path(repo["root"])
+    monkeypatch.chdir(root)
+    assert main(["new", "range", f"main..{git(root, 'rev-parse', 'HEAD')}", "--name", "mine"]) == 0
+    capsys.readouterr()
+    assert main(["refresh", "mine", "--json"]) == EXIT_OK
+    output = json.loads(capsys.readouterr().out)
+    assert output["updated"] is False
+    assert output["head"] == {
+        "branch": "feature",
+        "sha": git(root, "rev-parse", "HEAD"),
+        "reason": "followed_branch",
+    }
 
 
 def test_refresh_after_a_new_commit_rebuilds_the_review(repo: dict[str, str]) -> None:
@@ -758,6 +893,26 @@ def test_resolve_commit_puts_the_end_of_options_marker_before_the_revision(
         return "0" * 40 + "\n"
 
     monkeypatch.setattr(process, "run_command", fake_run)
-    review_module._resolve_commit(tmp_path, "--output=x")
+    resolve_commit(tmp_path, "--output=x")
     (args,) = launched
     assert args[-2:] == ["--end-of-options", "--output=x^{commit}"]
+
+
+def test_range_merge_base_and_diff_put_shas_after_end_of_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[list[str]] = []
+    base, head, ancestor = "a" * 40, "b" * 40, "c" * 40
+
+    def fake_run(args: list[str]) -> str:
+        seen.append(args)
+        if args[1] == "rev-parse":
+            return f"{base if 'base^{commit}' in args else head}\n"
+        return f"{ancestor}\n" if args[1] == "merge-base" else "a.py\n"
+
+    monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
+    resolve_range(Path(), "base..head")
+    assert seen[2:] == [
+        ["git", "merge-base", "--end-of-options", base, head],
+        ["git", "diff", "--name-only", "--end-of-options", ancestor, head],
+    ]

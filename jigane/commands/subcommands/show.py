@@ -11,8 +11,11 @@ from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.group_argument import parse_group
 from jigane.commands.output import print_group_json, print_lines
 from jigane.commands.views.findings import (
+    budget_stop_lines,
+    kept_previous_lines,
     macro_view_lines,
     micro_view_lines,
+    no_document_body_lines,
     received_concern_lines,
     security_view_lines,
     selection_marks,
@@ -23,6 +26,7 @@ from jigane.commands.views.review import (
     bot_lines,
     declaration_lines,
     gate_lines,
+    group_guide_lines,
     map_lines,
     selection_lines,
     source_lines,
@@ -33,6 +37,7 @@ from jigane.commands.views.review import (
 from jigane.findings.discard import NO_CONCERN_CLAIM, concern_with_places, places_line
 from jigane.findings.discarded_nits import is_legacy_nit_id, selection_note_of
 from jigane.findings.records import (
+    KEY_NIT_REASON,
     TriagedFinding,
     display_category_of,
     load_findings_state,
@@ -41,10 +46,12 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import MACRO, MICRO, SECURITY, GroupId
 from jigane.groups.viewpoints import viewpoint_fields
-from jigane.llm_runs import launch_failure
+from jigane.llm_runs import failure_views
 from jigane.reviews import selection as selection_module
-from jigane.reviews.lifecycle import Review, load_review, resolve_review
-from jigane.skills import macro, micro, pipeline, security
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.resolution import resolve_review
+from jigane.skills import macro, micro, pipeline, policy_reason, security
 from jigane.skills import run_record as run_record_module
 from jigane.skills.group_result import (
     NOT_RUN_OUTCOME,
@@ -123,10 +130,10 @@ def run_record(review: Review, group: GroupId) -> dict[str, Any] | None:
         "over_budget": totals["over_budget"],
         # 最終的に通らなかった起動の失敗（上限で失敗を含む）。種類と理由、額とその出所を添えた文
         "failures": [
-            view.to_json() for view in launch_failure.failure_views(run.launch_failures or ())
+            view.to_json() for view in failure_views.failure_views(run.launch_failures or ())
         ],
         # 今回の回の前に起きた失敗の件数と額。無ければ None
-        "earlier_failures": launch_failure.earlier_failures_json(run.launch_failures or ()),
+        "earlier_failures": failure_views.earlier_failures_json(run.launch_failures or ()),
     }
 
 
@@ -138,11 +145,21 @@ def shown_failure_lines(run: pipeline.GroupRun | None, outcome: GroupOutcome) ->
     if run is None or isinstance(outcome, Failed):
         # Failed の帯が理由として失敗を言っている
         return []
-    lines = [view.text for view in launch_failure.failure_views(run.launch_failures or ())]
-    earlier = launch_failure.earlier_failures(run.launch_failures or ())
+    lines = [view.text for view in failure_views.failure_views(run.launch_failures or ())]
+    earlier = failure_views.earlier_failures_view(run.launch_failures or ())
     if earlier is not None:
         lines += [earlier.text, *(f"  {view.text}" for view in earlier.views)]
     return lines
+
+
+def shown_budget_stop_lines(run: pipeline.GroupRun | None) -> list[str]:
+    """入力の見積もりで上限に達するため起動しなかった役の文。run の表示の「起動せず」と同じ形。
+
+    見送った起動の分は指摘が出ないので、読んだうえでの 0 件と区別できるようにここで言う。
+    """
+    if run is None:
+        return []
+    return budget_stop_lines(pipeline.budget_stops_of(run))
 
 
 def outcome_of(review: Review, group: GroupId, findings: Sequence[TriagedFinding]) -> GroupOutcome:
@@ -198,7 +215,7 @@ def _with_derived_nit_reason(finding: TriagedFinding) -> dict[str, Any]:
     line = places_line(reason)
     if line is not None:
         derived["places_line"] = line
-    return {**raw, "nit_reason": {**reason.to_json(), **derived}}
+    return {**raw, KEY_NIT_REASON: {**reason.to_json(), **derived}}
 
 
 def with_in_reply(
@@ -263,7 +280,14 @@ def show_macro(review: Review, *, as_json: bool) -> None:
         [STALE_NOTE] if stale else [],
         stopped_lines(stopped_view(review, macro.GROUP)),
         outcome_lines(outcome),
+        no_document_body_lines(review, len(shown)),
         shown_failure_lines(macro_run, outcome),
+        shown_budget_stop_lines(macro_run),
+        kept_previous_lines(
+            policy_reason.diagram_not_run(
+                macro_run if isinstance(macro_run, pipeline.PolicyGroupRun) else None
+            )
+        ),
         macro_view_lines(review, ordered, selection_marks(review), considered),
     )
 
@@ -304,6 +328,7 @@ def show_micro(review: Review, *, as_json: bool) -> None:
         stopped_lines(stopped_view(review, micro.GROUP)),
         outcome_lines(outcome),
         shown_failure_lines(group_run(review, micro.GROUP), outcome),
+        shown_budget_stop_lines(group_run(review, micro.GROUP)),
         micro_view_lines(findings, state.themes, selection_marks(review)),
         received_concern_lines(received),
     )
@@ -338,6 +363,7 @@ def show_security(review: Review, *, as_json: bool) -> None:
         outcome_lines(outcome),
         [] if security_run is None else [pipeline.mcp_label(security_run)],
         shown_failure_lines(security_run, outcome),
+        shown_budget_stop_lines(security_run),
         security_view_lines(findings, selection_marks(review)),
     )
 
@@ -377,6 +403,7 @@ def show_and_print(text: str, view: View, *, as_json: bool) -> None:
         static_finding_lines(review),
         warning_lines(review),
         output.warning_lines(history.warnings),
+        group_guide_lines(review),
     )
 
 

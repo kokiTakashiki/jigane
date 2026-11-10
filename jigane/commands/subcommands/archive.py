@@ -5,7 +5,8 @@ import json
 
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
-from jigane.reviews.lifecycle import resolve_review, set_archived
+from jigane.reviews.catalog import set_archived
+from jigane.reviews.resolution import resolve_review
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:

@@ -17,8 +17,9 @@ from jigane.findings.records import (
     reserve_numbers,
 )
 from jigane.groups.definitions import MACRO, SECURITY
-from jigane.storage import store
-from jigane.storage.store import LockTimeoutError, review_lock, write_text_atomic
+from jigane.storage import locking
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.locking import LockTimeoutError, review_lock
 
 
 def test_two_groups_saved_concurrently_both_remain(tmp_path: Path) -> None:
@@ -92,7 +93,7 @@ def test_lock_held_by_crashed_process_is_released(tmp_path: Path) -> None:
             (
                 "import sys, time\n"
                 "from pathlib import Path\n"
-                "from jigane.storage.store import review_lock\n"
+                "from jigane.storage.locking import review_lock\n"
                 "with review_lock(Path(sys.argv[1])):\n"
                 "    print('held', flush=True)\n"
                 "    time.sleep(60)\n"
@@ -101,7 +102,7 @@ def test_lock_held_by_crashed_process_is_released(tmp_path: Path) -> None:
         ],
         # 子が import する jigane を、このテストを動かしている親と同じ src に固定する。
         # 別の worktree が同じ仮想環境の .pth を書き換えても、子は取り違えない
-        env={**os.environ, "PYTHONPATH": str(Path(store.__file__).resolve().parents[2])},
+        env={**os.environ, "PYTHONPATH": str(Path(locking.__file__).resolve().parents[2])},
         stdout=subprocess.PIPE,
         text=True,
         encoding="utf-8",
@@ -142,7 +143,7 @@ def test_lock_held_by_crashed_process_is_released(tmp_path: Path) -> None:
 def test_lock_file_remains_after_release(tmp_path: Path) -> None:
     with review_lock(tmp_path):
         pass
-    assert (tmp_path / store.LOCK_FILE).exists()
+    assert (tmp_path / locking.LOCK_FILE).exists()
 
 
 def test_lock_released_after_error(tmp_path: Path) -> None:

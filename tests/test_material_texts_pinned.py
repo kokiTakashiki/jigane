@@ -4,7 +4,7 @@ from typing import Any, cast
 
 from jigane.figures.models import NoteText, SequenceFigure
 from jigane.regex.tags import CountedRegex, CountedTag, Rule, Severity, ShapeTag
-from jigane.sequence import review_diagrams
+from jigane.sequence import before_diagrams, review_diagrams
 from jigane.skills.policy_regex import _directions
 
 DIRECTIONS = {
@@ -32,13 +32,14 @@ def test_regex_directions_in_the_material_keep_the_plain_form() -> None:
 
 def test_sequence_notes_in_the_material_keep_the_plain_form() -> None:
     notes = review_diagrams
+    before = before_diagrams
     assert notes.NO_ADAPTER_TEXT == "変更したファイルの言語に、呼び出しの抽出がまだ無い。"
     assert notes.NO_DECLARATION_TEXT == "変更した宣言も、変更したファイルを読む宣言も無い。"
-    assert notes.NO_BASE_TREE_TEXT == "変更前のツリーが無いため、変更前の図は作れない。"
+    assert before.NO_BASE_TREE_TEXT == "変更前のツリーが無いため、変更前の図は作れない。"
     assert notes.NO_INTERACTION_TEXT == "変更した宣言はあるが、他の型とのやり取りが無い。"
-    assert notes.BEFORE_NO_ROOT_NOTE == "変更前にこの入口が無い"
-    assert notes.BEFORE_NO_PATH_NOTE == "変更前は変更した宣言へ届かない"
-    assert notes.AFTER_NO_ARROW_NOTE == "変更後の図に呼び出しが無い"
+    assert before.BEFORE_NO_ROOT_NOTE == "変更前にこの入口が無い"
+    assert before.BEFORE_NO_PATH_NOTE == "変更前は変更した宣言へ届かない"
+    assert before.AFTER_NO_ARROW_NOTE == "変更後の図に呼び出しが無い"
     assert notes.NO_CALL_ENTRIES_NOTE == "呼び出しの無い入口 {count} 件は図にしない: {names}"
     assert (
         notes.MARKUP_CALLED_ENTRIES_NOTE == "XAML から呼ばれる入口 {count} 件は図にしない: {names}"

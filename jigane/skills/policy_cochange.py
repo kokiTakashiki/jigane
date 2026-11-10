@@ -16,13 +16,13 @@ from jigane.languages.base import SequenceAdapter
 from jigane.policy_materials import cochange
 from jigane.policy_materials.cochange import CoChange
 from jigane.pull_request_context.fetching import repository_cache_path
+from jigane.reviews.catalog import scope_files
 from jigane.reviews.lifecycle import (
     DesignDocOrigin,
     FeatureOrigin,
     PullRequestOrigin,
     RangeOrigin,
     Review,
-    scope_files,
 )
 from jigane.sequence.indexes import Indexes
 

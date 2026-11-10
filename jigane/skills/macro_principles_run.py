@@ -5,24 +5,24 @@ from dataclasses import replace
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude
 from jigane.llm_runs.defaults import resolve_run_defaults
-from jigane.skills import macro, policy_principles
+from jigane.skills import macro, policy_launch, policy_principles
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import DiagramPolicyEstimate, PolicyEstimate
 
 
-def principle_launches(assembly: AssemblyInput) -> tuple[macro.ExtraLaunch, ...]:
+def principle_launches(assembly: AssemblyInput) -> tuple[policy_launch.ExtraLaunch, ...]:
     """図の形の、原則ごとの起動。assembly の中で一度だけ組み立て、見積もりと実行で共有する。"""
-    return assembly.remember("principle_launches", lambda: _build_principle_launches(assembly))
 
+    def build() -> tuple[policy_launch.ExtraLaunch, ...]:
+        # 設計書の形は原則の起動を持たない
+        if macro.policy_shape(assembly.review) is not PolicyShape.DIAGRAM:
+            return ()
+        return tuple(
+            policy_launch.ExtraLaunch(item.principle.number, item.prompt)
+            for item in policy_principles.principle_prompts(assembly)
+        )
 
-def _build_principle_launches(assembly: AssemblyInput) -> tuple[macro.ExtraLaunch, ...]:
-    """設計書の形は原則の起動を持たない。"""
-    if macro.policy_shape(assembly.review) is not PolicyShape.DIAGRAM:
-        return ()
-    return tuple(
-        macro.ExtraLaunch(item.principle.number, item.prompt, index)
-        for index, item in enumerate(policy_principles.principle_prompts(assembly), start=1)
-    )
+    return assembly.remember("principle_launches", build)
 
 
 def run_policy(assembly: AssemblyInput, settings: claude.RunSettings) -> macro.MacroRun:

@@ -24,8 +24,8 @@ from jigane.languages.concurrency_core import (
     Extractor,
     WalkRules,
     line_of,
-    text_of,
 )
+from jigane.languages.node_text import text_or_empty
 
 _EXECUTOR_MIN_ARGUMENTS = 2  # executor と呼ぶ関数
 
@@ -80,12 +80,12 @@ def _callee(call: Node) -> tuple[str | None, str | None, Node | None]:
     if function is None:
         return None, None, None
     if function.type == "identifier":
-        return None, text_of(function), None
+        return None, text_or_empty(function), None
     if function.type == "attribute":
         obj = function.child_by_field_name("object")
         attribute = function.child_by_field_name("attribute")
         if obj is not None and attribute is not None:
-            return text_of(obj), text_of(attribute), obj
+            return text_or_empty(obj), text_or_empty(attribute), obj
     return None, None, None
 
 
@@ -111,7 +111,7 @@ def _bound_primitives(root: Node) -> frozenset[str]:
             continue
         _, name, _ = _callee(right)
         if name in _THREADING_PRIMITIVES:
-            found.add(text_of(left))
+            found.add(text_or_empty(left))
     return frozenset(found)
 
 
@@ -222,7 +222,7 @@ def _group_aliases(node: Node) -> list[str]:
         created = value.named_children[0]
         alias = value.child_by_field_name("alias")
         if created.type == "call" and _callee(created)[1] == "TaskGroup" and alias is not None:
-            aliases.append(text_of(alias))
+            aliases.append(text_or_empty(alias))
     return aliases
 
 

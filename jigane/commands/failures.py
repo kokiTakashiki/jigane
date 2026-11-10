@@ -20,15 +20,16 @@ from jigane.findings.records import HistoryCorruptError
 from jigane.flaky.catalog import CatalogError
 from jigane.git.process import CommandError
 from jigane.groups.definitions import GROUP_BY_ID
-from jigane.languages.grammars import GrammarError
+from jigane.languages.grammars import FETCH_COMMAND, GrammarError
 from jigane.languages.registry import LanguagePluginUnavailableError
 from jigane.llm_runs.claude import ClaudeInvocationError
 from jigane.reviews.lifecycle import ReviewError
 from jigane.sequence.roots import SequenceError
+from jigane.skills.discovery_errors import DiscoveryError, InputBudgetError
 from jigane.skills.mcp import SecurityConfigError
-from jigane.skills.pipeline import DiscoveryError, InputBudgetError
+from jigane.storage.atomic_write import StoredFileInUseError
+from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
-from jigane.storage.store import LockTimeoutError, StoredFileInUseError
 
 UNEXPECTED = "unexpected"
 # 子のプロセスの標準エラーを理由へ載せる長さの上限。失敗の原因は末尾に出やすいので末尾を残す
@@ -89,7 +90,7 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         Kind(
             "terms_declined",
             "取得しませんでした",
-            "取得するなら、もう一度 `jigane languages fetch` を実行して確認に y と答えてください",
+            f"取得するなら、もう一度 `{FETCH_COMMAND}` を実行して確認に y と答えてください",
         ),
     ),
     (
@@ -105,7 +106,7 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         Kind(
             "terms_unavailable",
             "取得しませんでした",
-            "端末から `jigane languages fetch` を実行するか、"
+            f"端末から `{FETCH_COMMAND}` を実行するか、"
             f"規約を読んだうえで `{ACCEPT_TERMS_OPTION}` を付けてください",
         ),
     ),
@@ -157,8 +158,7 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         Kind(
             "grammar",
             "文法を使えません",
-            "`jigane languages fetch` を走らせてください。"
-            "開発の木では `make setup` を走らせてください",
+            f"`{FETCH_COMMAND}` を走らせてください。開発の木では `make setup` を走らせてください",
         ),
     ),
     (

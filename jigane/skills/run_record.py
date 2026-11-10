@@ -23,7 +23,8 @@ from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
 from jigane.llm_runs.cost import total_by_source
 from jigane.reviews.lifecycle import Review
-from jigane.storage.store import review_lock, write_text_atomic
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.locking import review_lock
 from jigane.storage.store_format import upgrade_mapping
 
 STOPPED_FILE = "stopped_runs.json"

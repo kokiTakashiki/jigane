@@ -8,6 +8,7 @@ import pytest
 from fakes import (
     RECORD,
     RECORD_ROW,
+    MacroFailure,
     MacroFake,
     _single_viewpoint,
     discovered,
@@ -15,13 +16,15 @@ from fakes import (
     with_budget,
 )
 from legacy_schemas import load_finding_schema
-from review_fakes import with_map, with_range_source
+from review_fakes import stored_finding, with_map, with_range_source
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
+from jigane.commands.subcommands import show as show_module
+from jigane.commands.views.findings import over_budget_lines, stopped_notice
 from jigane.figures.models import TREE_INTRO
-from jigane.findings.records import triaged_dicts
-from jigane.groups.definitions import DIAGRAM_SHAPE, GROUP_BY_ID, MACRO
+from jigane.findings.records import read_stored_state, save_findings_state, triaged_dicts
+from jigane.groups.definitions import DIAGRAM_SHAPE, GROUP_BY_ID, MACRO, MICRO, GroupId
 from jigane.groups.policy_runs import PolicyRole
 from jigane.judgment_map.declaration import demote_headings
 from jigane.llm_runs import claude, pricing
@@ -34,7 +37,16 @@ from jigane.reviews.lifecycle import (
     Review,
     create_feature_review,
 )
-from jigane.skills import input_budget, macro, macro_principles_run, pipeline
+from jigane.reviews.selection import Held, Objected, Picked, Selection, save_selection
+from jigane.skills import (
+    discovery_errors,
+    history,
+    input_budget,
+    macro,
+    macro_principles_run,
+    pipeline,
+    policy_launch,
+)
 from jigane.skills.assembly import AssemblyInput
 from jigane.technology_list import materials as technology_materials
 from jigane.technology_list import tables as technology_tables
@@ -197,7 +209,8 @@ def test_cli_estimate(project: Path, capsys: pytest.CaptureFixture[str]) -> None
     assert "estimated_input_tokens_with_cache" not in data
     assert main(["estimate", "shop:p", "macro"]) == EXIT_OK
     out = capsys.readouterr().out
-    assert "入力トークンの見積もり（素朴な推定）" in out
+    label = "入力トークンの見積もり（検査と見積もりに使う数）"
+    assert f"{label}: {data['discovery_input_tokens']}" in out
     assert "0.36 USD" in out
     # 倍率の行（×25）は出ない
     assert "×" not in out
@@ -251,14 +264,14 @@ def test_cli_run_and_show(project: Path, capsys: pytest.CaptureFixture[str]) -> 
 
 def test_cli_discovery_failure(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
-    fake = MacroFake([], fail_discovery=True)
+    fake = MacroFake([], fails=MacroFailure.EVERYTHING)
     assert main(["run", "shop:p", "macro"], invoke=fake) == EXIT_PROCESSING_FAILURE
 
 
 def test_run_failure_raises_discovery_error(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    with pytest.raises(pipeline.DiscoveryError):
-        run(review, MacroFake([], fail_discovery=True))
+    with pytest.raises(discovery_errors.DiscoveryError):
+        run(review, MacroFake([], fails=MacroFailure.EVERYTHING))
 
 
 def test_cli_run_per_call_flag_and_totals(
@@ -352,7 +365,7 @@ def test_discovery_schema_restricts_viewpoint_to_macro(project: Path) -> None:
     }
     review = create_feature_review(project, ["src"], "q")
     fake = MacroFake([discovered("M4 利用者に向けたインターフェース")])
-    with pytest.raises(pipeline.DiscoveryError):
+    with pytest.raises(discovery_errors.DiscoveryError):
         run(review, fake)
 
 
@@ -549,10 +562,11 @@ def test_history_keeps_the_first_run_when_the_second_finds_nothing(project: Path
     review = create_feature_review(project, ["src"], "p")
     run(review, MacroFake([discovered("M2")]))
     run(review, MacroFake([]))
+    save_selection(review.id.directory(), Selection({"F1": Held()}))
     section = history_section(review)
     assert section.splitlines() == [
         "- 前の回: 指摘なし",
-        "- 2 回前 F1 M2 warning in_scope=true 区分=必読 claim M2（src/a.py:1）",
+        "- 2 回前 F1 hold claim M2",
     ]
     assert section in macro.build_diagram_prompt(AssemblyInput.load(review))
 
@@ -562,10 +576,10 @@ def test_history_orders_three_runs_newest_first_with_stable_numbers(project: Pat
     run(review, MacroFake([discovered("M2")]))
     run(review, MacroFake([]))
     run(review, MacroFake([discovered("M3")]))
+    save_selection(review.id.directory(), Selection({"F1": Held()}))
     expected = [
         "- 前の回 F2 M3 warning in_scope=true 区分=必読 claim M3（src/a.py:1）",
-        "- 2 回前: 指摘なし",
-        "- 3 回前 F1 M2 warning in_scope=true 区分=必読 claim M2（src/a.py:1）",
+        "- 3 回前 F1 hold claim M2",
     ]
     assert history_section(review).splitlines() == expected
     # 読むだけでは履歴は増えない
@@ -573,14 +587,75 @@ def test_history_orders_three_runs_newest_first_with_stable_numbers(project: Pat
     assert history_section(review).splitlines() == expected
 
 
-def test_history_has_no_cap(project: Path) -> None:
+def _run_many_rounds(review: Review, rounds: int, per_round: int) -> dict[str, str]:
+    """回を重ねて、指摘の番号から扱いの種類（pick、hold、object、none）への表を返す。"""
+    kinds: dict[str, str] = {}
+    verdicts: dict[str, Any] = {}
+    for round_index in range(rounds):
+        found = [
+            {**discovered("M2"), "claim": f"claim r{round_index} n{n}"} for n in range(per_round)
+        ]
+        run(review, MacroFake(found))
+        for n in range(per_round):
+            number = round_index * per_round + n + 1
+            kind = ("pick", "hold", "object", "none")[number % 4]
+            kinds[f"F{number}"] = kind
+            if kind == "pick":
+                verdicts[f"F{number}"] = Picked()
+            elif kind == "hold":
+                verdicts[f"F{number}"] = Held()
+            elif kind == "object":
+                verdicts[f"F{number}"] = Objected("理由")
+    save_selection(review.id.directory(), Selection(verdicts))
+    return kinds
+
+
+def test_older_rounds_keep_only_unresolved_findings_as_one_line_each(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    many = [{**discovered("M2"), "claim": f"claim {n}"} for n in range(30)]
-    run(review, MacroFake(many))
-    run(review, MacroFake([]))
-    section = history_section(review)
-    assert len(section.splitlines()) == 31
-    assert "ほか" not in section
+    kinds = _run_many_rounds(review, rounds=5, per_round=3)
+    lines = history_section(review).splitlines()
+    latest = [line for line in lines if line.startswith("- 前の回 ")]
+    older = [line for line in lines if not line.startswith("- 前の回 ")]
+    # 直前の回は今と同じ詳しさ
+    assert len(latest) == 3
+    assert all("in_scope=true 区分=必読" in line and "（src/a.py:1）" in line for line in latest)
+    # 新しい回から順に、回の中は番号順
+    expected_ids = [
+        f"F{n}"
+        for n in sorted(range(1, 13), key=lambda n: (-((n - 1) // 3), n))
+        if kinds[f"F{n}"] in ("hold", "object")
+    ]
+    assert [line.split()[3] for line in older] == expected_ids
+    for line in older:
+        number = line.split()[3]
+        assert line.split()[4] == kinds[number]
+        assert "src/a.py" not in line
+        assert "理由" not in line
+    # 直した扱いと記録の無い指摘は載らない
+    text = "\n".join(older)
+    for number, kind in kinds.items():
+        if kind in ("pick", "none") and int(number[1:]) <= 12:
+            assert f" {number} " not in text
+    assert "ほか" not in text
+
+
+def test_older_rounds_are_capped_with_a_count_and_the_section_stays_bounded(project: Path) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    per_round = 12
+    kinds = _run_many_rounds(review, rounds=7, per_round=per_round)
+    lines = history_section(review).splitlines()
+    older = [line for line in lines if not line.startswith("- 前の回 ")]
+    assert len(older) == history.OLDER_ROUND_LINE_LIMIT
+    assert len(lines) <= per_round + history.OLDER_ROUND_LINE_LIMIT
+    unresolved = sum(
+        1 for n in range(1, 6 * per_round + 1) if kinds[f"F{n}"] in ("hold", "object")
+    )
+    shown = history.OLDER_ROUND_LINE_LIMIT - 1
+    count_line = f"- ほか {unresolved - shown} 件（まだ解決していない扱いの指摘。上の行より古い）"
+    assert older[-1] == count_line
+    # 新しい回の指摘から順に載る
+    rounds = [(int(line.split()[3][1:]) - 1) // per_round for line in older[:-1]]
+    assert rounds == sorted(rounds, reverse=True)
 
 
 def test_history_is_empty_text_when_nothing_was_ever_found(project: Path) -> None:
@@ -660,7 +735,7 @@ def known_model_settings(fake: MacroFake, max_budget_usd: float) -> claude.RunSe
 def test_run_stops_before_calling_when_input_exceeds_budget(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     fake = MacroFake([])
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         macro.run_macro(AssemblyInput.load(review), known_model_settings(fake, 0.0001))
     assert fake.calls == []
     message = str(raised.value)
@@ -690,7 +765,7 @@ def test_run_continues_when_input_is_under_budget(project: Path) -> None:
 def test_run_stops_for_model_without_price_using_highest_price(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     fake = MacroFake([])
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         macro.run_macro(AssemblyInput.load(review), settings_for(fake, max_budget_usd=0.0000001))
     assert fake.calls == []
     message = str(raised.value)
@@ -829,7 +904,7 @@ def test_principle_runs_one_launch_per_principle_with_single_viewpoint(
 @pytest.mark.usefixtures("all_principle_shapes")
 def test_one_failed_principle_keeps_other_findings(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    fake = MacroFake([discovered("M4")], fail_principles=True)
+    fake = MacroFake([discovered("M4")], fails=MacroFailure.PRINCIPLES)
     result = macro_principles_run.run_policy(AssemblyInput.load(review), settings_for(fake))
     assert [f.finding.viewpoint for f in result.findings] == ["M4"]
     assert len(result.run_state.launch_failures or ()) == 4
@@ -838,8 +913,8 @@ def test_one_failed_principle_keeps_other_findings(project: Path) -> None:
 HUGE_PROMPT = "x" * 5_000_000
 
 
-def _extra(number: int, prompt: str) -> macro.ExtraLaunch:
-    return macro.ExtraLaunch(f"P{number}", prompt, number)
+def _extra(number: int, prompt: str) -> policy_launch.ExtraLaunch:
+    return policy_launch.ExtraLaunch(f"P{number}", prompt)
 
 
 def test_run_skips_only_the_over_budget_launch_and_keeps_the_others(project: Path) -> None:
@@ -853,9 +928,9 @@ def test_run_skips_only_the_over_budget_launch_and_keeps_the_others(project: Pat
     assert len(fake.calls) == 2
     assert [f["viewpoint"] for f in triaged_dicts(result.findings)] == ["M4"]
     assert result.run_state.budget_stops is not None
-    assert [stop["index"] for stop in result.run_state.budget_stops] == [2]
-    assert result.notice is not None
-    assert "原則 P2 の起動を上限のために見送りました" in result.notice
+    assert [stop.index for stop in result.run_state.budget_stops] == [2]
+    assert len(result.skipped) == 1
+    assert "原則 P2 の起動を上限のために見送りました" in stopped_notice(result.skipped[0])
 
 
 def test_run_skips_a_principle_launch_that_reaches_the_principle_limit_alone(
@@ -888,7 +963,7 @@ def test_run_skips_a_principle_launch_that_reaches_the_principle_limit_alone(
     assert len(fake.calls) == 2
     assert [f["viewpoint"] for f in triaged_dicts(result.findings)] == ["M4"]
     assert result.run_state.budget_stops is not None
-    assert [stop["index"] for stop in result.run_state.budget_stops] == [2]
+    assert [stop.index for stop in result.run_state.budget_stops] == [2]
 
 
 def test_run_stops_without_launching_when_every_launch_is_over_budget(project: Path) -> None:
@@ -896,7 +971,7 @@ def test_run_stops_without_launching_when_every_launch_is_over_budget(project: P
     fake = MacroFake([discovered("M4")])
     extras = [_extra(number, HUGE_PROMPT) for number in range(1, 6)]
     settings = known_model_settings(fake, 0.0001)
-    with pytest.raises(pipeline.InputBudgetError) as raised:
+    with pytest.raises(discovery_errors.InputBudgetError) as raised:
         macro.run_macro(AssemblyInput.load(review), settings, extras=extras)
     assert fake.calls == []
     assert "全 6 起動が失敗しました（6 個は起動しませんでした）" in str(raised.value)
@@ -906,7 +981,7 @@ def test_run_stops_without_launching_when_every_launch_is_over_budget(project: P
 def test_run_stops_for_design_shape_over_budget_as_before(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     fake = MacroFake([])
-    with pytest.raises(pipeline.InputBudgetError):
+    with pytest.raises(discovery_errors.InputBudgetError):
         macro.run_macro(AssemblyInput.load(review), known_model_settings(fake, 0.0001))
     assert fake.calls == []
 
@@ -1008,3 +1083,102 @@ def test_a_principle_launch_has_no_discards_and_its_nit_is_kept_as_a_finding(
     assert result.run_state.discovered == 2
     stored = [f for f in triaged_dicts(result.findings) if f["viewpoint"] == "P1"]
     assert [f["severity"] for f in stored] == ["nit"]
+
+
+def _policy_run_with_stops(
+    project: Path, extras: list[policy_launch.ExtraLaunch]
+) -> pipeline.PolicyGroupRun:
+    review = create_feature_review(project, ["src"], "p")
+    result = macro.run_macro(
+        AssemblyInput.load(review),
+        known_model_settings(MacroFake([discovered("M4")]), 0.5),
+        extras=extras,
+    )
+    return pipeline.PolicyGroupRun.from_json(result.run_state.to_json())
+
+
+def test_policy_budget_stops_reach_the_summary_and_the_skipped_lines(project: Path) -> None:
+    stopped = _policy_run_with_stops(project, [_extra(1, "短い"), _extra(2, HUGE_PROMPT)])
+    totals = pipeline.summarize_invocations(stopped)
+    assert [stop.index for stop in totals["budget_stops"]] == [2]
+    lines = over_budget_lines(totals)
+    assert len(lines) == 1
+    assert lines[0].startswith("起動せず: 方針の原則の起動（2 本目）、入力の見積もり ")
+
+
+def test_policy_without_budget_stops_shows_no_skipped_line(project: Path) -> None:
+    clean = _policy_run_with_stops(project, [])
+    totals = pipeline.summarize_invocations(clean)
+    assert totals["budget_stops"] == []
+    assert over_budget_lines(totals) == []
+    assert show_module.shown_budget_stop_lines(clean) == []
+
+
+def test_show_lists_the_skipped_policy_launches(project: Path) -> None:
+    stopped = _policy_run_with_stops(project, [_extra(1, "短い"), _extra(2, HUGE_PROMPT)])
+    assert show_module.shown_budget_stop_lines(None) == []
+    assert show_module.shown_budget_stop_lines(stopped)[0].startswith(
+        "起動せず: 方針の原則の起動（2 本目）、"
+    )
+    assert stopped.budget_stops is not None
+    diagram = replace(stopped, budget_stops=(replace(stopped.budget_stops[0], index=0),))
+    assert show_module.shown_budget_stop_lines(diagram)[0].startswith("起動せず: 方針の図の起動、")
+
+
+def test_policy_stop_name_uses_the_launch_position_when_a_principle_is_skipped(
+    project: Path,
+) -> None:
+    # P2 を問わない回。2 本目の起動は P3 で、起動の番号は extras の並びの位置（2）。
+    # 原則の番号（3）とは異なり、記録は位置しか持たない
+    stopped = _policy_run_with_stops(project, [_extra(1, "短い"), _extra(3, HUGE_PROMPT)])
+    lines = over_budget_lines(pipeline.summarize_invocations(stopped))
+    assert lines[0].startswith("起動せず: 方針の原則の起動（2 本目）、")
+    assert "P3" not in lines[0]
+
+
+def _store_findings(review: Review, groups: tuple[GroupId, ...]) -> None:
+    state = read_stored_state(review.id.directory())
+    for number, group in enumerate(groups, start=1):
+        state.groups[group] = (
+            stored_finding(
+                {"id": f"F{number}", "severity": "warning", "viewpoint": "M2", "claim": "C"}
+            ),
+        )
+    save_findings_state(review.id.directory(), state)
+
+
+def test_overview_guides_to_the_groups_that_have_findings(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    _store_findings(review, (MACRO, MICRO))
+    capsys.readouterr()
+    assert main(["show", "shop:p"]) == EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-3:] == [
+        "指摘を一件ずつ見るには、次のどれかを打ってください。",
+        f"  jigane show {review.id} macro（方針の指摘 1 件）",
+        f"  jigane show {review.id} micro（実装の指摘 1 件）",
+    ]
+    assert not any("security" in line for line in lines)
+
+
+def test_overview_without_findings_adds_no_guide(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_feature_review(project, ["src"], "p")
+    capsys.readouterr()
+    assert main(["show", "shop:p"]) == EXIT_OK
+    assert "指摘を一件ずつ見るには" not in capsys.readouterr().out
+
+
+def test_overview_json_has_no_guide_field(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    review = create_feature_review(project, ["src"], "p")
+    capsys.readouterr()
+    assert main(["show", "shop:p", "--json"]) == EXIT_OK
+    before = set(json.loads(capsys.readouterr().out))
+    _store_findings(review, (MACRO,))
+    assert main(["show", "shop:p", "--json"]) == EXIT_OK
+    assert set(json.loads(capsys.readouterr().out)) == before

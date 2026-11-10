@@ -46,7 +46,7 @@ from jigane.reviews.lifecycle import (
     ReviewContent,
     ReviewOrigin,
 )
-from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.store import CheckedReviewId, ReviewId, ReviewKind, check_review_id
 
 # gates だけが変わったレビューを作るための、実在の検出に当たらない警告
 EXTRA_WARNING = GateEntry(
@@ -115,7 +115,7 @@ def make_review(
     origin = _origin_for(kind, repository_root, base_tree, pull_request)
     key = "7" if kind is ReviewKind.PULL_REQUEST else "scratch"
     return Review(
-        ReviewId("octo", "hello", key, kind),
+        check_review_id(ReviewId("octo", "hello", key, kind)),
         "2026-01-01T00:00:00+00:00",
         str(repository_root),
         paths,
@@ -162,9 +162,9 @@ def build_content(project: Path, kind: ReviewKind) -> Content:
     return ReviewContent(*head, origin=origin)
 
 
-def save_review_of_kind(project: Path, key: str, kind: ReviewKind) -> ReviewId:
+def save_review_of_kind(project: Path, key: str, kind: ReviewKind) -> CheckedReviewId:
     """種類に合う出所の内容で、`local/shop` の下に指定の種類とキーのレビューを保存する。"""
-    review_id = ReviewId("local", "shop", key, kind)
+    review_id = check_review_id(ReviewId("local", "shop", key, kind))
     review_module.save_review(review_id, build_content(project, kind), "t", None, str(project))
     return review_id
 
@@ -182,7 +182,7 @@ def write_fake_review(
     base_tree = None if kind is ReviewKind.FEATURE else repository_root
     review = make_review(repository_root, [], kind=kind, base_tree=base_tree)
     directory.mkdir(parents=True, exist_ok=True)
-    review_module._write_review_file(directory, review)
+    review_module.write_review_file(directory, review)
     (directory / MAP_FILE).write_text(json.dumps(dump_map(review.map_kind)), encoding="utf-8")
     return review
 

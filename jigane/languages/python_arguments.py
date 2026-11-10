@@ -5,8 +5,8 @@ import ast
 from tree_sitter import Node
 
 from jigane.languages.base import CommandArgument
+from jigane.languages.node_text import text_of
 from jigane.languages.python_walk import call_arguments, enclosing_function
-from jigane.preconditions.required import required
 
 # 呼び出しの連鎖をたどる深さ。再帰する関数と循環で止まるための上限
 _MAX_DEPTH = 4
@@ -15,19 +15,15 @@ _MAX_DEPTH = 4
 TOP_LEVEL_COMMAND = ""
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def _string_value(node: Node) -> str:
     if node.type == "string" and not any(c.type == "interpolation" for c in node.children):
         try:
-            value = ast.literal_eval(_text(node))
+            value = ast.literal_eval(text_of(node))
         except (ValueError, SyntaxError):
-            return _text(node)
+            return text_of(node)
         if isinstance(value, str):
             return value
-    return _text(node)
+    return text_of(node)
 
 
 def _callee_name(call: Node) -> str | None:
@@ -35,10 +31,10 @@ def _callee_name(call: Node) -> str | None:
     if function is None:
         return None
     if function.type == "identifier":
-        return _text(function)
+        return text_of(function)
     if function.type == "attribute":
         attribute = function.child_by_field_name("attribute")
-        return _text(attribute) if attribute is not None else None
+        return text_of(attribute) if attribute is not None else None
     return None
 
 
@@ -47,15 +43,15 @@ def _parameter_names(function: Node) -> list[str]:
     names: list[str] = []
     for child in parameters.named_children if parameters is not None else ():
         if child.type == "identifier":
-            names.append(_text(child))
+            names.append(text_of(child))
         elif child.type in ("default_parameter", "typed_default_parameter"):
             name = child.child_by_field_name("name")
             if name is not None:
-                names.append(_text(name))
+                names.append(text_of(name))
         elif child.type == "typed_parameter":
             identifier = next((c for c in child.named_children if c.type == "identifier"), None)
             if identifier is not None:
-                names.append(_text(identifier))
+                names.append(text_of(identifier))
     return names
 
 
@@ -86,7 +82,7 @@ def _group_of(value: Node) -> tuple[str, bool] | None:
     receiver = function.child_by_field_name("object") if function is not None else None
     if receiver is None or receiver.type != "identifier":
         return None
-    return _text(receiver), callee == "add_mutually_exclusive_group"
+    return text_of(receiver), callee == "add_mutually_exclusive_group"
 
 
 class _Reader:
@@ -119,12 +115,12 @@ class _Reader:
         key = scope.id if scope is not None else self._root.id
         group = _group_of(right)
         if group is not None:
-            self._groups.setdefault(key, []).append((assignment, _text(left), *group))
+            self._groups.setdefault(key, []).append((assignment, text_of(left), *group))
             return
         command = _parser_command(right)
         if command is None:
             return
-        self._assignments.setdefault(key, []).append((assignment, _text(left), command))
+        self._assignments.setdefault(key, []).append((assignment, text_of(left), command))
 
     def arguments(self, path: str) -> list[CommandArgument]:
         found: list[CommandArgument] = []
@@ -135,7 +131,7 @@ class _Reader:
             receiver = function.child_by_field_name("object") if function is not None else None
             if receiver is None or receiver.type != "identifier":
                 continue
-            variable = _text(receiver)
+            variable = text_of(receiver)
             group = self._latest_group(call, variable)
             if group is not None:
                 assignment, parent, exclusive = group
@@ -191,7 +187,7 @@ class _Reader:
         index = parameters.index(name)
         commands: list[str] = []
         for call in self._calls:
-            if _callee_name(call) != _text(function_name):
+            if _callee_name(call) != text_of(function_name):
                 continue
             callee = call.child_by_field_name("function")
             shift = 1 if is_method and callee is not None and callee.type == "attribute" else 0
@@ -202,7 +198,7 @@ class _Reader:
             if argument is None or argument.type != "identifier":
                 # 引数が識別子でない呼び出しは、parser の出どころを構文だけでは決められない
                 continue
-            resolved = self._resolve(_text(argument), call, depth + 1, visiting | {function.id})
+            resolved = self._resolve(text_of(argument), call, depth + 1, visiting | {function.id})
             commands.extend(c for c in resolved if c not in commands)
         return commands
 
@@ -216,7 +212,7 @@ def _argument(
 
     def original(key: str) -> str | None:
         node = keywords.get(key)
-        return _text(node) if node is not None else None
+        return text_of(node) if node is not None else None
 
     required_text = original("required")
     if is_positional:

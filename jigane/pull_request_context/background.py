@@ -17,10 +17,12 @@ from typing import Any, assert_never
 import pathspec
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand, build_git_command
+from jigane.git.revision import resolve_commit_sha
 from jigane.git.tree_files import is_inside_tree, read_tree_text
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context.fetching import PullRequestMetadata
-from jigane.storage.store import write_text_atomic
+from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
 
 BACKGROUND_FILE = "background.json"
@@ -45,6 +47,10 @@ _SQUASH_SUBJECT_PATTERN = re.compile(r"^(.*?)\s*\(#(\d+)\)$")
 _RECORD_START = "\x01"
 _FIELD_SEPARATOR = "\x02"
 _BODY_END = "\x03"
+
+
+# 日本語のパスを八進数でなく生で出し、pathspec を glob でなく文字どおりに読む
+_LOG_GLOBAL_OPTIONS = ("-c", "core.quotepath=off", "--literal-pathspecs")
 
 
 @dataclass(frozen=True)
@@ -218,21 +224,19 @@ def find_past_pull_requests(
         return []
     # first-parent と -m で、マージのコミットも squash のコミットも 1 本の履歴に並ぶ
     output = process.run_command(
-        [
-            "git",
-            "-c",
-            "core.quotepath=off",
-            "--literal-pathspecs",
-            "log",
-            "--first-parent",
-            "-m",
-            "--no-renames",
-            "--name-only",
-            f"--format={_RECORD_START}%s{_FIELD_SEPARATOR}%b{_BODY_END}",
-            merge_base,
-            "--",
-            *paths,
-        ],
+        build_git_command(
+            GitSubcommand.LOG,
+            global_options=_LOG_GLOBAL_OPTIONS,
+            options=[
+                "--first-parent",
+                "-m",
+                "--no-renames",
+                "--name-only",
+                f"--format={_RECORD_START}%s{_FIELD_SEPARATOR}%b{_BODY_END}",
+            ],
+            revisions=[resolve_commit_sha(git_dir, merge_base)],
+            pathspecs=paths,
+        ),
         cwd=git_dir,
     )
     found: dict[int, tuple[str, dict[str, None]]] = {}
@@ -265,23 +269,21 @@ def find_past_changes(git_dir: Path, merge_base: str, pairs: list[FilePair]) -> 
     if not paths:
         return []
     output = process.run_command(
-        [
-            "git",
-            "-c",
-            "core.quotepath=off",
-            "--literal-pathspecs",
-            "log",
-            "-m",
-            "--no-renames",
-            "--name-only",
-            (
-                f"--format={_RECORD_START}%H{_FIELD_SEPARATOR}%P{_FIELD_SEPARATOR}%s"
-                f"{_FIELD_SEPARATOR}%b{_BODY_END}"
-            ),
-            merge_base,
-            "--",
-            *paths,
-        ],
+        build_git_command(
+            GitSubcommand.LOG,
+            global_options=_LOG_GLOBAL_OPTIONS,
+            options=[
+                "-m",
+                "--no-renames",
+                "--name-only",
+                (
+                    f"--format={_RECORD_START}%H{_FIELD_SEPARATOR}%P{_FIELD_SEPARATOR}%s"
+                    f"{_FIELD_SEPARATOR}%b{_BODY_END}"
+                ),
+            ],
+            revisions=[resolve_commit_sha(git_dir, merge_base)],
+            pathspecs=paths,
+        ),
         cwd=git_dir,
     )
     found: dict[tuple[PastChangeKind, str | int], tuple[str, dict[str, None]]] = {}

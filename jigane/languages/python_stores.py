@@ -20,10 +20,18 @@ from jigane.languages.base import (
     StoreRole,
     StoreSide,
 )
+from jigane.languages.python_ast import parse_python
+from jigane.storage.store_suffixes import STORED_FILE_SUFFIXES
 
-_SUFFIXES = (".json", ".jsonl", ".csv", ".tsv")
+# 保存物の拡張子のうち、この読み取りが鍵を取れる JSON、CSV、TSV の形式
+_READABLE_STORE_FORMATS = frozenset({"json", "jsonl", "csv", "tsv"})
+_SUFFIXES = tuple(
+    f".{suffix}" for suffix in sorted(_READABLE_STORE_FORMATS & STORED_FILE_SUFFIXES)
+)
 _READ_SOURCES = {"load", "loads", "DictReader"}
-_WRITE_CALLS = {"dump", "dumps", "writerow", "writerows", "DictWriter"}
+_CSV_WRITE_CALLS = {"writerow", "writerows", "DictWriter"}
+_JSON_WRITE_CALLS = {"dump", "dumps"}
+_WRITE_CALLS = _JSON_WRITE_CALLS | _CSV_WRITE_CALLS
 _WRITE_METHODS = {"to_json", "to_dict"}
 _READ_METHODS = {"from_json", "from_dict"}
 
@@ -774,9 +782,7 @@ def _write_kinds(
     function: _Function, calls: list[ast.Call], sinks: dict[int, _Sink]
 ) -> set[StoreFormat]:
     kinds = {
-        StoreFormat.CSV
-        if _call_name(c) in ("writerow", "writerows", "DictWriter")
-        else StoreFormat.JSON
+        StoreFormat.CSV if _call_name(c) in _CSV_WRITE_CALLS else StoreFormat.JSON
         for c in calls
         if _call_name(c) in _WRITE_CALLS
     } | {s.kind for s in sinks.values()}
@@ -798,7 +804,7 @@ def _add_written_keys(
     called = _call_name(node)
     if called == "asdict" and owner is not None:
         side.keys |= _fields_of(owner)
-    if called in ("DictWriter", "writerow", "writerows"):
+    if called in _CSV_WRITE_CALLS:
         for arg in [*node.args, *(k.value for k in node.keywords)]:
             side.add(*_expr_keys(arg, function, path, vocab, 0, indirect=called != "writerows"))
     if id(node) in sinks and (passed := _sink_argument(node, sinks[id(node)])) is not None:
@@ -840,7 +846,7 @@ def _sink_of(function: _Function, owner: ast.ClassDef | None) -> _Sink | None:
         if not isinstance(node, ast.Call):
             continue
         called = _call_name(node)
-        if called in ("writerow", "dump", "dumps"):
+        if called in _JSON_WRITE_CALLS | {"writerow"}:
             carried = node.args[:1]
             kind = StoreFormat.CSV if called == "writerow" else StoreFormat.JSON
         elif called == "DictWriter":
@@ -914,13 +920,9 @@ def store_accesses(sources: Mapping[str, str]) -> list[StoreAccess]:
     """関数ごとの保存物の書く側と読む側を、ファイルの並びの順に返す。"""
     parsed: dict[str, ast.Module] = {}
     for path, text in sources.items():
-        try:
-            parsed[path] = ast.parse(text)
-        except (SyntaxError, RecursionError, MemoryError, ValueError):
-            # 構文を読めないファイルは、保存物の手がかりを拾えないので飛ばす。
-            # 入れ子の深い式は RecursionError、巨大な入力は MemoryError、
-            # NUL 文字は ValueError で落ちる
-            continue
+        # 構文を読めないファイルは、保存物の手がかりを拾えないので飛ばす
+        if (tree := parse_python(text)) is not None:
+            parsed[path] = tree
     vocab = _vocabulary(parsed)
     found: list[StoreAccess] = []
     for path, tree in parsed.items():

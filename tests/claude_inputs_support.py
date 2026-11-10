@@ -33,7 +33,7 @@ ATTACHMENT = "docs/reports/memo.md"
 WRAPPER_ENVIRONMENT = frozenset({"PWD", "OLDPWD", "SHLVL", "_"})
 
 
-class Launch(dict[str, Any]):
+class RecordedLaunch(dict[str, Any]):
     """起動の記録の 1 件。kind はレビューの種類、group は run の群、role は見分けた役。"""
 
     @property
@@ -71,7 +71,7 @@ def _run(
     group: GroupId,
     work: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> list[Launch]:
+) -> list[RecordedLaunch]:
     records = work / f"records-{kind}-{group}-{len(list(work.glob('records-*')))}"
     records.mkdir()
     parent = work / f"parent-{records.name}.json"
@@ -88,7 +88,7 @@ def _run(
     parent.write_text(json.dumps(dict(os.environ)), encoding="utf-8")
     assert main(arguments) == EXIT_OK, arguments
     return [
-        Launch(
+        RecordedLaunch(
             json.loads(path.read_text(encoding="utf-8")),
             group=group.value,
             kind=kind.value,
@@ -186,13 +186,13 @@ def _new_review(arguments: list[str]) -> str:
 
 
 @contextmanager
-def recorded_launches(work: Path) -> Iterator[list[Launch]]:
+def recorded_launches(work: Path) -> Iterator[list[RecordedLaunch]]:
     """4 種類のレビューを作り、macro、micro、security を走らせる。
 
     ファイルのレビューは MCP ありも走らせる。
     """
     monkeypatch = pytest.MonkeyPatch()
-    launches: list[Launch] = []
+    launches: list[RecordedLaunch] = []
     try:
         home = work / "home"
         monkeypatch.setenv("JIGANE_HOME", str(home))
@@ -257,8 +257,8 @@ def recorded_launches(work: Path) -> Iterator[list[Launch]]:
 
 def _run_groups(
     name: str, kind: ReviewKind, work: Path, monkeypatch: pytest.MonkeyPatch
-) -> list[Launch]:
-    launches: list[Launch] = []
+) -> list[RecordedLaunch]:
+    launches: list[RecordedLaunch] = []
     for group in (GroupId.MACRO, GroupId.MICRO, GroupId.SECURITY):
         launches += _run(["run", name, group.value], kind, group, work, monkeypatch)
     return launches

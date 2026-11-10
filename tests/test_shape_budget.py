@@ -114,12 +114,12 @@ def test_only_the_diagram_shape_has_a_principle_budget() -> None:
         assert resolve_run_defaults(group, None, None).budget.principles is None
 
 
-def test_principle_runs_match_the_principle_numbers_and_sum_to_44_cents() -> None:
+def test_principle_runs_match_the_principle_numbers_and_sum_to_52_cents() -> None:
     assert list(PRINCIPLE_RUNS) == [principle.number for principle in design_principles()]
     total = DIAGRAM_SHAPE.max_budget_usd + sum(
         run.max_budget_usd for run in PRINCIPLE_RUNS.values()
     )
-    assert total == pytest.approx(0.44)
+    assert total == pytest.approx(0.52)
 
 
 def test_model_and_limit_arguments_reach_all_five_diagram_launches() -> None:
@@ -128,7 +128,7 @@ def test_model_and_limit_arguments_reach_all_five_diagram_launches() -> None:
     assert budget.principles is not None
     assert set(budget.principles) == set(PRINCIPLE_RUNS)
     assert set(budget.principles.values()) == {
-        claude.RunBudget("m-override", 0.9, reserve_margin=False, output_allowance_tokens=12_000)
+        claude.RunBudget("m-override", 0.9, reserve_margin=False, output_allowance_tokens=30_000)
     }
 
 
@@ -145,7 +145,7 @@ def test_default_diagram_run_uses_sonnet_for_the_diagram_and_haiku_for_the_princ
     # 原則の起動は並行して走るため、順序は問わない
     assert (
         sorted((c.model, c.budget.limit_usd) for c in fake.principle_calls)
-        == [("claude-haiku-5-5", 0.02)] * 4
+        == [("claude-haiku-5-5", 0.04)] * 4
     )
 
 
@@ -256,10 +256,12 @@ def test_estimate_json_uses_the_group_limit_and_includes_the_output_part(
     expected = estimate["expected"]
     assert expected["output_multiplier_source"] == MultiplierSource.DEFAULT.value
     assert expected["output_multiplier"] == DEFAULT_OUTPUT_MULTIPLIER
-    assert expected["total_usd"] == pytest.approx(
-        estimate["input_cost_usd"] * DEFAULT_OUTPUT_MULTIPLIER
-    )
-    assert expected["total_usd"] > estimate["input_cost_usd"]
+    # 倍率は過去の実額と入力の費用の比なので、見込みの元は入力だけの費用（旧式）のまま
+    plain_input_usd = pricing.input_cost_usd(
+        "claude-sonnet-5-5", pricing.estimate_input_tokens(estimate["materials_bytes"])
+    ).usd
+    assert expected["total_usd"] == pytest.approx(plain_input_usd * DEFAULT_OUTPUT_MULTIPLIER)
+    assert expected["total_usd"] > plain_input_usd
     assert expected["exceeds_budget"] is (expected["total_usd"] >= 0.5)
     assert ("budget_warning" in expected) is expected["exceeds_budget"]
     assert not set(estimate) & {

@@ -16,16 +16,15 @@ from jigane.skills.policy_figures import (
     section_texts,
 )
 
-CSHARP = "class A { }\n"
+SOURCE = "class A { }\n"
 PYTHON = "x = 1\n"
-NOTE = "対応外の言語: C#（jigane の C# の解析は、この表の読み取りにまだ対応していない）。"
 NOSEQ_BUILTIN_NOTE = (
     "対応外の言語: no-sequence"
     "（jigane の no-sequence の解析は、この表の読み取りにまだ対応していない）。"
 )
-BUILTIN_NOTE_CSHARP_SWIFT = (
-    "対応外の言語: C#、Swift"
-    "（jigane の C#、Swift の解析は、この表の読み取りにまだ対応していない）。"
+BUILTIN_NOTE_NOSEQ_SWIFT = (
+    "対応外の言語: Swift、no-sequence"
+    "（jigane の Swift、no-sequence の解析は、この表の読み取りにまだ対応していない）。"
 )
 PLUGIN_NOTE = "対応外の言語: no-sequence（入れたプラグインが、この表の読み取りを持たない）。"
 BOTH_NOTE = (
@@ -50,39 +49,13 @@ def _unsupported(review: Review) -> dict[str, tuple[str, ...]]:
     }
 
 
-def test_csharp_only_change_is_unsupported_for_the_interface_tables(
+def test_swift_change_reports_the_unsupported_figures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP})
-    assert _unsupported(review) == {
-        "commands": ("C#",),
-        "file_paths": ("C#",),
-        "stores": ("C#",),
-        "field_copies": ("C#",),
-        "callers": ("C#",),
-        "discriminators": ("C#",),
-    }
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
-    assert NOTE in text
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        (
-            "src/A.cs",
-            {"commands", "file_paths", "stores", "field_copies", "callers", "discriminators"},
-        ),
-        # Swift はファイルの名前の組み立て、項目の写し、呼ぶ側の表を読める
-        ("src/B.swift", {"commands", "stores"}),
-    ],
-)
-def test_swift_and_csharp_changes_report_the_unsupported_figures(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, expected: set[str]
-) -> None:
-    # 判別の流れ図は DiscriminatorReader を持たない C# だけが対応外に挙がり、Swift は読める
-    review = _review(tmp_path, monkeypatch, {name: CSHARP})
-    assert set(_unsupported(review)) == expected
+    # Swift はファイルの名前の組み立て、項目の写し、保存物の表、判別の流れ図を読める。
+    # 読めないのは副コマンドの引数
+    review = _review(tmp_path, monkeypatch, {"src/B.swift": SOURCE})
+    assert set(_unsupported(review)) == {"commands"}
 
 
 def test_python_only_change_is_not_unsupported(
@@ -105,34 +78,37 @@ def test_non_language_files_are_not_unsupported(
 def test_mixed_change_names_only_the_unsupported_languages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    files = {"src/a.py": PYTHON, "src/A.cs": CSHARP, "src/B.swift": "struct B {}\n"}
+    files = {"src/a.py": PYTHON, "src/a.nosq": SOURCE, "src/B.swift": "struct B {}\n"}
     review = _review(tmp_path, monkeypatch, files)
-    assert _unsupported(review)["commands"] == ("C#", "Swift")
-    assert _unsupported(review)["stores"] == ("C#", "Swift")
-    assert _unsupported(review)["file_paths"] == ("C#",)
+    register_no_sequence_adapter(monkeypatch)
+    assert _unsupported(review)["commands"] == ("Swift", "no-sequence")
+    assert _unsupported(review)["stores"] == ("no-sequence",)
+    assert _unsupported(review)["file_paths"] == ("no-sequence",)
     sections = section_texts(AssemblyInput.load(review), FigureSlot.AFTER_TREE)
-    assert any(BUILTIN_NOTE_CSHARP_SWIFT in s for s in sections)
+    assert any(BUILTIN_NOTE_NOSEQ_SWIFT in s for s in sections)
     assert not any("Python" in s for s in sections if "対応外" in s)
 
 
 def test_json_has_unsupported_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP})
+    review = _review(tmp_path, monkeypatch, {"src/a.nosq": SOURCE})
+    register_no_sequence_adapter(monkeypatch)
     assert main(["diagrams", "--json", str(review.id)]) == 0
     payload = json.loads(capsys.readouterr().out)
     entry = next(u for u in payload["unsupported"] if u["key"] == "commands")
-    assert entry["languages"] == [{"name": "C#", "builtin": True}]
-    assert entry["note"] == NOTE
+    assert entry["languages"] == [{"name": "no-sequence", "builtin": True}]
+    assert entry["note"] == NOSEQ_BUILTIN_NOTE
     assert payload == diagrams_of(review).to_json()
 
 
 def test_cli_text_prints_the_unsupported_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP})
+    review = _review(tmp_path, monkeypatch, {"src/a.nosq": SOURCE})
+    register_no_sequence_adapter(monkeypatch)
     assert main(["diagrams", str(review.id)]) == 0
-    assert NOTE in capsys.readouterr().out
+    assert NOSEQ_BUILTIN_NOTE in capsys.readouterr().out
 
 
 def test_language_without_any_interface_is_unsupported_for_every_interface_figure(
@@ -210,10 +186,12 @@ def test_sequence_section_names_the_language_without_an_interface(
 def test_builtin_languages_share_one_sentence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    review = _review(tmp_path, monkeypatch, {"src/A.cs": CSHARP, "src/B.swift": "struct B {}\n"})
+    review = _review(tmp_path, monkeypatch, {"src/a.nosq": SOURCE, "src/B.swift": "struct B {}\n"})
+    register_no_sequence_adapter(monkeypatch)
     notes = {u.note() for u in diagrams_of(review).unsupported}
-    # ファイルの名前の組み立てと項目の写しは Swift が読めるので、その図の文は C# だけを挙げる
-    assert notes == {BUILTIN_NOTE_CSHARP_SWIFT, NOTE}
+    # ファイルの名前の組み立てと項目の写しは Swift が読めるので、その図の文は
+    # no-sequence だけを挙げる
+    assert notes == {BUILTIN_NOTE_NOSEQ_SWIFT, NOSEQ_BUILTIN_NOTE}
 
 
 def test_plugin_language_gets_the_plugin_sentence(

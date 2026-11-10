@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pr_support import git
 
+from jigane.commands.subcommands.design import render, to_dict
 from jigane.design.mentions import Mention, MentionKind
 from jigane.design.parse import parse_design
 from jigane.design.recommend import (
@@ -26,6 +27,15 @@ from jigane.design.recommend import (
     Trace,
     recommend,
 )
+from jigane.design.submodule_notes import submodule_lines
+from jigane.design.submodule_status import (
+    ConflictedSubmodule,
+    DifferentCommitSubmodule,
+    SubmoduleNote,
+    UninitializedSubmodule,
+    UnrecordedSubmodule,
+)
+from jigane.git import process
 
 FILES = {
     "shop/cart.py": """\
@@ -186,15 +196,22 @@ def test_review_store_design_recommends_review(tmp_path: Path) -> None:
     assert isinstance(review, Found)
 
 
-def test_tests_are_excluded_from_path_and_subcommand_hits(tmp_path: Path) -> None:
+def test_tests_are_found_by_path_but_not_recommended_or_indexed_for_subcommands(
+    tmp_path: Path,
+) -> None:
     root = _work(tmp_path)
     (root / "tests/cli").mkdir(parents=True)
     (root / "tests/cli/more.py").write_text(
         'def register(s):\n    s.add_parser("run")\n', encoding="utf-8"
     )
-    document = parse_design("# 題\n\n## 1. 序論\n\n`tests/test_cart.py` と `jigane run`。\n")
-    matches = {m.mention.name: m for m in recommend(root, document).matches}
-    assert isinstance(matches["tests/test_cart.py"], NotFound)
+    (root / "tests/test_cart.py").write_text("def test_cart(): ...\n", encoding="utf-8")
+    document = parse_design(
+        "# 題\n\n## 1. 序論\n\n`tests/test_cart.py` と `jigane run`、`Cart`。\n"
+    )
+    result = recommend(root, document)
+    matches = {m.mention.name: m for m in result.matches}
+    assert isinstance(matches["tests/test_cart.py"], Found)
+    assert "tests/test_cart.py" not in {c.path for c in result.candidates}
     run = matches["run"]
     assert isinstance(run, Found)
     assert {loc.path for loc in run.locations} == {"shop/cli/commands/run.py"}
@@ -208,7 +225,7 @@ def test_sources_under_docs_are_not_indexed(tmp_path: Path) -> None:
     assert "docs/scratch.py" not in {c.path for c in result.candidates}
 
 
-def test_more_sections_rank_first_then_direct_above_one_step(tmp_path: Path) -> None:
+def test_direct_sources_rank_above_one_step_regardless_of_section_count(tmp_path: Path) -> None:
     root = _work(tmp_path)
     text = (
         "# 題\n\n## 1. a\n\n`Cart`\n\n## 2. b\n\n`Cart`\n\n## 3. c\n\n`Cart` `shop/unrelated.py`\n"
@@ -216,10 +233,27 @@ def test_more_sections_rank_first_then_direct_above_one_step(tmp_path: Path) -> 
     result = recommend(root, parse_design(text))
     order = [(c.path, c.kind, c.section_count) for c in result.candidates]
     assert order[0] == ("shop/cart.py", CandidateKind.DIRECT, 3)
-    # 3 節の起点から辿った 2 件は、1 節だけが名指す直接の unrelated より上に来る
-    assert order.index(("shop/app.py", CandidateKind.ONE_STEP, 3)) < order.index(
-        ("shop/unrelated.py", CandidateKind.DIRECT, 1)
+    # 直接引き当たったソースは、節の数に関わらず一段のたどりより上に来る
+    assert order.index(("shop/unrelated.py", CandidateKind.DIRECT, 1)) < order.index(
+        ("shop/app.py", CandidateKind.ONE_STEP, 3)
     )
+
+
+def test_direct_source_enters_a_small_limit_before_adapterless_files(tmp_path: Path) -> None:
+    root = _work(tmp_path)
+    (root / "notes.md").write_text("# n\n", encoding="utf-8")
+    (root / "config").mkdir()
+    (root / "config" / "conf.toml").write_text("a = 1\n", encoding="utf-8")
+    text = (
+        "# 題\n\n## 1. a\n\n`notes.md` `config/conf.toml`\n\n"
+        "## 2. b\n\n`notes.md` `config/conf.toml`\n\n"
+        "## 3. c\n\n`Pricing`\n"
+    )
+    result = recommend(root, parse_design(text), limit=2)
+    paths = [c.path for c in result.candidates]
+    assert paths[0] == "shop/pricing.py"
+    assert paths[1] == "config/conf.toml"
+    assert result.omitted == 2
 
 
 def test_limit_must_be_positive(tmp_path: Path) -> None:
@@ -660,3 +694,128 @@ def test_stored_file_trace_skips_a_file_with_a_deep_attribute_chain(
     paths = {c.path for c in result.candidates}
     assert "lib/paths.py" in paths
     assert "lib/deep.py" not in paths
+
+
+def test_subcommands_are_found_outside_directories_named_cli(tmp_path: Path) -> None:
+    root = tmp_path / "work"
+    git(tmp_path, "init", "-q", str(root))
+    target = root / "pkg/commands/subcommands"
+    target.mkdir(parents=True)
+    (target / "new.py").write_text(
+        """\
+RUN_COMMAND = "run"
+
+
+def register(subparsers):
+    subparsers.add_parser("new")
+    subparsers.add_parser(
+        "design",
+    )
+    subparsers.add_parser(RUN_COMMAND)
+    subparsers.add_parser(other.NAME)
+""",
+        encoding="utf-8",
+    )
+    git(root, "add", ".")
+    document = parse_design(
+        "# 題\n\n## 1. 序論\n\n`jigane new`、`jigane design`、`jigane run`。\n"
+    )
+    matches = {m.mention.name: m for m in recommend(root, document).matches}
+    lines = {}
+    for name in ("new", "design", "run"):
+        match = matches[name]
+        assert isinstance(match, Found)
+        assert [loc.path for loc in match.locations] == ["pkg/commands/subcommands/new.py"]
+        lines[name] = match.locations[0].line
+    assert lines == {"new": 5, "design": 7, "run": 1}
+
+
+def test_submodule_states_are_noted(tmp_path: Path) -> None:
+    child = tmp_path / "child"
+    child.mkdir()
+    git(child, "init", "-q")
+    (child / "a.py").write_text("x = 1\n", encoding="utf-8")
+    git(child, "add", ".")
+    git(child, "commit", "-q", "-m", "one")
+    root = tmp_path / "parent"
+    root.mkdir()
+    git(root, "init", "-q")
+    (root / "README.md").write_text("# p\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "init")
+    git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(child), "cli")
+    git(root, "commit", "-q", "-m", "sub")
+    document = parse_design("# 題\n\n## 1. 序論\n\n`Cart`。\n")
+    assert recommend(root, document).submodules == ()
+    recorded = git(root, "rev-parse", "HEAD:cli").strip()
+
+    (root / "cli/a.py").write_text("x = 2\n", encoding="utf-8")
+    git(root / "cli", "commit", "-q", "-am", "two")
+    moved = git(root / "cli", "rev-parse", "HEAD").strip()
+    assert recommend(root, document).submodules == (
+        DifferentCommitSubmodule("cli", recorded, moved),
+    )
+
+    git(root, "submodule", "deinit", "-q", "-f", "cli")
+    assert recommend(root, document).submodules == (UninitializedSubmodule("cli", recorded),)
+
+
+def _fake_status(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    def run_command(args: list[str], **_: object) -> str:
+        if args[:2] == ["git", "submodule"]:
+            return status
+        raise process.CommandError(args, "bad revision", returncode=128)
+
+    monkeypatch.setattr(process, "run_command", run_command)
+
+
+def test_conflicted_and_unrecorded_submodules_are_noted_not_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    status = f"U{'0' * 40} merging (heads/x)\n+{'b' * 40} lonely (heads/y)\n {'c' * 40} same\n"
+    _fake_status(monkeypatch, status)
+    notes = recommend(tmp_path, parse_design("# 題\n\n## 1. 序論\n\n`Cart`。\n")).submodules
+    assert notes == (ConflictedSubmodule("merging"), UnrecordedSubmodule("lonely", "b" * 40))
+
+
+def test_every_submodule_note_has_its_own_line_and_json_state() -> None:
+    notes: tuple[SubmoduleNote, ...] = (
+        UninitializedSubmodule("cli", "a" * 40),
+        DifferentCommitSubmodule("lib", "c" * 40, "b" * 40),
+        ConflictedSubmodule("mrg"),
+        UnrecordedSubmodule("lone", "e" * 40),
+    )
+    lines = submodule_lines(notes)
+    assert "`cli`" in lines[0]
+    assert "`lib`" in lines[1]
+    assert "`mrg`" in lines[2]
+    assert "`lone`" in lines[3]
+    assert "初期化していない" in lines[0]
+    assert "衝突" in lines[2]
+    assert "引けず" in lines[3]
+    result = Recommendation((), 0, (), notes)
+    assert render(result).count("注記") == 4
+    assert [
+        (d["path"], d["state"], d["checked_out"], d["recorded"])
+        for d in to_dict(result)["submodules"]
+    ] == [
+        ("cli", "uninitialized", None, "a" * 40),
+        ("lib", "different_commit", "b" * 40, "c" * 40),
+        ("mrg", "conflicted", None, None),
+        ("lone", "unrecorded", "e" * 40, None),
+    ]
+
+
+def test_aliased_import_of_a_stored_constant_is_found(tmp_path: Path) -> None:
+    files = {
+        "lib/paths.py": 'NOTES_FILE = "notes.json"\n',
+        "lib/aliased.py": (
+            "from lib.paths import NOTES_FILE as NOTES\n\n\ndef load():\n    return NOTES\n"
+        ),
+    }
+    for relative, text in files.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    result = recommend(tmp_path, parse_design("# 題\n\n## 1. 序論\n\n`notes.json` を保存する。\n"))
+    assert "lib/aliased.py" in {c.path for c in result.candidates}

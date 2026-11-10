@@ -7,8 +7,7 @@ import pytest
 from store_format_support import check_upgrades
 
 from jigane.pull_request_context import background, bots
-from jigane.reviews import lifecycle as review_module
-from jigane.reviews import selection
+from jigane.reviews import review_formats, selection
 from jigane.skills import run_record
 
 type Table = Mapping[int, Callable[[Any], dict[str, Any]]]
@@ -17,9 +16,9 @@ CASES: list[tuple[str, int, Table]] = [
     ("selection", selection.SELECTION_FORMAT, selection._UPGRADES),
     ("background", background.BACKGROUND_FORMAT, background._UPGRADES),
     ("bots", bots.BOT_COMMENTS_FORMAT, bots._UPGRADES),
-    ("review", review_module.REVIEW_FORMAT, review_module._REVIEW_UPGRADES),
-    ("regions", review_module.REGIONS_FORMAT, review_module._REGIONS_UPGRADES),
-    ("pairs", review_module.PAIRS_FORMAT, review_module._PAIRS_UPGRADES),
+    ("review", review_formats.REVIEW_FORMAT, review_formats._REVIEW_UPGRADES),
+    ("regions", review_formats.REGIONS_FORMAT, review_formats._REGIONS_UPGRADES),
+    ("pairs", review_formats.PAIRS_FORMAT, review_formats._PAIRS_UPGRADES),
     ("in_progress", run_record.IN_PROGRESS_FORMAT, run_record._IN_PROGRESS_UPGRADES),
     ("stopped", run_record.STOPPED_FORMAT, run_record._STOPPED_UPGRADES),
 ]

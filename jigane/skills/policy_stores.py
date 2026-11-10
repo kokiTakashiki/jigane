@@ -51,6 +51,20 @@ INTRO = (
     "独自の形式は、書く側と読む側の片方が特定できないことがある。"
     "ファイル名が引数で渡る保存物も、形式によらず、相手側は呼ぶ側の引数の先にあって拾えない。"
     "そのときは「見つからない」でなく「特定できていない」と書く。"
+    "\n\nSwift は、`UserDefaults.standard` の `set` と `removeObject` を書く側、"
+    "`string(forKey:)` などの `forKey:` の読み込みを読む側とし、"
+    "一つの保存物「UserDefaults」にまとめた。"
+    "鍵は、文字列リテラル、型の `static let` の定数、"
+    "`String` を生の値に持つ列挙型の case（`.rawValue`）から文字列に解いた。"
+    "引数で渡るなど解けない鍵は、鍵の欄に載せていない。"
+    "Codable の JSON は、`JSONEncoder()` の `encode` を書く側、"
+    "`JSONDecoder()` の `decode(型.self, from:)` を読む側とし、"
+    "型の名前から「型 の JSON」の保存物にまとめた。"
+    "鍵は、`Codable`、`Encodable`、`Decodable` を継承する構造体とクラスの格納プロパティの名前。"
+    "型の注釈の無い値の `encode` は数えていない。"
+    "Keychain は、`SecItemAdd`、`SecItemUpdate`、`SecItemDelete` を書く側、"
+    "`SecItemCopyMatching` を読む側とし、一つの保存物「Keychain」にまとめた。"
+    "鍵は、問い合わせの辞書の `kSecAttrAccount` の値。"
 )
 HEADER = (
     "保存物",

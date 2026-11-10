@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from jigane.findings.records import (
+    KEY_OUT_OF_SCOPE,
     ConcludedInScope,
     ConcludedOutOfScope,
     NoConclusion,
@@ -39,7 +40,7 @@ class OutOfScope:
     def shaped(self) -> dict[str, Any]:
         """保存する指摘の形。記録は out_of_scope に入れる。"""
         shaped = dict(self.candidate)
-        shaped["out_of_scope"] = self.record
+        shaped[KEY_OUT_OF_SCOPE] = self.record
         return shaped
 
 

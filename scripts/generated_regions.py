@@ -23,12 +23,17 @@ def write_exact(path: Path, text: str) -> None:
 def layers_lines(pyproject: str) -> list[str]:
     """layers 契約の層の行を、上の層から順に返す。
 
-    契約がちょうど一つでなければ ValueError にする。
+    サブパッケージの層（containers が jigane）の契約がちょうど一つでなければ ValueError にする。
+    モジュールの層の契約（containers を持たない）は数えない。
     """
     contracts = tomllib.loads(pyproject)["tool"]["importlinter"]["contracts"]
-    layered = [contract for contract in contracts if contract["type"] == "layers"]
+    layered = [
+        contract
+        for contract in contracts
+        if contract["type"] == "layers" and contract.get("containers") == ["jigane"]
+    ]
     if len(layered) != 1:
-        raise ValueError("layers 契約がちょうど一つ要る")
+        raise ValueError("サブパッケージの layers 契約がちょうど一つ要る")
     lines: list[str] = layered[0]["layers"]
     return lines
 

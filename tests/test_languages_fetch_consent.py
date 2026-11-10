@@ -1,10 +1,11 @@
 import importlib.metadata
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from jigane import commands
-from jigane.commands.exit_codes import EXIT_OK
+from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
 from jigane.commands.public_urls import installed_version, terms_urls
 from jigane.commands.terms_consent import terms_notice
 from jigane.languages import fetch_main
@@ -156,3 +157,29 @@ def test_installed_version_is_none_without_distribution(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(importlib.metadata, "version", missing)
     assert installed_version() is None
+
+
+def test_fetch_name_check_with_a_broken_enabled_file_stops_before_consent(
+    downloads: list[str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    (home / "languages.json").write_text("{not json\x1b[31m", encoding="utf-8")
+    code = commands.main(
+        ["languages", "fetch", "python"], is_terminal=lambda: True, read_answer=_forbidden
+    )
+    err = capsys.readouterr().err
+    assert code == EXIT_PROCESSING_FAILURE
+    assert downloads == []
+    assert err.startswith("jigane: ")
+    assert "languages.json" in err
+    assert "\x1b" not in err
+
+
+def test_unselectable_name_message_carries_no_control_characters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fetch_main, "selectable_names", lambda: ("python", "zi\x1b[31mg"))
+    with pytest.raises(ValueError, match="取得できない言語の名前") as unknown:
+        fetch_main.validated_names(["bad\x1b[2Jname"])
+    assert "\x1b" not in str(unknown.value)

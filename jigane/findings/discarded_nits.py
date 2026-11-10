@@ -12,7 +12,13 @@ from jigane.findings.discard import (
     DiscardedCandidate,
     NotNit,
 )
-from jigane.findings.records import StoredFinding, TriagedFinding, triaged
+from jigane.findings.records import (
+    KEY_NIT_REASON,
+    KEY_THEME,
+    StoredFinding,
+    TriagedFinding,
+    triaged,
+)
 from jigane.groups.definitions import GroupId
 
 # 保存した F の番号と重ならないよう、捨てた候補の通し番号（S1 など）から作る
@@ -48,7 +54,7 @@ def discarded_nit_candidate(item: DiscardedCandidate) -> dict[str, Any] | None:
         "severity": "nit",
         "viewpoint": DISCARDED_VIEWPOINT,
         "claim": reason.claim,
-        "nit_reason": reason.to_json(),
+        KEY_NIT_REASON: reason.to_json(),
         "body": "",
         "evidence": [],
         "declaration_ref": None,
@@ -80,7 +86,7 @@ def legacy_discarded_nits(
                 "id": f"{LEGACY_ID_PREFIX}{item.source}",
                 **candidate,
                 "group": group.value,
-                "theme": None,
+                KEY_THEME: None,
                 "triage": None,
             },
             None,

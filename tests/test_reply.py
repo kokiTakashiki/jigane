@@ -123,7 +123,7 @@ def test_stale_picked_number_warns(
     pick(review, "F1")
     selection = review.id.directory() / "selection.json"
     data = json.loads(selection.read_text(encoding="utf-8"))
-    data["verdicts"]["F99"] = {"kind": "picked"}
+    data["verdicts"]["F99"] = {"kind": "picked", "round": None}
     selection.write_text(json.dumps(data), encoding="utf-8")
     text = report_text(review, tmp_path)
     assert "F99" not in text

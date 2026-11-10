@@ -26,13 +26,10 @@ from jigane.languages.base import (
     Super,
     Unknown,
 )
+from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
 Captures = dict[str, list[Node]]
-
-
-def text_of(node: Node) -> str:
-    return required(node.text).decode()
 
 
 def within(node: Node, container: Node) -> bool:

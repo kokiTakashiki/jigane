@@ -6,6 +6,7 @@ import re
 from tree_sitter import Node
 
 from jigane.languages.base import FilePathPattern, FileUsage
+from jigane.languages.file_paths_core import text
 from jigane.languages.python_walk import call_arguments, enclosing_function
 from jigane.preconditions.required import required
 
@@ -92,10 +93,6 @@ _WRAPPER_FILE_WORDS = (
 _MAX_RESOLVE_DEPTH = 5
 
 
-def _text(node: Node) -> str:
-    return " ".join(required(node.text).decode().split())
-
-
 def _qualified_name(node: Node) -> str:
     names: list[str] = []
     parent = node.parent
@@ -103,7 +100,7 @@ def _qualified_name(node: Node) -> str:
         if parent.type in _SCOPE_BOUNDARIES:
             name = parent.child_by_field_name("name")
             if name is not None:
-                names.append(_text(name))
+                names.append(text(name))
         parent = parent.parent
     return ".".join(reversed(names))
 
@@ -128,7 +125,7 @@ def _is_string_building(node: Node) -> bool:
         return True
     if node.type == "binary_operator":
         operator = node.child_by_field_name("operator")
-        if operator is not None and _text(operator) == "+":
+        if operator is not None and text(operator) == "+":
             sides = (node.child_by_field_name("left"), node.child_by_field_name("right"))
             if any(s is not None and s.type in ("string", "concatenated_string") for s in sides):
                 return True
@@ -138,7 +135,7 @@ def _is_string_building(node: Node) -> bool:
 def _is_path_expression(node: Node) -> bool:
     if node.type == "binary_operator":
         operator = node.child_by_field_name("operator")
-        return operator is not None and _text(operator) == "/"
+        return operator is not None and text(operator) == "/"
     if node.type == "call":
         function = node.child_by_field_name("function")
         if function is None:
@@ -146,7 +143,7 @@ def _is_path_expression(node: Node) -> bool:
         name = (
             function.child_by_field_name("attribute") if function.type == "attribute" else function
         )
-        return name is not None and _text(name) in _PATH_CONSTRUCTORS
+        return name is not None and text(name) in _PATH_CONSTRUCTORS
     return False
 
 
@@ -196,7 +193,7 @@ class _Reader:
                 anchor.start_byte,
                 FilePathPattern(
                     function=_qualified_name(anchor),
-                    expression=_text(expression),
+                    expression=text(expression),
                     usage=usage,
                     path=self._path,
                     line=anchor.start_point[0] + 1,
@@ -220,7 +217,7 @@ class _Reader:
         self, call: Node, function: Node, positional: list[Node], keywords: dict[str, Node]
     ) -> None:
         """`open(path, mode)`。組み込みの `open` だけを見る。"""
-        if _text(function) == "open" and positional:
+        if text(function) == "open" and positional:
             mode = positional[1] if len(positional) > 1 else keywords.get("mode")
             self._add_traced(call, positional[0], _mode_usage(mode))
 
@@ -232,13 +229,13 @@ class _Reader:
         attribute = function.child_by_field_name("attribute")
         if receiver is None or attribute is None:
             return
-        method = _text(attribute)
-        module_usage = _MODULE_FUNCTIONS.get(_text(receiver), {}).get(method)
+        method = text(attribute)
+        module_usage = _MODULE_FUNCTIONS.get(text(receiver), {}).get(method)
         if module_usage is not None:
             if positional:
                 self._add_traced(call, positional[0], module_usage)
             return
-        library = _LIBRARY_FILE_CALLS.get(_text(receiver), {}).get(method)
+        library = _LIBRARY_FILE_CALLS.get(text(receiver), {}).get(method)
         if library is not None and self._library_call(call, library, positional):
             return
         if self._wrapper_call(call, receiver, method, positional):
@@ -259,7 +256,7 @@ class _Reader:
         """引数が開いたファイルでなくパスと分かるか。分からなければ数えない（取り違えを避ける）。"""
         resolved = self._previous_assignment(argument) if argument.type == "identifier" else None
         target = resolved or argument
-        if target.type == "call" and _text(
+        if target.type == "call" and text(
             target.child_by_field_name("function") or target
         ).endswith("open"):
             return False
@@ -268,7 +265,7 @@ class _Reader:
         if self._is_known_path(target, 0) or self._is_path_producing(target):
             return True
         # 名前に path を含む変数や属性。`f` や `stream` などの開いたファイルの名前は含まない
-        return argument.type in ("identifier", "attribute") and "path" in _text(argument).lower()
+        return argument.type in ("identifier", "attribute") and "path" in text(argument).lower()
 
     def _method_call(
         self,
@@ -288,7 +285,7 @@ class _Reader:
             self._add_traced(call, receiver, FileUsage.WRITE)
         elif method in _READ_METHODS:
             self._add_traced(call, receiver, FileUsage.READ)
-        elif method == "open" and _text(receiver) not in _NOT_PATH_MODULES:
+        elif method == "open" and text(receiver) not in _NOT_PATH_MODULES:
             mode = positional[0] if positional else keywords.get("mode")
             self._add_traced(call, receiver, _mode_usage(mode))
         # 上のどれでもない呼び出しは、ファイルを開かない。名前の式は後段の `Path` の走査が拾う。
@@ -301,7 +298,7 @@ class _Reader:
         `Path.read_text(encoding)` と `Path.write_text(data)` の第一引数はパスではないので、
         第一引数がパスを作る式のときだけ、ラッパーとして扱う。原文は呼び出し全体を取る。
         """
-        if not positional or _text(receiver) in _NOT_PATH_MODULES:
+        if not positional or text(receiver) in _NOT_PATH_MODULES:
             return False
         argument = positional[0]
         resolved = self._previous_assignment(argument) if argument.type == "identifier" else None
@@ -346,7 +343,7 @@ class _Reader:
         return (
             attribute is not None
             and owner is not None
-            and _text(attribute) in _PATH_RETURNING_ATTRIBUTES
+            and text(attribute) in _PATH_RETURNING_ATTRIBUTES
             and self._is_known_path(owner, depth + 1)
         )
 
@@ -358,7 +355,7 @@ class _Reader:
         return (
             attribute is not None
             and owner is not None
-            and _text(attribute) in _PATH_RETURNING_METHODS
+            and text(attribute) in _PATH_RETURNING_METHODS
             and self._is_known_path(owner, depth + 1)
         )
 
@@ -373,7 +370,7 @@ class _Reader:
         """同じ関数の引数に、その名前で `Path` の注釈が付いているか。"""
         function = enclosing_function(variable)
         parameters = function.child_by_field_name("parameters") if function is not None else None
-        name = _text(variable)
+        name = text(variable)
         for parameter in parameters.named_children if parameters is not None else ():
             annotation = parameter.child_by_field_name("type")
             if annotation is None or parameter.type not in (
@@ -384,8 +381,8 @@ class _Reader:
             declared = parameter.child_by_field_name("name") or next(
                 (c for c in parameter.named_children if c.type == "identifier"), None
             )
-            if declared is not None and _text(declared) == name:
-                return _PATH_ANNOTATION.search(_text(annotation)) is not None
+            if declared is not None and text(declared) == name:
+                return _PATH_ANNOTATION.search(text(annotation)) is not None
         return False
 
     def _is_path_producing(self, node: Node) -> bool:
@@ -399,8 +396,8 @@ class _Reader:
                 if function.type == "attribute"
                 else function
             )
-            if name is not None and "path" in _text(name).lower():
-                return _text(name) not in _PATH_CONSTRUCTORS or _is_string_building(node)
+            if name is not None and "path" in text(name).lower():
+                return text(name) not in _PATH_CONSTRUCTORS or _is_string_building(node)
         return _is_path_expression(node) and _is_string_building(node)
 
     def _add_traced(self, call: Node, expression: Node, usage: FileUsage) -> None:
@@ -415,7 +412,7 @@ class _Reader:
 
     def _previous_assignment(self, variable: Node) -> Node | None:
         """同じ関数（無ければモジュール）の中で、使う位置より前のその変数への代入の右辺。"""
-        name = _text(variable)
+        name = text(variable)
         best: Node | None = None
         stack = [enclosing_function(variable) or self._root]
         while stack:
@@ -424,7 +421,7 @@ class _Reader:
             if node.type != "assignment" or node.end_byte > variable.start_byte:
                 continue
             left = node.child_by_field_name("left")
-            if left is None or left.type != "identifier" or _text(left) != name:
+            if left is None or left.type != "identifier" or text(left) != name:
                 continue
             if best is None or node.start_byte > best.start_byte:
                 best = node

@@ -25,8 +25,9 @@ from jigane.languages.concurrency_core import (
     StatelessWalk,
     is_ui_thread,
     line_of,
-    text_of,
 )
+from jigane.languages.java_nodes import TYPE_NODES_WITHOUT_ANNOTATION
+from jigane.languages.node_text import text_or_empty
 
 _UI_THREAD = UI_THREAD
 _THREAD_POOL = QueueDomain("スレッドプール")
@@ -72,9 +73,6 @@ _UI_PACKAGES = ("javafx.", "java.awt", "javax.swing", "java.applet", "android.",
 # JFrame、JPanel、JComponent のような `J` で始まる Swing の型。JUnit は Swing ではない
 _SWING_TYPE = re.compile(r"J[A-Z][a-z]\w*")
 _NOT_SWING_PREFIX = "JUnit"
-_TYPE_DECLARATIONS = frozenset(
-    {"class_declaration", "interface_declaration", "enum_declaration", "record_declaration"}
-)
 # 別の本体になる宣言。ラムダは executor などへ渡されたときだけ、渡された先の本体として降りる
 _SKIPPED = frozenset({"lambda_expression", "class_body", "class_declaration"})
 _SUBMIT_NAMES = frozenset({"submit", "execute"})
@@ -101,7 +99,7 @@ def _type_name(node: Node | None) -> str | None:
     if node is None:
         return None
     if node.type in ("type_identifier", "identifier"):
-        return text_of(node)
+        return text_or_empty(node)
     if node.type in ("generic_type", "scoped_type_identifier"):
         names = [
             c for c in node.children if c.type in ("type_identifier", "scoped_type_identifier")
@@ -126,7 +124,7 @@ def _declares_type(root: Node, name: str) -> bool:
     while stack:
         current = stack.pop()
         if (
-            current.type in _TYPE_DECLARATIONS
+            current.type in TYPE_NODES_WITHOUT_ANNOTATION
             and _type_name(current.child_by_field_name("name")) == name
         ):
             return True
@@ -148,7 +146,7 @@ def _is_confirmed_ui_name(name: str, scope: Node | None) -> bool:
         if node.type != "import_declaration":
             continue
         spelled = (
-            text_of(node)
+            text_or_empty(node)
             .removeprefix("import")
             .removeprefix(" static")
             .strip()
@@ -170,8 +168,8 @@ def _callee(call: Node) -> tuple[str | None, str | None, Node | None]:
         return None, None, None
     receiver = call.child_by_field_name("object")
     if receiver is None:
-        return None, text_of(name), None
-    return text_of(receiver), text_of(name), receiver
+        return None, text_or_empty(name), None
+    return text_or_empty(receiver), text_or_empty(name), receiver
 
 
 def _positional(call: Node) -> list[Node]:
@@ -192,7 +190,7 @@ def _declared_bases(type_node: Node) -> list[str]:
                 continue
             # 完全修飾の綴り `a.b.Foo` は、パッケージで UI の型と確かめるため原文のまま残す
             name = (
-                text_of(current)
+                text_or_empty(current)
                 if current.type == "scoped_type_identifier"
                 else _type_name(current)
             )
@@ -209,7 +207,7 @@ def is_async(_member_node: Node, /) -> bool:
 def _receiver_label(node: Node) -> str:
     """札に出す受け手の綴り。呼び出しの連なりは引数を省いて短くする。"""
     if node.type in ("identifier", "field_access", "this"):
-        return text_of(node)
+        return text_or_empty(node)
     if node.type == "method_invocation":
         _, name, _ = _callee(node)
         inner = node.child_by_field_name("object")
@@ -221,7 +219,7 @@ def _receiver_label(node: Node) -> str:
 def _is_scope_type(creation: Node | None) -> bool:
     if creation is None or creation.type != "object_creation_expression":
         return False
-    return text_of(creation.child_by_field_name("type") or creation).startswith(
+    return text_or_empty(creation.child_by_field_name("type") or creation).startswith(
         "StructuredTaskScope"
     )
 
@@ -229,7 +227,7 @@ def _is_scope_type(creation: Node | None) -> bool:
 def _is_thread_creation(node: Node) -> bool:
     if node.type != "object_creation_expression":
         return False
-    return text_of(node.child_by_field_name("type") or node) == "Thread"
+    return text_or_empty(node.child_by_field_name("type") or node) == "Thread"
 
 
 def _is_thread_builder(node: Node) -> bool:
@@ -251,7 +249,7 @@ def _assignment(x: Extractor[None], node: Node) -> list[ConcurrencyStep]:
         receiver = left.child_by_field_name("object")
         member = left.child_by_field_name("field")
         if receiver is not None and member is not None:
-            steps.append(MemberAssignment(receiver, text_of(member), line_of(node)))
+            steps.append(MemberAssignment(receiver, text_or_empty(member), line_of(node)))
     return steps
 
 
@@ -335,7 +333,7 @@ def _scope(x: Extractor[None], node: Node) -> list[ConcurrencyStep]:
         name = resource.child_by_field_name("name")
         value = resource.child_by_field_name("value")
         if name is not None and value is not None and _is_scope_type(value):
-            scopes[text_of(name)] = text_of(value.child_by_field_name("type") or value)
+            scopes[text_or_empty(name)] = text_or_empty(value.child_by_field_name("type") or value)
     if block is None or not scopes:
         return x.walk(node)
     forks: list[Node] = []
@@ -417,7 +415,7 @@ def _is_ui_dispatch(receiver: str | None, name: str) -> bool:
 
 class _Rules(StatelessWalk):
     skipped = _SKIPPED
-    type_declarations = _TYPE_DECLARATIONS
+    type_declarations = TYPE_NODES_WITHOUT_ANNOTATION
 
     def is_main_thread(self, domain: Isolation) -> bool:
         return is_ui_thread(domain)

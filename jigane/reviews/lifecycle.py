@@ -1,22 +1,17 @@
-import copy
-import glob
 import json
 import re
-import shutil
-import uuid
-import warnings
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, assert_never
 
 from jigane.flaky.catalog import load_catalog
-from jigane.flaky.gates import load_gates, update_gates
+from jigane.flaky.gates import update_gates
 from jigane.gates.entry import Gates
 from jigane.git import process
 from jigane.git.repository import Repository, identify, identify_git
+from jigane.git.revision import CommitSha, parse_commit_sha
 from jigane.git.tree_files import walk_tree_files
 from jigane.judgment_map.changes import CHANGES_CHAR_LIMIT, CHANGES_FILE, render_changes
 from jigane.judgment_map.classification import (
@@ -41,7 +36,6 @@ from jigane.judgment_map.map_kind import (
     DesignDocMap,
     JudgmentMapKind,
     dump_map,
-    load_map,
 )
 from jigane.judgment_map.region_table import CodeRegion, Region, RegionTable
 from jigane.pull_request_context import bots
@@ -50,7 +44,6 @@ from jigane.pull_request_context.background import (
     collect_background,
     collect_declaration_background,
     collect_range_background,
-    load_background,
     save_background,
 )
 from jigane.pull_request_context.fetching import (
@@ -62,6 +55,32 @@ from jigane.pull_request_context.fetching import (
     fetch_pull_request,
     parse_pull_request_url,
 )
+from jigane.reviews.range_head import (
+    UNTRACKED,
+    BaseLost,
+    GitPlace,
+    GitPlaceUnusable,
+    GitProcessQueries,
+    HeadTracking,
+    RefreshHead,
+    ResolvedRange,
+    TrackedBranch,
+    new_range_place,
+    plan_refresh_range,
+    resolve_range,
+    run_git,
+    select_git_place,
+)
+from jigane.reviews.review_formats import (
+    PAIRS_FILE,
+    PULL_REQUEST_FIELDS,
+    REGIONS_FILE,
+    dump_pairs,
+    dump_regions,
+    dump_review,
+    load_regions,
+)
+from jigane.reviews.stored_pairs import load_pairs
 from jigane.static_analysis.intake import (
     NO_STATIC,
     STATIC_FINDINGS_FILE,
@@ -74,39 +93,30 @@ from jigane.static_analysis.intake import (
     static_touches,
     static_warnings,
 )
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.review_creation import (
+    SaveTarget,
+    direct_save_target,
+    prepare_save_target,
+    staged_save_target,
+    staging_directory,
+)
 from jigane.storage.review_error import (
     ReviewError as ReviewError,  # noqa: PLC0414 他のモジュールが jigane.reviews.lifecycle から再エクスポートとして取り込む
 )
-from jigane.storage.review_error import ReviewExistsError
 from jigane.storage.store import (
-    ReviewId,
-    ReviewKind,
-    check_new_key,
-    data_home,
-    ensure_data_home,
-    review_lock,
-    write_text_atomic,
+    REVIEW_FILE as REVIEW_FILE,  # noqa: PLC0414 開発用リポジトリが jigane.reviews.lifecycle から取り込む継ぎ目の名前
 )
-from jigane.storage.store_format import Upgrade, upgrade_mapping, upgrade_to_current
+from jigane.storage.store import (
+    STAGING_PREFIX as STAGING_PREFIX,  # noqa: PLC0414 開発用リポジトリが jigane.reviews.lifecycle から取り込む継ぎ目の名前
+)
+from jigane.storage.store import (
+    CheckedReviewId,
+    ReviewKind,
+    new_review_id,
+)
+from jigane.text.document_files import DOCUMENT_ONLY_NOTICE, all_documents
 
-REVIEW_FILE = "review.json"
-# review.json の形の版。保存物の形を変えたら一つ上げ、_REVIEW_UPGRADES に前の版からの移しを足す
-REVIEW_FORMAT = 4
-# regions.json の形の版。上げ方は REVIEW_FORMAT と同じ
-REGIONS_FORMAT = 2
-# pairs.json の形の版。上げ方は REVIEW_FORMAT と同じ
-PAIRS_FORMAT = 2
-# 削除が中身を退ける置き場の名前。データの置き場の直下に作る。一覧には出さない
-TRASH_DIRECTORY = ".trash"
-# 作成の途中の置き場の名前の頭。本物のレビューの名前は先頭が英数字か _ なので重ならない
-STAGING_PREFIX = ".creating-"
-# アーカイブの印。レビューの中身とは分けるので、refresh は触れない。中身は印を付けた時刻
-ARCHIVE_MARKER_FILE = "archived"
-ARCHIVED_EXCLUDE = "exclude"
-ARCHIVED_ONLY = "only"
-ARCHIVED_INCLUDE = "include"
-PAIRS_FILE = "pairs.json"
-REGIONS_FILE = "regions.json"
 BASE_TREE = "trees/base"
 HEAD_TREE = "trees/head"
 # 変更の文の上限の警告。宣言の警告と区別して引き継ぐための先頭の文言
@@ -150,19 +160,35 @@ class LocalRange:
     # 作ったときの作業ディレクトリの git の根。refresh が範囲を解き直す場所。
     # repository_root は変更後の木を指すので代わりにならない
     working_directory: str
+    # 共通の git ディレクトリの絶対パス。作業ディレクトリが消えた後の、git を走らせる代わりの場所。
+    # 空は代わりの場所を持たないこと
+    git_directory: str = ""
+    head_tracking: HeadTracking = UNTRACKED
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-_PULL_REQUEST_FIELDS = ("url", "number", "title")
-# 版 2 までの review.json の pull_request が持つ鍵。版 1 の移しが diff_source と分けるのに使う
-_PULL_REQUEST_FIELDS_UNTIL_V2 = (*_PULL_REQUEST_FIELDS, "linked_issues")
+        return {
+            "range_text": self.range_text,
+            "working_directory": self.working_directory,
+            "git_directory": self.git_directory,
+            "head_tracking": None if self.head_tracking is None else self.head_tracking.to_dict(),
+        }
 
 
 def read_stored_local_range(stored: dict[str, Any] | None) -> LocalRange | None:
     """保存した review.json の local_range を読む。null なら範囲ではない。"""
-    return LocalRange(**stored) if stored is not None else None
+    if stored is None:
+        return None
+    try:
+        raw_tracking = stored["head_tracking"]
+        tracking = UNTRACKED if raw_tracking is None else TrackedBranch.from_dict(raw_tracking)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ReviewError(
+            f"review.json の local_range の head_tracking が不正です: {error!r}"
+        ) from error
+    try:
+        return LocalRange(**{**stored, "head_tracking": tracking})
+    except TypeError as error:
+        raise ReviewError(f"review.json の local_range が不正です: {error!r}") from error
 
 
 @dataclass
@@ -182,7 +208,7 @@ def read_stored_sources(
 ) -> tuple[DiffSource | None, PullRequestInfo | None]:
     """今の版の review.json の値を読む。diff_source と PR の情報は独立に読む。"""
     pull_request = (
-        PullRequestInfo(**{name: stored[name] for name in _PULL_REQUEST_FIELDS})
+        PullRequestInfo(**{name: stored[name] for name in PULL_REQUEST_FIELDS})
         if stored is not None
         else None
     )
@@ -298,7 +324,7 @@ def origin_kind(origin: ReviewOrigin) -> ReviewKind:
 
 @dataclass
 class Review:
-    id: ReviewId
+    id: CheckedReviewId
     created_at: str
     repository_root: str
     paths: list[str]
@@ -477,31 +503,6 @@ def _number_order(ids: list[str]) -> list[str]:
     return sorted(ids, key=lambda text: int(text[1:]))
 
 
-def _upgrade_regions_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の regions.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    for entry in upgraded["regions"].values():
-        # judged は読み口の無いまま残った鍵で、今の版は書かない
-        entry.pop("judged", None)
-    return upgraded
-
-
-# 保存された版から次の版への移し。load_regions が REGIONS_FORMAT まで順に回す
-_REGIONS_UPGRADES: dict[int, Upgrade] = {1: _upgrade_regions_v1}
-
-
-def load_regions(raw: object) -> dict[str, Any]:
-    """regions.json を読む境の一か所。保存された版から今の版まで移した辞書を返す。"""
-    if not isinstance(raw, dict):
-        raise ReviewError("regions.json の最上位が辞書ではありません")
-    return upgrade_mapping(REGIONS_FILE, raw, current=REGIONS_FORMAT, upgrades=_REGIONS_UPGRADES)
-
-
-def dump_regions(state: Mapping[str, Any]) -> dict[str, Any]:
-    """regions.json へ書く境の一か所。最上位に今の版を刻む。"""
-    return {"format": REGIONS_FORMAT, **{k: v for k, v in state.items() if k != "format"}}
-
-
 def _assign_numbers(
     regions: Sequence[Region], directory: Path
 ) -> tuple[list[Region], RegionChanges]:
@@ -547,84 +548,11 @@ def _assign_numbers(
     )
 
 
-def _now() -> str:
+def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _upgrade_review_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の review.json を次の版へ移す。鍵の欠けは、移す前の読み口が使っていた値で埋める。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 宣言の警告を保存する前の記録は、警告が無いものとして読む
-    declaration = upgraded["declaration"]
-    declaration.setdefault("warnings", [])
-    # content_warnings を保存する前の記録は、宣言に警告が無かったので、warnings の全体が内容の警告
-    upgraded.setdefault("content_warnings", list(upgraded["warnings"]))
-    # 古い PR の記録は、diff_source を分けず PR の値に変更前の木の値を同居させていた
-    stored_pull_request = upgraded.get("pull_request")
-    if upgraded.get("diff_source") is None and stored_pull_request is not None:
-        upgraded["diff_source"] = {
-            key: value
-            for key, value in stored_pull_request.items()
-            if key not in _PULL_REQUEST_FIELDS_UNTIL_V2
-        }
-        upgraded["pull_request"] = {
-            key: stored_pull_request[key] for key in _PULL_REQUEST_FIELDS_UNTIL_V2
-        }
-    # 出所の欄は、種類に属さないものを null で書く。古い記録は書いていない
-    for name in (
-        "refreshed_at",
-        "targets",
-        "pull_request",
-        "diff_source",
-        "local_range",
-        "design_doc",
-        "background",
-    ):
-        upgraded.setdefault(name, None)
-    return upgraded
-
-
-def _upgrade_review_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の review.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # PR の情報から issue を外した。版 2 までの保存物が持つ linked_issues は読み口が無いので落とす
-    if upgraded.get("pull_request") is not None:
-        upgraded["pull_request"].pop("linked_issues", None)
-    return upgraded
-
-
-def _upgrade_review_v3(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 3 の review.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 版 3 までの保存物が持つ次の鍵は、読み口が無いか id から導けるので落とす。
-    # warnings は content_warnings の移しの材料だけだった（版 1 の移しが先に読む）
-    for name in ("kind", "mode", "is_diff", "is_pull_request", "warnings"):
-        upgraded.pop(name, None)
-    upgraded["declaration"].pop("source_label", None)
-    return upgraded
-
-
-# 保存された版から次の版への移し。load_review_meta が REVIEW_FORMAT まで順に回す
-_REVIEW_UPGRADES: dict[int, Upgrade] = {
-    1: _upgrade_review_v1,
-    2: _upgrade_review_v2,
-    3: _upgrade_review_v3,
-}
-
-
-def load_review_meta(raw: object) -> dict[str, Any]:
-    """review.json を読む境の一か所。保存された版から今の版まで移した辞書を返す。"""
-    if not isinstance(raw, dict):
-        raise ReviewError("review.json の最上位が辞書ではありません")
-    return upgrade_mapping(REVIEW_FILE, raw, current=REVIEW_FORMAT, upgrades=_REVIEW_UPGRADES)
-
-
-def dump_review(meta: Mapping[str, Any]) -> dict[str, Any]:
-    """review.json へ書く境の一か所。最上位に今の版を刻む。"""
-    return {"format": REVIEW_FORMAT, **meta}
-
-
-def _write_review_file(directory: Path, review: Review) -> None:
+def write_review_file(directory: Path, review: Review) -> None:
     write_text_atomic(
         directory / REVIEW_FILE,
         json.dumps(dump_review(review.to_stored_dict()), ensure_ascii=False, indent=2),
@@ -694,7 +622,7 @@ def _design_doc_origin(
     return DesignDocOrigin.from_dict(design_doc)
 
 
-def _origin_from_stored(
+def origin_from_stored(
     kind: ReviewKind,
     pull_request: PullRequestInfo | None,
     local_range: LocalRange | None,
@@ -824,19 +752,52 @@ def _write_static_findings(directory: Path, store: StaticFindingsStore | None) -
 
 
 def save_review(
-    review_id: ReviewId,
+    review_id: CheckedReviewId,
+    content: Content,
+    created_at: str,
+    refreshed_at: str | None,
+    repository_root: str,
+) -> tuple[Review, RegionChanges]:
+    """既存の保存先へ、番号の割り当てと保存をする。更新はここを通る。"""
+    return _save_review(
+        review_id,
+        content,
+        created_at,
+        refreshed_at,
+        repository_root,
+        direct_save_target(review_id),
+    )
+
+
+def save_staged_review(
+    review_id: CheckedReviewId,
     content: Content,
     created_at: str,
     refreshed_at: str | None,
     repository_root: str,
     *,
-    staging: Path | None = None,
+    staging: Path,
 ) -> tuple[Review, RegionChanges]:
-    """作るときも更新するときも、番号の割り当てと保存はここを通る。
+    """作成の仮置きへ書く。木のパスなど記録に入る値は保存先のものを使い、木を読む場面だけ仮置きの実体へ読み替える。"""
+    return _save_review(
+        review_id,
+        content,
+        created_at,
+        refreshed_at,
+        repository_root,
+        staged_save_target(review_id, staging),
+    )
 
-    staging を渡すと、保存先の代わりにそのディレクトリへ書く。木のパスなど記録に入る値は
-    保存先のものを使い、木を読む場面だけ staging の中の実体へ読み替える。
-    """
+
+def _save_review(
+    review_id: CheckedReviewId,
+    content: Content,
+    created_at: str,
+    refreshed_at: str | None,
+    repository_root: str,
+    target: SaveTarget,
+) -> tuple[Review, RegionChanges]:
+    """番号の割り当てと保存の本体。作るときも更新するときもここを通る。"""
     judgment_map = content.judgment_map
     paths = content.paths
     origin = content.origin
@@ -849,16 +810,14 @@ def save_review(
             f"識別子の種類（{review_id.kind}）と保存する内容の出所（{content_kind}）が"
             f"食い違います: {review_id}"
         )
-    final_directory = review_id.directory()
-    directory = final_directory if staging is None else staging
+    final_directory, directory = target
 
     def physical(path: Path) -> Path:
-        if staging is not None and path.is_relative_to(final_directory):
-            return staging / path.relative_to(final_directory)
+        if directory != final_directory and path.is_relative_to(final_directory):
+            return directory / path.relative_to(final_directory)
         return path
 
-    ensure_data_home()
-    directory.mkdir(parents=True, exist_ok=True)
+    prepare_save_target(target)
     unnumbered = map_kind_of(content)
     numbered, region_changes = _assign_numbers(unnumbered.table.regions, directory)
     map_kind = unnumbered.with_regions(numbered)
@@ -884,7 +843,7 @@ def save_review(
         background,
         gates,
     )
-    _write_review_file(directory, review)
+    write_review_file(directory, review)
     if background is not None:
         save_background(directory, background)
     write_text_atomic(
@@ -917,7 +876,7 @@ def judge_files(root: Path, files: list[str], touches: Sequence[FindingTouch] = 
 def _head_commit(root: Path) -> str:
     """ファイルのレビューには変更後のコミットが無いので、HEAD を解析したコミットとみなす。"""
     try:
-        return _git(root, "rev-parse", "HEAD").strip()
+        return run_git(root, "rev-parse", "HEAD").strip()
     except process.CommandError as error:
         raise ReviewError(f"HEAD を解けません: {root}") from error
 
@@ -958,41 +917,6 @@ def read_intent(
     return None
 
 
-def _existing_review_message(review_id: ReviewId) -> str:
-    """識別子が既にあるときの案内。"""
-    match review_id.kind:
-        case ReviewKind.PULL_REQUEST:
-            return (
-                f"レビューが既にあります: {review_id}。作者の修正は refresh で取り込んでください"
-            )
-        case ReviewKind.RANGE:
-            return (
-                f"レビューが既にあります: {review_id}。作り直すには refresh してください。"
-                "別のレビューを残すなら --name で別の名前を付けてください"
-            )
-        case ReviewKind.FEATURE | ReviewKind.DESIGN_DOC:
-            return f"レビューが既にあります: {review_id}"
-        case _:
-            assert_never(review_id.kind)
-
-
-def _existing_review_error(review_id: ReviewId) -> ReviewExistsError:
-    return ReviewExistsError(review_id, _existing_review_message(review_id))
-
-
-def _new_review_id(owner: str, repo: str, name: str, kind: ReviewKind) -> ReviewId:
-    """新しい識別子を、名前の検査と既存の確かめを通して作る。"""
-    try:
-        check_new_key(kind, name)
-        review_id = ReviewId(owner, repo, name, kind)
-        ReviewId.parse(str(review_id))
-    except ValueError as error:
-        raise ReviewError(str(error)) from error
-    if (review_id.directory() / REVIEW_FILE).is_file():
-        raise _existing_review_error(review_id)
-    return review_id
-
-
 def _repository_of_targets(working_directory: Path, targets: list[Path]) -> Repository:
     """対象のパスが属するリポジトリを返す。対象がすべて git の外なら作業ディレクトリのもの。"""
     inside: dict[Path, Repository] = {}
@@ -1018,65 +942,6 @@ def _repository_of_targets(working_directory: Path, targets: list[Path]) -> Repo
         roots = ", ".join(str(root) for root in inside)
         raise ReviewError(f"対象が複数のリポジトリにまたがっています: {roots}")
     return next(iter(inside.values()))
-
-
-def _remove_directory_in_home(path: Path, review_id: ReviewId, *, staging: bool) -> None:
-    """データの置き場の中の、この識別子の作成が作った（または残した）ディレクトリだけを消す。
-
-    消してよいのは、識別子の保存先そのもの（staging=False）か、その親の下の作成途中の置き場
-    （staging=True）に限る。置き場の外、置き場そのもの、シンボリックリンクは消さない。
-    """
-    home = data_home().resolve()
-    final = review_id.directory()
-    expected_parent = final.parent.resolve()
-    if path.is_symlink():
-        raise ReviewError(f"シンボリックリンクは消しません: {path}")
-    resolved = path.resolve()
-    if resolved == home or not resolved.is_relative_to(home):
-        raise ReviewError(f"データの置き場の外か置き場そのものは消しません: {path}")
-    if resolved.parent != expected_parent:
-        raise ReviewError(f"このレビューの置き場の直下ではないので消しません: {path}")
-    if staging != resolved.name.startswith(STAGING_PREFIX):
-        raise ReviewError(f"消す対象の名前が想定と違います: {path}")
-    if not staging and resolved.name != final.name:
-        raise ReviewError(f"このレビューの保存先ではないので消しません: {path}")
-    shutil.rmtree(resolved, ignore_errors=True)
-
-
-@contextmanager
-def _staging_directory(review_id: ReviewId) -> Iterator[Path]:
-    """保存先と同じ親の下の隠しの置き場で組み立て、抜けるときに保存先へ改名する。
-
-    失敗したら置き場を消して例外をそのまま上げる。改名が原子的なので、保存先に半端な
-    ディレクトリが現れることはない。
-    """
-    final = review_id.directory()
-    ensure_data_home()
-    final.parent.mkdir(parents=True, exist_ok=True)
-    staging = final.parent / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
-    staging.mkdir()
-    try:
-        yield staging
-        _install_staging(staging, final, review_id)
-    except BaseException:
-        if staging.exists():
-            _remove_directory_in_home(staging, review_id, staging=True)
-        raise
-
-
-def _install_staging(staging: Path, final: Path, review_id: ReviewId) -> None:
-    if final.exists():
-        if (final / REVIEW_FILE).is_file():
-            raise _existing_review_error(review_id)
-        # review.json の無い保存先は、以前の失敗が残した半端なもの。混ぜずに消してから置く
-        _remove_directory_in_home(final, review_id, staging=False)
-    try:
-        staging.rename(final)
-    except OSError as error:
-        if (final / REVIEW_FILE).is_file():
-            # 同じ名前の作成が先に改名を済ませた
-            raise _existing_review_error(review_id) from error
-        raise
 
 
 @dataclass(frozen=True)
@@ -1119,18 +984,18 @@ def create_feature_review(
     declared = read_intent(working_directory, inputs.intent, inputs.intent_file)
     targets = [(working_directory / path).resolve() for path in paths]
     repository = _repository_of_targets(working_directory, targets)
-    review_id = _new_review_id(repository.owner, repository.repo, name, ReviewKind.FEATURE)
+    review_id = new_review_id(repository.owner, repository.repo, name, ReviewKind.FEATURE)
     root = repository.root
     for target in targets:
         if not target.is_relative_to(root):
             raise ReviewError(f"対象がリポジトリの外にあります: {target}")
     static = import_sarif(sarif, _head_commit(root)) if sarif is not None else NO_STATIC
     content = _build_feature_content(root, targets, declared, static)
-    with _staging_directory(review_id) as staging:
-        review, _ = save_review(
+    with staging_directory(review_id) as staging:
+        review, _ = save_staged_review(
             review_id,
             content,
-            _now(),
+            now(),
             None,
             str(root),
             staging=staging,
@@ -1168,8 +1033,8 @@ def _build_diff_tree(
     git_dir: Path,
     directory: Path,
     base_sha: str,
-    head_sha: str,
-    merge_base: str,
+    head_sha: CommitSha,
+    merge_base: CommitSha,
     *,
     stored_directory: Path,
 ) -> tuple[DiffSource, list[FilePair], Config]:
@@ -1185,14 +1050,15 @@ def _build_diff_tree(
     # 変更を出す側が設定を緩められないよう、設定は変更前の木から読む
     config = load_config(base_tree)
     stored_base_tree = str(stored_directory / BASE_TREE)
-    return DiffSource(base_sha, head_sha, merge_base, stored_base_tree), pairs, config
+    source = DiffSource(base_sha, str(head_sha), str(merge_base), stored_base_tree)
+    return source, pairs, config
 
 
 def _build_pull_request_content(
     directory: Path,
     git_dir: Path,
     metadata: PullRequestMetadata,
-    merge_base: str,
+    merge_base: CommitSha,
     stored_directory: Path,
     static: StaticSelection = NO_STATIC,
 ) -> PullRequestContent:
@@ -1202,7 +1068,7 @@ def _build_pull_request_content(
     source, pairs, config = _build_diff_tree(
         git_dir,
         directory,
-        metadata.base_sha,
+        str(metadata.base_sha),
         metadata.head_sha,
         merge_base,
         stored_directory=stored_directory,
@@ -1229,7 +1095,7 @@ def _build_pull_request_content(
         title=metadata.title,
     )
     background = collect_background(
-        metadata, head_tree, base_tree, git_dir, merge_base, pairs=pairs
+        metadata, head_tree, base_tree, git_dir, str(merge_base), pairs=pairs
     )
     return PullRequestContent(
         tuple(pair.new_path for pair in pairs if pair.new_path is not None),
@@ -1247,17 +1113,17 @@ def create_pull_request_review(url: str, inputs: ReviewInputs = NO_REVIEW_INPUTS
     sarif = inputs.sarif
     owner, repo, number = parse_pull_request_url(url)
     metadata = fetch_metadata(owner, repo, number)
-    review_id = _new_review_id(owner, repo, str(number), ReviewKind.PULL_REQUEST)
+    review_id = new_review_id(owner, repo, str(number), ReviewKind.PULL_REQUEST)
     directory = review_id.directory()
     git_dir = ensure_repository_cache(owner, repo)
     merge_base = fetch_pull_request(git_dir, metadata)
-    static = import_sarif(sarif, metadata.head_sha) if sarif is not None else NO_STATIC
-    with _staging_directory(review_id) as staging:
+    static = import_sarif(sarif, str(metadata.head_sha)) if sarif is not None else NO_STATIC
+    with staging_directory(review_id) as staging:
         content = _build_pull_request_content(
             staging, git_dir, metadata, merge_base, directory, static
         )
-        review, _ = save_review(
-            review_id, content, _now(), None, str(directory / HEAD_TREE), staging=staging
+        review, _ = save_staged_review(
+            review_id, content, now(), None, str(directory / HEAD_TREE), staging=staging
         )
     return review
 
@@ -1265,37 +1131,6 @@ def create_pull_request_review(url: str, inputs: ReviewInputs = NO_REVIEW_INPUTS
 _COMMIT_START = "\x01"
 _COMMIT_FIELD = "\x02"
 _RANGE_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
-def _git(root: Path, *arguments: str) -> str:
-    return process.run_command(["git", *arguments], cwd=root)
-
-
-def _resolve_commit(root: Path, revision: str) -> str:
-    try:
-        return _git(
-            root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{revision}^{{commit}}"
-        ).strip()
-    except process.CommandError as error:
-        if error.missing_executable:
-            # git が無いことは refs の誤りではない。「必要なコマンドが見つからない」として伝える
-            raise
-        raise ReviewError(f"refs を解けません: {revision}") from error
-
-
-@dataclass(frozen=True)
-class RangeRefs:
-    """範囲の文字列を左右の refs 名に割った値。右側を省いた範囲の head は HEAD。"""
-
-    base: str
-    head: str
-
-
-def split_range(range_text: str) -> RangeRefs:
-    base, separator, head = range_text.partition("..")
-    if not separator or not base or head.startswith("."):
-        raise ReviewError(f"範囲は <base>..<head> の形で指定します: {range_text!r}")
-    return RangeRefs(base, head or "HEAD")
 
 
 def default_range_name(head: str, head_sha: str) -> str:
@@ -1308,11 +1143,12 @@ def default_range_name(head: str, head_sha: str) -> str:
 
 def _commits_text(root: Path, merge_base: str, head_sha: str) -> tuple[str, bool]:
     """(コミットの題と本文を並べた文, 本文を持つコミットがあるか)。"""
-    output = _git(
+    output = run_git(
         root,
         "log",
         "--reverse",
         f"--format={_COMMIT_START}%s{_COMMIT_FIELD}%b",
+        "--end-of-options",
         f"{merge_base}..{head_sha}",
     )
     entries: list[str] = []
@@ -1322,17 +1158,6 @@ def _commits_text(root: Path, merge_base: str, head_sha: str) -> tuple[str, bool
         has_body = has_body or bool(body.strip())
         entries.append(f"{subject}\n\n{body.strip()}" if body.strip() else subject)
     return "\n\n".join(entries), has_body
-
-
-@dataclass(frozen=True)
-class ResolvedRange:
-    """範囲の文字列を解いた値。作成と refresh が同じ値を受け渡す。"""
-
-    base_sha: str
-    head_sha: str
-    merge_base: str
-    # 範囲の head の refs 名。既定の名前に使う
-    head_name: str
 
 
 def _range_declaration(
@@ -1348,7 +1173,7 @@ def _range_declaration(
 def _build_range_content(
     root: Path,
     directory: Path,
-    range_text: str,
+    local_range: LocalRange,
     resolved: ResolvedRange,
     intent: Declaration | None,
     *,
@@ -1363,8 +1188,8 @@ def _build_range_content(
         root,
         directory,
         resolved.base_sha,
-        head_sha,
-        merge_base,
+        parse_commit_sha("範囲の先端", head_sha),
+        parse_commit_sha("範囲の基点", merge_base),
         stored_directory=stored_directory,
     )
     declaration = _range_declaration(root, resolved, intent)
@@ -1377,34 +1202,26 @@ def _build_range_content(
         touches=(),
         finding_touches=static_touches(static),
     )
+    paths = tuple(pair.new_path for pair in pairs if pair.new_path is not None)
     warnings = [*diff_warnings, *static_warnings(static)]
+    # 削除を数えない。run と show の判定が持つ review.paths と同じ集合で、三か所の判定を揃えるため
+    if all_documents(paths):
+        warnings.append(DOCUMENT_ONLY_NOTICE)
     background = collect_range_background(root, base_tree, merge_base, pairs)
     return ReviewContent(
-        tuple(pair.new_path for pair in pairs if pair.new_path is not None),
+        paths,
         declaration,
         tuple(warnings),
         judgment_map,
         background=background,
-        origin=RangeOrigin(LocalRange(range_text, str(root)), source),
+        origin=RangeOrigin(local_range, source),
         static=static,
     )
 
 
-def resolve_range(root: Path, range_text: str) -> ResolvedRange:
-    """範囲の文字列を解く。作るときも解き直すときも使う。
-
-    refs が解けない、共通の祖先が無い、範囲に変更が無いときは ReviewError。
-    """
-    refs = split_range(range_text)
-    base_sha = _resolve_commit(root, refs.base)
-    head_sha = _resolve_commit(root, refs.head)
-    try:
-        merge_base = _git(root, "merge-base", base_sha, head_sha).strip()
-    except process.CommandError as error:
-        raise ReviewError(f"共通の祖先がありません: {range_text}") from error
-    if not _git(root, "diff", "--name-only", merge_base, head_sha).strip():
-        raise ReviewError(f"範囲に変更がありません: {range_text}")
-    return ResolvedRange(base_sha, head_sha, merge_base, refs.head)
+def _new_local_range(root: Path, range_text: str, resolved: ResolvedRange) -> LocalRange:
+    place = new_range_place(root, range_text, resolved.head_sha)
+    return LocalRange(range_text, str(root), place.git_directory, place.head_tracking)
 
 
 def create_range_review(
@@ -1422,20 +1239,20 @@ def create_range_review(
     resolved_name = (
         name if name is not None else default_range_name(resolved.head_name, resolved.head_sha)
     )
-    review_id = _new_review_id(repository.owner, repository.repo, resolved_name, ReviewKind.RANGE)
+    review_id = new_review_id(repository.owner, repository.repo, resolved_name, ReviewKind.RANGE)
     directory = review_id.directory()
-    with _staging_directory(review_id) as staging:
+    with staging_directory(review_id) as staging:
         content = _build_range_content(
             root,
             staging,
-            range_text,
+            _new_local_range(root, range_text, resolved),
             resolved,
             declared,
             stored_directory=directory,
             static=static,
         )
-        review, _ = save_review(
-            review_id, content, _now(), None, str(directory / HEAD_TREE), staging=staging
+        review, _ = save_staged_review(
+            review_id, content, now(), None, str(directory / HEAD_TREE), staging=staging
         )
     return review
 
@@ -1445,13 +1262,18 @@ class RefreshResult:
     review: Review
     updated: bool
     region_changes: RegionChanges
+    # 範囲のレビューだけが持つ。範囲でないレビューの出力には出さない
+    head: RefreshHead | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "updated": self.updated,
             "regions": self.region_changes.to_dict(),
             "review": self.review.to_dict(),
         }
+        if self.head is not None:
+            result["head"] = self.head.to_dict()
+        return result
 
 
 def _refresh_diff_review(
@@ -1472,7 +1294,7 @@ def _refresh_diff_review(
     if not force_rebuild and head_sha == source.head_sha and merge_base == source.merge_base:
         return _rebuild_stored_map(declare(), source)
     updated, region_changes = save_review(
-        review.id, build_content(), review.created_at, _now(), review.repository_root
+        review.id, build_content(), review.created_at, now(), review.repository_root
     )
     return RefreshResult(updated, updated=True, region_changes=region_changes)
 
@@ -1494,8 +1316,8 @@ def refresh_pull_request(review: Review, inputs: ReviewInputs = NO_REVIEW_INPUTS
     return _refresh_diff_review(
         review,
         source,
-        metadata.head_sha,
-        merge_base,
+        str(metadata.head_sha),
+        str(merge_base),
         declare,
         build_content=lambda: _build_pull_request_content(
             review.id.directory(),
@@ -1503,7 +1325,7 @@ def refresh_pull_request(review: Review, inputs: ReviewInputs = NO_REVIEW_INPUTS
             metadata,
             merge_base,
             review.id.directory(),
-            _refresh_static(review, metadata.head_sha, sarif),
+            _refresh_static(review, str(metadata.head_sha), sarif),
         ),
         force_rebuild=sarif is not None,
     )
@@ -1526,31 +1348,48 @@ def refresh_range(
         raise ReviewError(f"範囲の出所でない記録を範囲として refresh できません: {review.id}")
     local_range = origin.range
     source = origin.diff
-    root = Path(local_range.working_directory)
     rebuild_advice = (
         f"作り直すには delete してから new range してください: {review.id}"
         f"（保存した作業ディレクトリ: {local_range.working_directory!r}）"
     )
-    if not local_range.working_directory or not root.is_dir():
-        raise ReviewError(f"範囲を解き直す作業ディレクトリがありません。{rebuild_advice}")
-    try:
-        _git(root, "rev-parse", "--git-dir")
-    except process.CommandError as error:
+    place = select_git_place(local_range.working_directory, local_range.git_directory)
+    match place:
+        case GitPlaceUnusable.NO_WORKING_DIRECTORY:
+            raise ReviewError(f"範囲を解き直す作業ディレクトリがありません。{rebuild_advice}")
+        case GitPlaceUnusable.NOT_A_REPOSITORY:
+            raise ReviewError(
+                f"作業ディレクトリが git のリポジトリではありません。{rebuild_advice}"
+            )
+        case GitPlace():
+            root = place.path
+    planned = plan_refresh_range(
+        GitProcessQueries(place.path),
+        place,
+        local_range.range_text,
+        local_range.head_tracking,
+        source.head_sha,
+        source.base_sha,
+        source.merge_base,
+    )
+    if isinstance(planned, BaseLost):
         raise ReviewError(
-            f"作業ディレクトリが git のリポジトリではありません。{rebuild_advice}"
-        ) from error
-    resolved = resolve_range(root, local_range.range_text)
+            f"記録した範囲の基点 {source.merge_base} を、先端 {planned.head_sha}"
+            f"（記録した枝: {planned.branch}）が含まなくなりました。基点を失ったので、"
+            f"新しい範囲で作り直してください。{rebuild_advice}"
+        )
+    resolved = planned.resolved
+    head = planned.head
     kept = _kept_declaration(review, declaration_override)
 
     def declare() -> RefreshResult:
         declaration = _range_declaration(root, resolved, kept)
         if declaration == review.declaration:
             return RefreshResult(review, updated=False, region_changes=RegionChanges([], [], []))
-        updated = replace(review, declaration=declaration, refreshed_at=_now())
-        _write_review_file(review.id.directory(), updated)
+        updated = replace(review, declaration=declaration, refreshed_at=now())
+        write_review_file(review.id.directory(), updated)
         return RefreshResult(updated, updated=True, region_changes=RegionChanges([], [], []))
 
-    return _refresh_diff_review(
+    result = _refresh_diff_review(
         review,
         source,
         resolved.head_sha,
@@ -1559,7 +1398,7 @@ def refresh_range(
         build_content=lambda: _build_range_content(
             root,
             review.id.directory(),
-            local_range.range_text,
+            local_range,
             resolved,
             kept,
             stored_directory=review.id.directory(),
@@ -1567,6 +1406,7 @@ def refresh_range(
         ),
         force_rebuild=sarif is not None,
     )
+    return replace(result, head=head)
 
 
 def _stored_bot_analysis(directory: Path) -> bots.BotAnalysis:
@@ -1640,7 +1480,7 @@ def _rebuild_stored_map(refreshed: RefreshResult, source: DiffSource) -> Refresh
         # 保存した木を持つのは差分の出所だけで、設計書のレビューはここへ来る道を持たない
         raise ReviewError(f"差分の出所でない記録の木は作り直せません: {review.id}")
     updated, region_changes = save_review(
-        review.id, content, review.created_at, _now(), review.repository_root
+        review.id, content, review.created_at, now(), review.repository_root
     )
     return RefreshResult(updated, updated=True, region_changes=region_changes)
 
@@ -1694,10 +1534,10 @@ def _refresh_declaration(
                 title=metadata.title,
             ),
         ),
-        refreshed_at=_now(),
+        refreshed_at=now(),
         background=background,
     )
-    _write_review_file(review.id.directory(), updated)
+    write_review_file(review.id.directory(), updated)
     save_background(review.id.directory(), background)
     return RefreshResult(updated, updated=True, region_changes=unchanged)
 
@@ -1736,7 +1576,7 @@ def refresh_from_content(
     ):
         return RefreshResult(review, updated=False, region_changes=RegionChanges([], [], []))
     updated, region_changes = save_review(
-        review.id, content, review.created_at, _now(), review.repository_root
+        review.id, content, review.created_at, now(), review.repository_root
     )
     return RefreshResult(updated, updated=True, region_changes=region_changes)
 
@@ -1777,320 +1617,3 @@ def refresh_feature(
         ),
         force_save=sarif is not None,
     )
-
-
-@dataclass(frozen=True)
-class LocatedReview:
-    """置き場から読んだレビューと、読んだ置き場の位置。
-
-    写した置き場では、位置は識別子が指す場所（review.id.directory()）と違う。
-    写しの置き場を扱う関数はこの値を受け、識別子から置き場を導く関数には渡さない。
-    """
-
-    review: Review
-    directory: Path
-
-
-def read_review_at(directory: Path) -> LocatedReview:
-    """保存先のディレクトリからレビューを読む。保存先と識別子の一致は求めない。
-
-    置き場を別の場所へ写した複製（保存先の名前が識別子の指す場所と違う）を読むための口で、
-    読むだけの検査（JSON と必須項目、識別子の形）を行う。失敗は ReviewError だけで返す。
-    本物の置き場の検査は load_review_at が、この上に重ねる。
-    """
-    try:
-        meta = load_review_meta(json.loads((directory / REVIEW_FILE).read_text(encoding="utf-8")))
-        review_id = _parse_stored_id(meta)
-        map_kind = load_map(json.loads((directory / MAP_FILE).read_text(encoding="utf-8")))
-        diff_source, pull_request = read_stored_sources(meta["pull_request"], meta["diff_source"])
-        try:
-            origin = _origin_from_stored(
-                review_id.kind,
-                pull_request,
-                read_stored_local_range(meta["local_range"]),
-                diff_source,
-                meta["targets"],
-                design_doc=meta["design_doc"],
-            )
-        except ReviewError as error:
-            # 固有のデータと diff_source の組が合わず、保存した出所の種類が決まらない
-            raise ReviewKindMismatchError(
-                f"保存した出所が食い違います: {review_id}: {error}"
-            ) from error
-        review = Review(
-            review_id,
-            meta["created_at"],
-            meta["repository_root"],
-            meta["paths"],
-            Declaration.from_dict(meta["declaration"]),
-            meta["content_warnings"],
-            map_kind,
-            origin,
-            meta["refreshed_at"],
-            load_background(directory),
-            load_gates(directory),
-        )
-        return LocatedReview(review, directory)
-    except FileNotFoundError as error:
-        raise ReviewError(f"レビューがありません: {directory}") from error
-    except (ValueError, KeyError, TypeError) as error:
-        # JSON の構文、識別子の形、必須項目の欠け、項目の型。いずれも保存した記録が壊れている
-        raise ReviewError(f"保存したレビューを読めません: {directory}: {error!r}") from error
-
-
-def set_repository_root(located: LocatedReview, root: str) -> None:
-    """置き場の review.json の repository_root だけを書き換える。
-
-    写した置き場の木の付け替えに使う。書き換えには置き場を読める必要があるので、
-    保存先の一致は求めない read_review_at から読んだ値を受ける。
-    """
-    located.review.repository_root = root
-    _write_review_file(located.directory, located.review)
-
-
-def load_review_at(directory: Path) -> Review:
-    """保存先のディレクトリからレビューを読む。記録を Review にするまでの検査はここに集める。
-
-    read_review_at の検査に、保存先との一致と出所の種類の一致を足す。
-    失敗は ReviewError（とその派生）だけで返す。呼ぶ側は ReviewError を捕まえれば足りる。
-    """
-    review = read_review_at(directory).review
-    review_id = review.id
-    if review_id.directory() != directory:
-        # 種類は保存した記録の id が決め、保存先の名前だけでは決めない
-        # （数字だけのファイルのレビューの名前は PR の番号と同じ名前になる）。
-        # id が指す場所と保存先が違う記録は、どちらが正しいか決められない
-        raise ReviewError(f"保存先が識別子（{review_id}）の指す場所と違います: {directory}")
-    stored_kind = review.kind
-    if stored_kind != review_id.kind:
-        raise ReviewKindMismatchError(
-            f"識別子の種類（{review_id.kind}）と保存した出所（{stored_kind}）が"
-            f"食い違います: {review_id}"
-        )
-    return review
-
-
-def _parse_stored_id(meta: dict[str, Any]) -> ReviewId:
-    """review.json の id を識別子にする。読めなければ ValueError / KeyError / TypeError。"""
-    return ReviewId.parse(meta["id"])
-
-
-def check_stored_id(review_id: ReviewId) -> None:
-    """識別子が指す保存先の記録の id が、その識別子と食い違わないことを確かめる。
-
-    識別子から記録へ進む入口（load_review と resolve_review）が必ず通る。
-    同じ保存先を別の種類の識別子で指している場合
-    （数字だけのファイルのレビューと PR の番号）を、ここで止める。
-    """
-    try:
-        meta = load_review_meta(
-            json.loads((review_id.directory() / REVIEW_FILE).read_text(encoding="utf-8"))
-        )
-        stored = _parse_stored_id(meta)
-    except FileNotFoundError as error:
-        raise ReviewError(f"レビューがありません: {review_id}") from error
-    except (ValueError, KeyError, TypeError, ReviewError):
-        # 壊れた記録（JSON、版、id の欠けや形の誤り）は食い違いを判定できないので通す。
-        # ここで止めると、壊れた記録を完全な識別子で delete する復旧の道が塞がる。
-        # 読む側の load_review_at が別に止める
-        return
-    if stored != review_id:
-        raise ReviewKindMismatchError(
-            f"識別子の種類（{review_id.kind}）と保存した記録の識別子（{stored}）が"
-            f"食い違います: {review_id}"
-        )
-
-
-def load_review(review_id: ReviewId) -> Review:
-    check_stored_id(review_id)
-    return load_review_at(review_id.directory())
-
-
-def _upgrade_pairs_v1(raw: list[Any]) -> dict[str, Any]:
-    """版 1 の pairs.json（対の配列そのもの）を次の版へ移す。"""
-    return {"pairs": copy.deepcopy(raw)}
-
-
-# 保存された版から次の版への移し。read_pairs が PAIRS_FORMAT まで順に回す
-_PAIRS_UPGRADES: dict[int, Upgrade] = {1: _upgrade_pairs_v1}
-
-
-def read_pairs(raw: object) -> list[FilePair]:
-    """pairs.json を読む境の一か所。版 1 は最上位が配列で、版 2 からは format を持つ辞書。"""
-    if not isinstance(raw, dict | list):
-        raise ReviewError("pairs.json の最上位が配列でも辞書でもありません")
-    if isinstance(raw, dict):
-        stored = upgrade_mapping(PAIRS_FILE, raw, current=PAIRS_FORMAT, upgrades=_PAIRS_UPGRADES)
-    else:
-        # 配列は format を持てないので版 1。upgrade_mapping は辞書しか受けない
-        stored = upgrade_to_current(PAIRS_FILE, 1, raw, PAIRS_FORMAT, _PAIRS_UPGRADES)
-    try:
-        return [FilePair(old, new) for old, new in stored["pairs"]]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ReviewError(
-            f"pairs.json の対が [変更前, 変更後] の組ではありません: {error!r}"
-        ) from error
-
-
-def dump_pairs(pairs: Sequence[FilePair]) -> dict[str, Any]:
-    """pairs.json へ書く境の一か所。配列は format を持てないので、辞書に包んで今の版を刻む。"""
-    return {"format": PAIRS_FORMAT, "pairs": [[pair.old_path, pair.new_path] for pair in pairs]}
-
-
-def load_pairs(review_id: ReviewId) -> list[FilePair]:
-    """差分のレビューの、変更したファイルの対。"""
-    path = review_id.directory() / PAIRS_FILE
-    if not path.is_file():
-        raise ReviewError(
-            "ファイルの対が保存されていない古いレビューです。"
-            f"refresh で作り直してください: {review_id}"
-        )
-    return read_pairs(json.loads(path.read_text(encoding="utf-8")))
-
-
-def scope_files(review: Review) -> set[str]:
-    """レビューの範囲のファイル。差分のレビューは変更したファイル（削除も含む）、ファイルのレビューは渡したファイル群。"""
-    if not review.is_diff:
-        return set(review.paths)
-    try:
-        pairs = load_pairs(review.id)
-    except ReviewError:
-        # ファイルの対を保存する前の古いレビュー。paths が変更したファイルの新しい側を持つ
-        return set(review.paths)
-    return {path for pair in pairs for path in (pair.old_path, pair.new_path) if path is not None}
-
-
-def is_archived(review_id: ReviewId) -> bool:
-    return (review_id.directory() / ARCHIVE_MARKER_FILE).is_file()
-
-
-def set_archived(review_id: ReviewId, *, archived: bool) -> bool:
-    """アーカイブの印を付ける、または外す。すでにその状態なら何もしない。変えたかを返す。"""
-    directory = review_id.directory()
-    with review_lock(directory):
-        if is_archived(review_id) == archived:
-            return False
-        if archived:
-            write_text_atomic(directory / ARCHIVE_MARKER_FILE, _now() + "\n")
-        else:
-            (directory / ARCHIVE_MARKER_FILE).unlink()
-        return True
-
-
-def list_reviews(archived: str = ARCHIVED_EXCLUDE) -> list[Review]:
-    """archived は EXCLUDE（隠す）、ONLY（アーカイブ済みだけ）、INCLUDE（全部）。"""
-    reviews: list[Review] = []
-    home = data_home()
-    for review_file in sorted(home.glob(f"*/*/*/{REVIEW_FILE}")):
-        directory = review_file.parent
-        relative = review_file.relative_to(home)
-        if relative.parts[0] == TRASH_DIRECTORY or relative.parts[2].startswith(STAGING_PREFIX):
-            continue
-        marked = (directory / ARCHIVE_MARKER_FILE).is_file()
-        if archived != ARCHIVED_INCLUDE and marked != (archived == ARCHIVED_ONLY):
-            continue
-        try:
-            reviews.append(load_review_at(directory))
-        except ReviewError as error:
-            # 壊れた記録 1 件で一覧の全体が出なくなるのを避ける。隠したままにはせず警告する
-            warnings.warn(f"一覧から除きました: {error}", stacklevel=2)
-    return sorted(reviews, key=lambda review: review.created_at, reverse=True)
-
-
-def _short_matches(known: list[ReviewId], repo: str, kind: ReviewKind, key: str) -> list[ReviewId]:
-    return [
-        candidate
-        for candidate in known
-        if candidate.repo == repo and candidate.key == key and candidate.kind == kind
-    ]
-
-
-def _stored_ids_named(name: str, repository: Repository | None = None) -> list[ReviewId]:
-    """置き場のディレクトリ名が name に当たるレビューの識別子を、アーカイブ済みも含めて集める。
-
-    repository を渡すと、その owner/repo の下だけを探す。渡さなければ全リポジトリを探す。
-
-    置き場の全件は読まない。名前の合うディレクトリの review.json から id だけを読む。
-    読めない記録は候補にしない（壊れた記録の扱いは list_reviews と delete が持つ）。
-    """
-    home = data_home()
-    found: list[ReviewId] = []
-    scope = "*/*" if repository is None else glob.escape(f"{repository.owner}/{repository.repo}")
-    for prefix in sorted({kind.directory_prefix for kind in ReviewKind}):
-        pattern = f"{scope}/{glob.escape(prefix + name)}/{REVIEW_FILE}"
-        for review_file in sorted(home.glob(pattern)):
-            if review_file.relative_to(home).parts[0] == TRASH_DIRECTORY:
-                continue
-            try:
-                found.append(
-                    _parse_stored_id(
-                        load_review_meta(json.loads(review_file.read_text(encoding="utf-8")))
-                    )
-                )
-            except (OSError, ValueError, KeyError, TypeError, ReviewError):
-                # 読めない記録は id を取れない。候補を欠いても誤りの文は出せる
-                continue
-    return [review_id for review_id in found if review_id.key == name]
-
-
-def _name_only_message(text: str, repository: Repository) -> str:
-    """名前だけが渡され、呼び出した場所のリポジトリに無いときの誤りの文。候補は示すだけで、選びはしない。"""
-    candidates = _stored_ids_named(text)
-    where = f"{repository.owner}/{repository.repo}"
-    head = f"このリポジトリ（{where}）に名前 {text!r} のレビューはありません。"
-    if not candidates:
-        # 区切りはレビューの種類ごとに違うので、例を一つに決めず一覧の形へ案内する
-        return f"{head}jigane list に出る完全な識別子か短い識別子で指してください"
-    listed = "、".join(
-        f"{candidate}（短い形: {candidate.repo}{candidate.kind.separator}{candidate.key}）"
-        for candidate in candidates
-    )
-    return f"{head}候補: {listed}。jigane list で一覧を確かめられます"
-
-
-def _resolve_name_only(text: str, working_directory: Path) -> ReviewId:
-    """名前だけの入力を、呼び出した場所のリポジトリの中で一つに決める。決まらなければ拒む。"""
-    repository = identify(working_directory)
-    here = _stored_ids_named(text, repository)
-    if len(here) == 1:
-        return here[0]
-    if len(here) > 1:
-        listed = ", ".join(str(candidate) for candidate in here)
-        raise ReviewError(f"名前が曖昧です: {text}（候補: {listed}）")
-    # 呼び出した場所のリポジトリに無いときは、全リポジトリの候補を示して完全な形へ案内する
-    raise ReviewError(_name_only_message(text, repository))
-
-
-def resolve_review(text: str, working_directory: Path | None = None) -> ReviewId:
-    """識別子を決める。名前だけの入力は working_directory（省くと現在地）のリポジトリで探す。"""
-    try:
-        full = ReviewId.parse(text)
-    except ValueError as error:
-        if "/" in text:
-            # owner を含む形は完全な識別子として書かれている。短い識別子の誤りに読み替えない
-            raise ReviewError(str(error)) from error
-        full = None
-    if full is not None:
-        check_stored_id(full)
-        return full
-    try:
-        repo, kind, key = ReviewId.parse_short(text)
-    except ValueError as error:
-        # どれかの種類の名前の規則に合う文字列だけを、`jigane new` で付けた名前と見なす
-        if any(named.key_pattern.fullmatch(text) for named in ReviewKind):
-            return _resolve_name_only(text, working_directory or Path.cwd())
-        raise ReviewError(str(error)) from error
-    # 短い識別子は、アーカイブしていないレビューを先に探す。無いときだけアーカイブ済みへ広げる。
-    # 置き場の全件を読むのは、短い形と分かってからにする
-    known = [review.id for review in list_reviews()]
-    matches = _short_matches(known, repo, kind, key)
-    if not matches:
-        matches = _short_matches(
-            [review.id for review in list_reviews(ARCHIVED_ONLY)], repo, kind, key
-        )
-    if not matches:
-        raise ReviewError(f"レビューがありません: {text}")
-    if len(matches) > 1:
-        listed = ", ".join(str(match) for match in matches)
-        raise ReviewError(f"短い識別子が曖昧です: {text}（候補: {listed}）")
-    return matches[0]

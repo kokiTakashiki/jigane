@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import textwrap
 from pathlib import Path
@@ -5,6 +6,8 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+
+from jigane.git import command_line
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -274,6 +277,181 @@ def test_git_literal_launch_passes(tmp_path: Path) -> None:
         },
     )
     assert commands(root) == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        '["git", "fetch", "origin", sha]',
+        '["git", "fetch", f"origin/{sha}"]',
+        '["git", "fetch", *rest]',
+        '["git", "fetch", make(sha)]',
+        '["git", "fetch", "a" + sha]',
+    ],
+)
+def test_git_literal_with_non_constant_element_fails(tmp_path: Path, argv: str) -> None:
+    root = make_tree(
+        tmp_path,
+        {
+            "a.py": f"""
+            from jigane.git import process
+
+            def f(sha, rest, make):
+                process.run_command({argv})
+            """
+        },
+    )
+    assert len(commands(root)) == 1
+
+
+def _listed_launch(
+    tmp_path: Path, body: str, shape_name: str, prefix: str = "", parameters: str = "sha, rest"
+) -> list[str]:
+    source = f"from jigane.git import process\n\ndef f({parameters}):\n" + textwrap.indent(
+        textwrap.dedent(body), "    "
+    )
+    root = make_tree(tmp_path, {"a.py": source})
+    checker = load_checker()
+    allowed = {
+        "END_OF_OPTIONS_FIRST": lambda: checker.EndOfOptionsFirst("試験用"),
+        "FIXED_PREFIX": lambda: checker.FixedPrefix("試験用", prefix),
+        "PASS_THROUGH": lambda: checker.PassThrough("試験用"),
+    }[shape_name]()
+    checker.VARIABLE_GIT_ARGV_ALLOWED[("jigane.a", "f")] = allowed
+    problems: list[str] = checker.check_commands(root)
+    return problems
+
+
+@pytest.mark.parametrize(
+    ("shape", "prefix", "argv"),
+    [
+        ("END_OF_OPTIONS_FIRST", "", '["git", "rev-parse", "--end-of-options", f"{sha}^"]'),
+        ("END_OF_OPTIONS_FIRST", "", '["git", "log", "--end-of-options", sha, *rest]'),
+        ("FIXED_PREFIX", "HEAD:", '["git", "rev-parse", f"HEAD:{sha}"]'),
+        ("PASS_THROUGH", "", '["git", *rest]'),
+    ],
+)
+def test_listed_function_passes_with_its_shape(
+    tmp_path: Path, shape: str, prefix: str, argv: str
+) -> None:
+    assert _listed_launch(tmp_path, f"process.run_command({argv})", shape, prefix) == []
+
+
+@pytest.mark.parametrize(
+    ("shape", "prefix", "argv"),
+    [
+        ("END_OF_OPTIONS_FIRST", "", '["git", "show", sha]'),
+        ("END_OF_OPTIONS_FIRST", "", '["git", "rev-parse", sha, "--end-of-options"]'),
+        ("END_OF_OPTIONS_FIRST", "", '["git", sha, "--end-of-options", sha]'),
+        ("END_OF_OPTIONS_FIRST", "", '[sha, "--end-of-options", "x"]'),
+        ("END_OF_OPTIONS_FIRST", "", '["git", "rev-parse", *rest, "--end-of-options", sha]'),
+        ("FIXED_PREFIX", "HEAD:", '["git", "rev-parse", sha]'),
+        ("FIXED_PREFIX", "HEAD:", '["git", "rev-parse", f"{sha}:x"]'),
+        ("FIXED_PREFIX", "HEAD:", '["git", sha, f"HEAD:{sha}"]'),
+        ("PASS_THROUGH", "", '["git", "fetch", sha]'),
+        ("PASS_THROUGH", "", '["git", "fetch", *rest]'),
+        ("PASS_THROUGH", "", '["git", sha]'),
+        ("PASS_THROUGH", "", "[sha, *rest]"),
+        ("PASS_THROUGH", "", '["hg", *rest]'),
+    ],
+)
+def test_listed_function_fails_with_other_shape(
+    tmp_path: Path, shape: str, prefix: str, argv: str
+) -> None:
+    assert len(_listed_launch(tmp_path, f"process.run_command({argv})", shape, prefix)) == 1
+
+
+def test_listed_function_checks_every_launch(tmp_path: Path) -> None:
+    body = """
+    process.run_command(["git", "rev-parse", "--end-of-options", sha])
+    process.run_command(["git", "show", sha])
+    """
+    assert len(_listed_launch(tmp_path, body, "END_OF_OPTIONS_FIRST")) == 1
+
+
+def test_allowed_entries_point_to_existing_functions() -> None:
+    checker = load_checker()
+    for module, function in checker.VARIABLE_GIT_ARGV_ALLOWED:
+        path = ROOT.joinpath(*module.split(".")).with_suffix(".py")
+        assert path.is_file(), module
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert any(
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == function
+            for node in ast.walk(tree)
+        ), (module, function)
+
+
+def test_git_argv_builder_launch_passes(tmp_path: Path) -> None:
+    root = make_tree(
+        tmp_path,
+        {
+            "a.py": """
+            from jigane.git import process
+            from jigane.git.command_line import GitSubcommand, build_git_command
+
+            def f(sha):
+                process.run_command(build_git_command(GitSubcommand.LS_TREE, revisions=[sha]))
+            """
+        },
+    )
+    assert commands(root) == []
+
+
+def test_git_argv_builders_match_public_builders() -> None:
+    public = {
+        name
+        for name, value in vars(command_line).items()
+        if name.startswith("build_")
+        and getattr(value, "__module__", None) == command_line.__name__
+    }
+    assert public == load_checker().GIT_ARGV_BUILDERS
+
+
+def test_same_name_builder_from_another_module_fails(tmp_path: Path) -> None:
+    root = make_tree(
+        tmp_path,
+        {
+            "a.py": """
+            from jigane.git import process
+            from jigane.other import build_git_command
+
+            def f(sha):
+                process.run_command(build_git_command(sha))
+            """
+        },
+    )
+    assert len(commands(root)) == 1
+
+
+def test_aliased_builder_import_passes(tmp_path: Path) -> None:
+    root = make_tree(
+        tmp_path,
+        {
+            "a.py": """
+            from jigane.git import process
+            from jigane.git.command_line import build_git_command as build
+
+            def f(sha):
+                process.run_command(build(sha))
+            """
+        },
+    )
+    assert commands(root) == []
+
+
+def test_other_call_as_argv_fails(tmp_path: Path) -> None:
+    root = make_tree(
+        tmp_path,
+        {
+            "a.py": """
+            from jigane.git import process
+
+            def f(make):
+                process.run_command(make())
+            """
+        },
+    )
+    assert len(commands(root)) == 1
 
 
 def test_other_command_launch_fails(tmp_path: Path) -> None:

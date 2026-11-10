@@ -9,7 +9,8 @@ LLM の起動、実行の記録、見積もりと使用量、使った額を受�
 | `claude` | Claude Code CLI を起動します |
 | `finding_model` | 指摘の pydantic のモデル。保存の前の検証が使い、旧の JSON スキーマと同じ入力を受け付けます |
 | `output_common` | LLM の出力のモデルが共有する約束（余計な項目を拒む設定と整数の型）を持ちます |
-| `launch_failure` | 起動の失敗の記録を持ちます |
+| `launch_failure` | 起動の失敗の保存の型と、今回と前の回の失敗を起動の単位ごとに選ぶ事実（`selected_failures`、`earlier_failures`）を持ちます |
+| `failure_views` | 選んだ失敗から表示の一件（`FailureView`）と文、JSON を作ります。`show` と `run` が共有します |
 | `prompt_stamp` | 起動したプロンプトの版と文字数の組（`PromptStamp`）を持ちます。`launch_failure` が失敗の記録に載せます |
 | `defaults` | 1 回の起動の上限と effort の既定を決めます |
 | `usage_table` | `usage.csv` の列と値の定義を持ちます |

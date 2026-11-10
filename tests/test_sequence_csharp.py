@@ -134,8 +134,14 @@ def test_rule7_call_result_as_receiver(index: Index) -> None:
     assert _resolved(static[1].resolution).type == TypeKey("Order")
 
 
-def test_rule8_capitalised_unknown_identifier_is_external(index: Index) -> None:
-    assert _only(index, "Rule8") == External("ArgumentNullException")
+def test_rule8_capitalised_unknown_identifier_is_unresolved(index: Index) -> None:
+    # 綴りだけで外部と推定せず、受け手の式を持つ未解決にする
+    assert _only(index, "Rule8") == Unresolved("ArgumentNullException")
+
+
+def test_annotated_type_missing_from_the_index_is_external(index: Index) -> None:
+    # 型注記で決まった索引に無い型は、確認済みの外部のまま
+    assert _only(index, "ExternalByAnnotation") == External("Stream")
 
 
 def test_unresolved_keeps_receiver_text(index: Index) -> None:

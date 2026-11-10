@@ -6,7 +6,14 @@
 
 from typing import Any, NamedTuple
 
-from jigane.technology_list.changes import CHANGE_TEXT, EXTERNAL, LANGUAGE_OS, SAME_REPOSITORY
+from jigane.technology_list.changes import (
+    ADDED,
+    CHANGE_TEXT,
+    EXTERNAL,
+    LANGUAGE_OS,
+    REMOVED,
+    SAME_REPOSITORY,
+)
 from jigane.technology_list.manifests import PLATFORM_FILES, PLATFORM_LANGUAGES
 
 CLASSIFICATION_TEXT = {
@@ -58,8 +65,53 @@ class Section(NamedTuple):
         return self._asdict()
 
 
+_MAX_LISTED_PATHS = 3
+
+
+def still_used_key(language: str, name: str) -> str:
+    """モデルの still_used_elsewhere の辞書のキー。"""
+    return f"{language}/{name}"
+
+
+def _listed_text(items: list[str]) -> str:
+    listed = "、".join(items[:_MAX_LISTED_PATHS])
+    rest = len(items) - _MAX_LISTED_PATHS
+    return f"{listed} ほか {rest} 件" if rest > 0 else listed
+
+
+def removed_change_text(paths: list[str] | None) -> str:
+    """消えた技術の変化の文言。paths は他のファイルで使い続けている場所。"""
+    if not paths:
+        return CHANGE_TEXT[REMOVED]
+    # 数えたのは変更したファイルの中だけで、リポジトリから無くなったとは限らない
+    places = _listed_text(paths)
+    return f"{CHANGE_TEXT[REMOVED]}（変更したファイルから。他では使い続けている: {places}）"
+
+
 def _change_text(change: str | None) -> str:
     return "-" if change is None else CHANGE_TEXT[change]
+
+
+def _added_names(model: dict[str, Any], removed: dict[str, Any]) -> list[str]:
+    """消えた技術と同じ言語と分類で、同じ変更で増えた技術の名前。"""
+    return [
+        t["name"]
+        for t in model["technologies"]
+        if t["change"] == ADDED
+        and t["language"] == removed["language"]
+        and t["classification"] == removed["classification"]
+    ]
+
+
+def _technology_change_text(model: dict[str, Any], t: dict[str, Any]) -> str:
+    if t["change"] != REMOVED:
+        return _change_text(t["change"])
+    text = removed_change_text(
+        model["still_used_elsewhere"].get(still_used_key(t["language"], t["name"]))
+    )
+    added = _added_names(model, t)
+    # 因果は推定せず、並べるだけにする
+    return f"{text}。同じ変更で増えた: {_listed_text(added)}" if added else text
 
 
 def _technology_section(model: dict[str, Any]) -> Section:
@@ -75,7 +127,7 @@ def _technology_section(model: dict[str, Any]) -> Section:
                 str(t["after"]["files"]),
                 str(t["after"]["lines"]),
                 "-" if before is None else f"{before['files']} / {before['lines']}",
-                _change_text(t["change"]),
+                _technology_change_text(model, t),
                 "-" if evidence is None else f"{evidence['path']}:{evidence['line']}",
             ]
         )

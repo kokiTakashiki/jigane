@@ -97,7 +97,10 @@ def test_selection_v1_moves_to_current_keys() -> None:
     v1 = {"picked": ["F1"], "held": [], "objections": {}}
     moved = dump_selection(parse_selection(v1))
     assert set(moved) == set(dump_selection(Selection()))
-    assert moved == {"format": SELECTION_FORMAT, "verdicts": {"F1": {"kind": "picked"}}}
+    assert moved == {
+        "format": SELECTION_FORMAT,
+        "verdicts": {"F1": {"kind": "picked", "round": None}},
+    }
 
 
 def test_selection_v2_moves_each_collection_to_one_verdict() -> None:

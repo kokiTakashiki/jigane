@@ -5,7 +5,7 @@ import pytest
 from tree_sitter import Node
 
 from jigane.judgment_map.configuration import DEFAULT_EXCLUDE
-from jigane.languages import registry
+from jigane.languages import csharp_nodes, registry
 from jigane.languages.base import (
     Declaration,
     MemberDecl,
@@ -16,6 +16,7 @@ from jigane.languages.base import (
     parse,
 )
 from jigane.languages.csharp import CSharpAdapter
+from jigane.preconditions.required import required
 
 adapter = CSharpAdapter()
 
@@ -430,3 +431,40 @@ def test_lambda_parameters_are_locals(lambda_text: str, expected: set[str]) -> N
     source = f"class C {{ void M() {{ var f = {lambda_text}; }} }}".encode()
     body = next(n for n in _walk(parse(adapter, source).root_node) if n.type == "block")
     assert adapter.locals_of(body).lambda_parameters == expected
+
+
+def test_type_declarations_are_the_kinds_without_enum_and_delegate() -> None:
+    expected = {
+        "class_declaration",
+        "struct_declaration",
+        "record_declaration",
+        "interface_declaration",
+    }
+    assert set(csharp_nodes.TYPE_KINDS) - expected == {"enum_declaration", "delegate_declaration"}
+    assert expected == csharp_nodes.TYPE_DECLARATIONS
+
+
+@pytest.mark.parametrize(
+    ("modifiers", "expected"),
+    [
+        ("public ", Visibility.PUBLIC),
+        ("protected ", Visibility.PUBLIC),
+        ("internal ", Visibility.INTERNAL),
+        ("protected internal ", Visibility.PUBLIC),
+        ("private protected ", Visibility.FILE),
+        ("private ", Visibility.FILE),
+        ("", Visibility.INTERNAL),
+    ],
+)
+def test_declared_visibility_reads_the_modifiers(modifiers: str, expected: Visibility) -> None:
+    root = parse(adapter, f"class A {{ {modifiers}void F() {{}} }}".encode()).root_node
+    body = required(root.children[0].child_by_field_name("body"))
+    method = body.children[1]
+    assert method.type == "method_declaration"
+    assert csharp_nodes.declared_visibility(method, Visibility.INTERNAL) is expected
+
+
+def test_declared_visibility_returns_the_caller_default_without_modifiers() -> None:
+    root = parse(adapter, b"class A { void F() {} }").root_node
+    method = required(root.children[0].child_by_field_name("body")).children[1]
+    assert csharp_nodes.declared_visibility(method, Visibility.FILE) is Visibility.FILE

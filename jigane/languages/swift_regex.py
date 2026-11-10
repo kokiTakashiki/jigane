@@ -4,8 +4,9 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
-from jigane.preconditions.required import required
+from jigane.languages.swift_nodes import DECLARED_FUNCTION_NODES, STRING_LITERALS
 
 _BINDING_PART_COUNT = 2  # パターンと初期値
 
@@ -16,10 +17,6 @@ class _NotConstantError(Exception):
     """文字列の定数に解けない式。"""
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def regex_scan(root: Node, path: str) -> RegexScan:
     literals: list[RegexLiteral] = []
     composed: list[RegexComposed] = []
@@ -28,7 +25,7 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         if node.type == "regex_literal":
             literals.append(
                 RegexLiteral(
-                    pattern=_regex_body(_text(node)),
+                    pattern=_regex_body(text_of(node)),
                     dialect=RegexDialect.SWIFT,
                     call="/.../",
                     use=RegexUse.COMPILE,
@@ -78,13 +75,13 @@ def _regex_body(text: str) -> str:
 def _label(argument: Node) -> str | None:
     for child in argument.children:
         if child.type == "value_argument_label":
-            return _text(child)
+            return text_of(child)
     return None
 
 
 def _callee_name(callee: Node) -> str | None:
     if callee.type == "simple_identifier":
-        return _text(callee)
+        return text_of(callee)
     if callee.type != "navigation_expression":
         return None
     # `Foundation.NSRegularExpression` のようなモジュール修飾は、最後の名前だけで判定する
@@ -92,7 +89,7 @@ def _callee_name(callee: Node) -> str | None:
     identifier = suffix.children[-1] if suffix.type == "navigation_suffix" else None
     if identifier is None or identifier.type != "simple_identifier":
         return None
-    return _text(identifier)
+    return text_of(identifier)
 
 
 def _argument_values(call: Node) -> list[Node] | None:
@@ -178,16 +175,11 @@ def _is_read(identifier: Node) -> bool:
 
 
 _LOCALS = LocalRules(
-    scopes=frozenset({"function_declaration", "init_declaration"}),
+    scopes=DECLARED_FUNCTION_NODES,
     identifier="simple_identifier",
     declaration=_declaration,
     top_level=_body,
     is_read=_is_read,
-)
-
-
-_STRING_LITERALS = frozenset(
-    {"line_string_literal", "multi_line_string_literal", "raw_string_literal"}
 )
 
 
@@ -212,15 +204,15 @@ def _sum_constant(node: Node, *, resolve: bool) -> str:
 def _string_constant(node: Node) -> str:
     """文字列リテラルの本文。補間を含むものは定数でないので解かない。"""
     if node.type == "raw_string_literal":
-        return _raw(_text(node))
+        return _raw(text_of(node))
     if node.type == "multi_line_string_literal":
         # 不正なエスケープなどで文法が壊れた節点（ERROR）を含む文字列は、本文を信用せず解かない
         if node.has_error or any(c.type == "interpolated_expression" for c in node.children):
             raise _NotConstantError
-        return _multiline(_text(node), 0)
+        return _multiline(text_of(node), 0)
     if any(c.type == "interpolated_expression" for c in node.children):
         raise _NotConstantError
-    return _unescape(_text(node)[1:-1], "")
+    return _unescape(text_of(node)[1:-1], "")
 
 
 def _identifier_constant(node: Node) -> str:
@@ -239,7 +231,7 @@ def _constant(node: Node, *, resolve: bool = True) -> str:
         return _constant(node.named_children[0], resolve=resolve)
     if node.type == "additive_expression":
         return _sum_constant(node, resolve=resolve)
-    if node.type in _STRING_LITERALS:
+    if node.type in STRING_LITERALS:
         return _string_constant(node)
     if node.type == "simple_identifier" and resolve:
         return _identifier_constant(node)

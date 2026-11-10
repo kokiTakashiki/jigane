@@ -14,59 +14,49 @@
 非公開から公開へ変えただけの名前は、足した名前に数えない。
 """
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
+from typing import Self, cast
 
 from tree_sitter import Node
 
 from jigane.languages.base import PublicName, PublicNameKind
-
-type ParseSource = Callable[[str], Node]
+from jigane.languages.node_text import text_or_empty
+from jigane.languages.public_names_core import (
+    AddedParameter,
+    Definition,
+    ParseSource,
+    Rules,
+    Site,
+    Tree,
+    added_public_names,
+    sites_of,
+)
+from jigane.languages.swift_nodes import TYPE_DECLARATIONS, TYPE_KEYWORDS
 
 _MODULE_LEVEL = "モジュール"
-_TYPE_KEYWORDS = frozenset({"struct", "class", "actor", "enum"})
 _FUNCTIONS = frozenset(
     {"function_declaration", "protocol_function_declaration", "init_declaration"}
 )
-_DECLARATIONS = _FUNCTIONS | {"class_declaration", "protocol_declaration"}
+_DECLARATIONS = _FUNCTIONS | TYPE_DECLARATIONS
 _PRIVATE = frozenset({b"private", b"fileprivate"})
 _IDENTIFIERS = frozenset({"simple_identifier", "type_identifier"})
 _DECLARED_NAMES = _IDENTIFIERS | {"pattern", "value_argument_label"}
 
 
 @dataclass
-class _Definition:
-    kind: PublicNameKind
-    path: str
-    qualified: str
-    line: int
-    is_public: bool
+class _Definition(Definition):
     # 呼ぶ側が渡すラベルの集合（オーバーロードは合わせる）
     labels: set[str] = field(default_factory=set)
-    owner: str | None = None
+
+    def merge(self, other: Self) -> None:
+        super().merge(other)
+        self.labels |= other.labels
 
 
 @dataclass(frozen=True)
-class _Site:
-    path: str
-    where: str
-    name: str
-    receiver: str | None
-    labels: frozenset[str]
-
-
-@dataclass
-class _Tree:
-    definitions: dict[tuple[str, str], _Definition] = field(default_factory=dict)
-    calls: list[_Site] = field(default_factory=list)
-    references: list[_Site] = field(default_factory=list)
-    inherits: list[_Site] = field(default_factory=list)
-    # 識別子の名前ごとの出現。呼ぶ側を数える表は行ごとに引くので、名前で索引にする
-    names: dict[str, list[_Site]] = field(default_factory=dict)
-
-
-def _text(node: Node | None) -> str:
-    return (node.text or b"").decode() if node is not None else ""
+class _Site(Site):
+    labels: frozenset[str] = frozenset()
 
 
 def _is_private(node: Node) -> bool:
@@ -84,7 +74,11 @@ def _labels(node: Node) -> set[str]:
         if parameter.type != "parameter":
             continue
         external = parameter.child_by_field_name("external_name")
-        label = _text(external) if external is not None else _text(parameter.children[0])
+        label = (
+            text_or_empty(external)
+            if external is not None
+            else text_or_empty(parameter.children[0])
+        )
         if label and label != "_":
             found.add(label)
     return found
@@ -103,7 +97,9 @@ def _call_labels(call: Node) -> frozenset[str]:
                 argument.child_by_field_name("name") if argument.type == "value_argument" else None
             )
             if label is not None:
-                found.add(_text(label.children[0]) if label.children else _text(label))
+                found.add(
+                    text_or_empty(label.children[0]) if label.children else text_or_empty(label)
+                )
     return frozenset(found)
 
 
@@ -118,10 +114,10 @@ def _navigation_parts(node: Node) -> tuple[str | None, str | None]:
     target = node.child_by_field_name("target")
     receiver = None
     if target is not None and target.type == "simple_identifier":
-        receiver = _text(target)
+        receiver = text_or_empty(target)
     elif target is not None and target.type == "navigation_expression":
         receiver = _navigation_parts(target)[1]
-    return receiver, _text(name) if name is not None else None
+    return receiver, text_or_empty(name) if name is not None else None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -141,7 +137,7 @@ class _Context:
 
 
 class _Walker:
-    def __init__(self, path: str, tree: _Tree) -> None:
+    def __init__(self, path: str, tree: Tree) -> None:
         self.path = path
         self.tree = tree
 
@@ -152,24 +148,20 @@ class _Walker:
         node: Node,
         *,
         public: bool,
-        owner: str | None,
         labels: set[str] | None = None,
+        constructor: bool = False,
     ) -> None:
-        key = (self.path, qualified)
-        existing = self.tree.definitions.get(key)
-        if existing is not None:
-            # オーバーロードは一つの定義に合わせる
-            existing.labels |= labels or set()
-            existing.is_public = existing.is_public or public
-            return
-        self.tree.definitions[key] = _Definition(
-            kind,
-            self.path,
-            qualified,
-            node.start_point.row + 1,
-            public,
-            set(labels or ()),
-            owner,
+        place = (self.path, node.start_point.row + 1)
+        # オーバーロードは一つの定義に合わせる
+        self.tree.add(
+            _Definition(
+                kind,
+                qualified,
+                [place],
+                public,
+                is_constructor=constructor,
+                labels=set(labels or ()),
+            )
         )
 
     def walk(self, node: Node, context: _Context) -> None:
@@ -180,10 +172,9 @@ class _Walker:
             for case in node.children_by_field_name("name"):
                 self._define(
                     PublicNameKind.ENUM_VALUE,
-                    context.qualify(_text(case)),
+                    context.qualify(text_or_empty(case)),
                     node,
                     public=context.public and not _is_private(node),
-                    owner=context.owner,
                 )
         elif kind == "call_expression":
             self._call(node, context.where)
@@ -193,9 +184,7 @@ class _Walker:
                 site = _Site(self.path, context.where, member, receiver, frozenset())
                 self.tree.references.append(site)
         elif kind in _IDENTIFIERS:
-            name = _text(node)
-            site = _Site(self.path, context.where, name, None, frozenset())
-            self.tree.names.setdefault(name, []).append(site)
+            self.tree.record_name(Site(self.path, context.where, text_or_empty(node)))
         self._walk_children(node, context)
 
     def _walk_children(self, node: Node, context: _Context) -> None:
@@ -212,14 +201,16 @@ class _Walker:
 
     def _declaration(self, node: Node, context: _Context) -> bool:
         """宣言を読み終えたら True。名前の読めない関数だけ False で、中は呼び出し側が辿る。"""
-        if node.type in ("class_declaration", "protocol_declaration"):
+        if node.type in TYPE_DECLARATIONS:
             is_extension = node.type == "class_declaration" and not any(
-                c.type in _TYPE_KEYWORDS for c in node.children
+                c.type in TYPE_KEYWORDS for c in node.children
             )
             self._type(node, context, extension=is_extension)
             return True
         name = (
-            "init" if node.type == "init_declaration" else _text(node.child_by_field_name("name"))
+            "init"
+            if node.type == "init_declaration"
+            else text_or_empty(node.child_by_field_name("name"))
         )
         if not name:
             # 名前の読めない関数は定義にできない。中の呼び出しは辿る
@@ -230,31 +221,31 @@ class _Walker:
             context.qualify(name),
             node,
             public=public,
-            owner=context.owner,
             labels=_labels(node),
+            constructor=node.type == "init_declaration",
         )
         inner = _Context(stack=(*context.stack, name), public=public, local=True)
         self._walk_children(node, inner)
         return True
 
     def _type(self, node: Node, context: _Context, *, extension: bool = False) -> None:
-        name = _text(node.child_by_field_name("name"))
+        name = text_or_empty(node.child_by_field_name("name"))
         if not name:
             # 名前の読めない型は定義にも所属にもできない
             return
         public = context.public and not _is_private(node)
         # 拡張される型は別の場所で定義済みなので、型の名前は足さず、メンバだけを所属付きで数える
         if not extension:
-            self._define(
-                PublicNameKind.CLASS, context.qualify(name), node, public=public, owner=None
-            )
+            self._define(PublicNameKind.CLASS, context.qualify(name), node, public=public)
         inner = _Context(stack=(*context.stack, name), public=public, owner=name)
         for child in node.children:
             if child.type == "inheritance_specifier":
                 base = child.child_by_field_name("inherits_from")
                 names = [c for c in (base.children if base else []) if c.type == "type_identifier"]
                 if names:
-                    inherited = _Site(self.path, inner.where, _text(names[-1]), None, frozenset())
+                    inherited = _Site(
+                        self.path, inner.where, text_or_empty(names[-1]), None, frozenset()
+                    )
                     self.tree.inherits.append(inherited)
             elif child.type in ("class_body", "enum_class_body", "protocol_body"):
                 for member in child.children:
@@ -266,7 +257,7 @@ class _Walker:
             return
         receiver = None
         if callee.type == "simple_identifier":
-            name = _text(callee)
+            name = text_or_empty(callee)
         elif callee.type == "navigation_expression":
             receiver, last = _navigation_parts(callee)
             name = last or ""
@@ -277,96 +268,56 @@ class _Walker:
             self.tree.calls.append(_Site(self.path, where, name, receiver, _call_labels(node)))
 
 
-def _parse_all(sources: Mapping[str, str], parse_source: ParseSource, tree: _Tree) -> None:
-    for path, source in sources.items():
-        try:
-            root = parse_source(source)
-            local = _Tree()
-            _Walker(path, local).walk(root, _Context())
-        except (RecursionError, MemoryError, ValueError):
-            # 深く入れ子のファイルは木を辿れない。他のファイルの名前で表は成り立つので止めない
-            continue
-        tree.definitions.update(local.definitions)
-        tree.calls += local.calls
-        tree.references += local.references
-        tree.inherits += local.inherits
-        for name, sites in local.names.items():
-            tree.names.setdefault(name, []).extend(sites)
+def _key_of(definition: Definition) -> tuple[str, str]:
+    # 別のファイルにある同名の定義は別の行として出す
+    return (definition.places[0][0], definition.qualified)
 
 
-def _inside(site: _Site, definition: _Definition) -> bool:
-    return site.path == definition.path and (
-        site.where == definition.qualified or site.where.startswith(definition.qualified + ".")
+def _walk(path: str, tree: Tree, root: Node) -> None:
+    _Walker(path, tree).walk(root, _Context())
+
+
+def _sites_of(definition: Definition, tree: Tree) -> list[Site]:
+    # `init` は型の名前での呼び出し。型は継承の並びも使う側に数える
+    return sites_of(
+        definition,
+        tree,
+        constructor_sites=lambda t: t.calls,
+        type_sites=lambda t, name: [*t.names.get(name, []), *t.inherits],
     )
 
 
-def _sites_of(definition: _Definition, tree: _Tree) -> list[_Site]:
-    last = definition.qualified.split(".")[-1]
-    match definition.kind:
-        case PublicNameKind.FUNCTION:
-            return [s for s in tree.calls if s.name == last and not _inside(s, definition)]
-        case PublicNameKind.METHOD if last == "init":
-            owner = definition.qualified.split(".")[-2]
-            return [s for s in tree.calls if s.name == owner and not _inside(s, definition)]
-        case PublicNameKind.METHOD:
-            return [s for s in tree.calls if s.name == last and not _inside(s, definition)]
-        case PublicNameKind.CLASS:
-            sites = [*tree.names.get(last, []), *tree.inherits]
-            return [s for s in sites if s.name == last and not _inside(s, definition)]
-        case _:
-            return [
-                s
-                for s in tree.references
-                if s.receiver == definition.qualified.split(".")[-2] and s.name == last
-            ]
-
-
-def _callers_of(sites: list[_Site]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(f"{s.path} の {s.where}" for s in sites))
-
-
-def _name(
-    qualified: str, kind: PublicNameKind, definition: _Definition, sites: list[_Site]
-) -> PublicName:
-    return PublicName(qualified, kind, definition.path, definition.line, _callers_of(sites))
+def _added_labels(
+    previous: Definition | None, definition: Definition, _old: Tree, new: Tree
+) -> list[AddedParameter]:
+    if (
+        previous is None
+        or not definition.is_public
+        or definition.kind not in (PublicNameKind.FUNCTION, PublicNameKind.METHOD)
+    ):
+        # 前に無い定義は名前の行で出るので、引数の行は重ねない。非公開と引数を持たない種類も対象外
+        return []
+    # 木に入る定義は、この部品の歩き方が作った `_Definition` だけ
+    added = cast("_Definition", definition).labels - cast("_Definition", previous).labels
+    if not added:
+        return []
+    sites = _sites_of(definition, new)
+    return [
+        AddedParameter(label, tuple(s for s in sites if label in cast("_Site", s).labels))
+        for label in sorted(added)
+    ]
 
 
 def added_public_names_of(
-    parse_source: ParseSource,
+    parse_source: ParseSource[Node],
     before: Mapping[str, str],
     after: Mapping[str, str],
     changed: Collection[str],
 ) -> list[PublicName]:
     """足した名前、足した引数の順。"""
-    old, new = _Tree(), _Tree()
-    _parse_all(before, parse_source, old)
-    _parse_all(after, parse_source, new)
-    found: list[PublicName] = []
-    for key, definition in new.definitions.items():
-        if definition.path not in changed or not definition.is_public:
-            continue
-        previous = old.definitions.get(key)
-        if previous is None:
-            found.append(
-                _name(
-                    definition.qualified, definition.kind, definition, _sites_of(definition, new)
-                )
-            )
-    for key, definition in new.definitions.items():
-        previous = old.definitions.get(key)
-        if previous is None or definition.path not in changed or not definition.is_public:
-            continue
-        if definition.kind not in (PublicNameKind.FUNCTION, PublicNameKind.METHOD):
-            continue
-        sites = _sites_of(definition, new)
-        for label in sorted(definition.labels - previous.labels):
-            reaching = [s for s in sites if label in s.labels]
-            found.append(
-                _name(
-                    f"{definition.qualified}.{label}",
-                    PublicNameKind.PARAMETER,
-                    definition,
-                    reaching,
-                )
-            )
-    return found
+    return added_public_names(
+        before,
+        after,
+        changed,
+        Rules(parse_source, _walk, _sites_of, key_of=_key_of, added_parameters=(_added_labels,)),
+    )

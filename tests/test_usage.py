@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import MacroFake, discovered, settings_for
+from fakes import MacroFailure, MacroFake, discovered, settings_for
+from keep_previous_support import extras, first_run
+from keep_previous_support import settings as keep_settings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -21,7 +23,7 @@ from jigane.llm_runs.usage_table import (
     UsageField,
 )
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import adversarial, macro
+from jigane.skills import adversarial, macro, pipeline
 from jigane.skills.assembly import AssemblyInput
 
 
@@ -574,3 +576,28 @@ def test_usage_of_old_records_only_keeps_the_run_model(
     review = create_feature_review(project, ["src"], "p")
     write_fixture(review)
     assert {row["model"] for row in usage_json(review, capsys)} == {"m"}
+
+
+def test_usage_counts_the_principle_launches_whose_results_were_discarded(
+    project: Path,
+) -> None:
+    review = first_run(project)
+    fake = MacroFake([discovered("P1")], fails=MacroFailure.DIAGRAM)
+    macro.run_macro(AssemblyInput.load(review), keep_settings(fake), extras=extras())
+    run = pipeline.read_runs(review.id.directory())[macro.GROUP]
+    roles = [item.role for item in pipeline.all_invocations(run)]
+    assert set(roles) == {PolicyRole.DIAGRAM, PolicyRole.PRINCIPLE}
+    assert len(roles) == 2
+    assert pipeline.summarize_invocations(run)["invocation_count"] == 2
+    assert pipeline.summarize_invocations(run)["cost_usd"] > 0
+
+
+def test_usage_counts_the_principle_launch_when_the_diagram_was_stopped(project: Path) -> None:
+    review = first_run(project)
+    fake = MacroFake([discovered("P1")])
+    macro.run_macro(
+        AssemblyInput.load(review), keep_settings(fake, diagram_usd=0.0001), extras=extras()
+    )
+    run = pipeline.read_runs(review.id.directory())[macro.GROUP]
+    assert [item.role for item in run.invocations or ()] == [PolicyRole.PRINCIPLE]
+    assert pipeline.summarize_invocations(run)["invocation_count"] == 1

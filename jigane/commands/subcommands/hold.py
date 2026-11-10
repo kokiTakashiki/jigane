@@ -5,8 +5,10 @@ import argparse
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.output import print_lost_reasons, print_selection
+from jigane.commands.selection_inputs import past_round_reader
 from jigane.reviews import selection as selection_module
-from jigane.reviews.lifecycle import load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -20,7 +22,10 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
 def run(args: argparse.Namespace, context: Context) -> int:
     del context
     review = load_review(resolve_review(args.review))
-    _, lost = selection_module.hold(review.id.directory(), args.findings)
+    directory = review.id.directory()
+    _, lost = selection_module.hold(directory, args.findings, past_round_reader(directory))
     print_lost_reasons(lost)
-    print_selection(review, as_json=args.json)
+    print_selection(
+        review, as_json=args.json, heading=f"保留にしました: {' '.join(args.findings)}"
+    )
     return EXIT_OK

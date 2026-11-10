@@ -8,6 +8,7 @@ from tree_sitter import Node
 
 from jigane.git.tree_files import read_tree_bytes
 from jigane.languages.base import LanguageAdapter, parse
+from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
 _FIXTURE_NAMES = frozenset({"pytest.fixture", "fixture"})
@@ -38,13 +39,11 @@ class FileContext:
         )
 
 
-def _text(node: Node) -> str:
-    return required(node.text).decode()
-
-
 def _is_autouse_fixture(decorator: Node) -> bool:
     call = next((c for c in decorator.named_children if c.type == "call"), None)
-    if call is None or _text(required(call.child_by_field_name("function"))) not in _FIXTURE_NAMES:
+    if call is None:
+        return False
+    if text_of(required(call.child_by_field_name("function"))) not in _FIXTURE_NAMES:
         return False
     arguments = required(call.child_by_field_name("arguments"))
     for argument in arguments.named_children:
@@ -52,7 +51,7 @@ def _is_autouse_fixture(decorator: Node) -> bool:
             continue
         name = required(argument.child_by_field_name("name"))
         value = required(argument.child_by_field_name("value"))
-        if _text(name) == "autouse" and value.type == "true":
+        if text_of(name) == "autouse" and value.type == "true":
             return True
     return False
 
@@ -80,9 +79,9 @@ def _segments(node: Node) -> list[str]:
     """第一引数の字面を、ドットで区切った語にする。文字列の引数は中身を使う。"""
     if node.type == "string":
         content = next((c for c in node.named_children if c.type == "string_content"), None)
-        return _text(content).split(".") if content is not None else []
+        return text_of(content).split(".") if content is not None else []
     if node.type in ("identifier", "attribute"):
-        return _text(node).split(".")
+        return text_of(node).split(".")
     return []
 
 
@@ -115,7 +114,7 @@ def _autouse_fixture_bodies(root: Node) -> Iterator[Node]:
 
 def _fixation_kind(call: Node) -> str | None:
     """call が固定する対象。"time"、"seed"、固定の呼び出しでなければ None。"""
-    name = _text(required(call.child_by_field_name("function")))
+    name = text_of(required(call.child_by_field_name("function")))
     if name in TIME_FIXATIONS:
         return "time"
     if name == "random.seed":

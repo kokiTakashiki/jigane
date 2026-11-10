@@ -5,12 +5,12 @@ import json
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from pydantic import MISSING, TypeAdapter, ValidationError
 
@@ -22,6 +22,7 @@ from jigane.findings.discard import (
     discard_summary,
 )
 from jigane.findings.records import (
+    KEY_ADJUDICATION,
     RUNS_FILE,
     Adjudication,
     AdjudicationKind,
@@ -31,6 +32,7 @@ from jigane.findings.records import (
     ReplacedRun,
     StoredFinding,
     ToolClaim,
+    TriagedFinding,
     merge_group,
     read_verification,
     reserve_numbers,
@@ -48,6 +50,7 @@ from jigane.llm_runs.launch_failure import (
     FailureScope,
     RerunKind,
     RunRecordKind,
+    SelectedFailure,
     Stage,
     StoredFailure,
     StoredInvocation,
@@ -56,30 +59,18 @@ from jigane.llm_runs.launch_failure import (
     failed_invocation_costs,
     failed_invocations,
     failure_from_record,
+    selected_failures,
 )
 from jigane.llm_runs.prompt_stamp import PromptStamp
-from jigane.reviews.lifecycle import LocatedReview, Review
-from jigane.skills.input_budget import BudgetStop, describe_invocation
-from jigane.storage.store import review_lock, write_text_atomic
+from jigane.policy_materials.missing import RecordedMissing, recorded_missing
+from jigane.reviews.catalog import LocatedReview
+from jigane.reviews.lifecycle import Review
+from jigane.skills.input_budget import StoredBudgetStop
+from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.locking import review_lock
 from jigane.storage.store_format import upgrade_mapping
 
 LOGGER = logging.getLogger(__name__)
-
-
-class DiscoveryError(Exception):
-    """発見役が失敗した。group は失敗した群の内部名。"""
-
-    def __init__(self, group: GroupId, message: str) -> None:
-        super().__init__(message)
-        self.group = group
-
-
-class InputBudgetError(DiscoveryError):
-    """入力だけで 1 回の起動の上限の費用に達する見込みのため、起動せずに止めた。"""
-
-    def __init__(self, group: GroupId, message: str, stop: BudgetStop | None = None) -> None:
-        super().__init__(group, message)
-        self.stop = stop
 
 
 def normalize_location(location: dict[str, Any], working_directory: Path) -> dict[str, Any] | None:
@@ -213,11 +204,11 @@ def keep_valid(
             {
                 "id": f"F{first_number + offset}",
                 **item.candidate,
-                "adjudication": None if adjudication is None else adjudication.to_json(),
+                KEY_ADJUDICATION: None if adjudication is None else adjudication.to_json(),
             }
         )
         if _is_valid_finding(finding):
-            body = {key: value for key, value in finding.items() if key != "adjudication"}
+            body = {key: value for key, value in finding.items() if key != KEY_ADJUDICATION}
             kept.append(StoredFinding.of_model_output(body, adjudication))
         else:
             # 番号は消費したままにする。再実行でも番号を再利用しないため。
@@ -297,6 +288,8 @@ class GroupRun(ABC):
     dropped_without_evidence: int | None
     dropped_invalid_schema: int | None
     others: Mapping[str, Any]
+    # 古い記録は持たない。既定値のある項目なので、名前でだけ渡す
+    estimate_stamp: "EstimateStamp | None" = field(default=None, kw_only=True)
 
     # 値をそのまま持つ鍵。型を持つ入れ子の鍵は _HEAD_NESTED_KEYS が別に持つ
     _HEAD_PLAIN_KEYS = (
@@ -324,12 +317,16 @@ class GroupRun(ABC):
         stored_discarded = value.get("discarded")
         stored_invocations = value.get("invocations")
         stored_failures = value.get("launch_failures")
-        typed = {*cls._HEAD_PLAIN_KEYS, *cls._HEAD_NESTED_KEYS, "effort", *own_keys}
+        typed = {
+            *cls._HEAD_PLAIN_KEYS,
+            *cls._HEAD_NESTED_KEYS,
+            "effort",
+            ESTIMATE_USD_KEY,
+            ESTIMATE_VERSION_KEY,
+            *own_keys,
+        }
         return {
-            "ran_at": value.get("ran_at"),
-            "model": value.get("model"),
-            "shape": value.get("shape"),
-            "discovered": value.get("discovered"),
+            **{key: value.get(key) for key in cls._HEAD_PLAIN_KEYS},
             "discarded": None
             if stored_discarded is None
             else tuple(DiscardedCandidate.from_json(item) for item in stored_discarded),
@@ -339,12 +336,10 @@ class GroupRun(ABC):
             "launch_failures": None
             if stored_failures is None
             else tuple(failure_from_record(item) for item in stored_failures),
-            "elapsed_s": value.get("elapsed_s"),
             "effort": value.get("effort"),
             "effort_recorded": "effort" in value,
-            "dropped_without_evidence": value.get("dropped_without_evidence"),
-            "dropped_invalid_schema": value.get("dropped_invalid_schema"),
             "others": {key: item for key, item in value.items() if key not in typed},
+            "estimate_stamp": EstimateStamp.from_json(value),
         }
 
     def _head_to_json(self) -> dict[str, Any]:
@@ -361,6 +356,8 @@ class GroupRun(ABC):
             stored["discarded"] = [item.to_json() for item in self.discarded]
         if self.launch_failures is not None:
             stored["launch_failures"] = [item.as_record() for item in self.launch_failures]
+        if self.estimate_stamp is not None:
+            stored.update(self.estimate_stamp.to_json())
         return stored
 
     @abstractmethod
@@ -382,7 +379,7 @@ class GroupRun(ABC):
         """画面が出す失敗。前の回の失敗は含めない。"""
         return current_failures(self.launch_failures or ())
 
-    def next_round(self, new_run: "GroupRun") -> "GroupRun":
+    def next_round(self, new_run: Self) -> Self:
         """この記録の次の回として new_run を保存するときの記録。
 
         この記録の失敗は前の回のものにして、new_run の launch_failures の先頭へ残す。
@@ -395,15 +392,55 @@ class GroupRun(ABC):
         return replace(new_run, launch_failures=(*earlier, *(new_run.launch_failures or ())))
 
 
+# 見積もりの数え方の版。数え方を変えたら上げる。倍率は今の版を持つ回だけから引く
+ESTIMATE_COUNTING_VERSION = 1
+# 回の記録の任意の欄。古い記録は持たず、その回は「見積もりの記録が無い」ものとして読む
+ESTIMATE_USD_KEY = "discovery_estimate_usd"
+ESTIMATE_VERSION_KEY = "estimate_version"
+
+
+@dataclass(frozen=True)
+class EstimateStamp:
+    """回の記録に残す、走らせる前の発見役の見積もりとその数え方の版。"""
+
+    discovery_usd: float
+    counting_version: int
+
+    @classmethod
+    def from_json(cls, value: Mapping[str, Any]) -> "EstimateStamp | None":
+        """どちらかの欄が無い、または数でなければ None。bool は数として読まない。"""
+        usd = value.get(ESTIMATE_USD_KEY)
+        version = value.get(ESTIMATE_VERSION_KEY)
+        if (
+            isinstance(usd, bool)
+            or isinstance(version, bool)
+            or not isinstance(usd, int | float)
+            or not isinstance(version, int)
+        ):
+            return None
+        return cls(float(usd), version)
+
+    def to_json(self) -> dict[str, Any]:
+        return {ESTIMATE_USD_KEY: self.discovery_usd, ESTIMATE_VERSION_KEY: self.counting_version}
+
+
+def _read_stops(stored: Sequence[Mapping[str, Any]] | None) -> tuple[StoredBudgetStop, ...] | None:
+    """runs.json の budget_stops を型に読み替える。読み替えるのはこの境だけ。"""
+    if stored is None:
+        return None
+    return tuple(StoredBudgetStop.from_record(item) for item in stored)
+
+
 @dataclass(frozen=True)
 class PolicyGroupRun(GroupRun):
     """方針（macro）の実行の記録。方針だけが持つ項目を足す。"""
 
     dropped_without_bot_findings: int | None = None
     record_kind: str | None = None
+    # runs.json の値をそのまま持つ。別の版が書いた未知の値も、書き戻しで保つため
     no_material: tuple[str, ...] | None = None
     # 入力の見積もりで起動しなかった起動の記録。シャードの群の budget_stops と同じ形と欄名
-    budget_stops: tuple[Mapping[str, Any], ...] | None = None
+    budget_stops: tuple[StoredBudgetStop, ...] | None = None
 
     _OWN_PLAIN_KEYS = ("dropped_without_bot_findings", "record_kind")
 
@@ -411,13 +448,23 @@ class PolicyGroupRun(GroupRun):
     def from_json(cls, value: Mapping[str, Any]) -> "PolicyGroupRun":
         stored_no_material = value.get("no_material")
         stored_stops = value.get("budget_stops")
+        head = cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "no_material", "budget_stops"))
+        head.update({key: value.get(key) for key in cls._OWN_PLAIN_KEYS})
         return cls(
-            **cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "no_material", "budget_stops")),
-            budget_stops=None if stored_stops is None else tuple(stored_stops),
-            dropped_without_bot_findings=value.get("dropped_without_bot_findings"),
-            record_kind=value.get("record_kind"),
+            **head,
+            budget_stops=_read_stops(stored_stops),
             no_material=None if stored_no_material is None else tuple(stored_no_material),
         )
+
+    @property
+    def missing_materials(self) -> RecordedMissing | None:
+        """材料なしの記録の読み替え。空の配列か欄なしのときは None。
+
+        材料なしかどうかはこの読み口だけで決まる。
+        """
+        if not self.no_material:
+            return None
+        return recorded_missing(self.no_material)
 
     def to_json(self) -> dict[str, Any]:
         stored = self._head_to_json()
@@ -427,7 +474,7 @@ class PolicyGroupRun(GroupRun):
         if self.no_material is not None:
             stored["no_material"] = list(self.no_material)
         if self.budget_stops is not None:
-            stored["budget_stops"] = [dict(item) for item in self.budget_stops]
+            stored["budget_stops"] = [item.as_record() for item in self.budget_stops]
         return {**stored, **self.others}
 
 
@@ -478,7 +525,7 @@ class ShardedGroupRun(GroupRun):
     dropped_outside_shard: int | None = None
     failed_splits: int | None = None
     unverified_candidates: int | None = None
-    budget_stops: tuple[Mapping[str, Any], ...] | None = None
+    budget_stops: tuple[StoredBudgetStop, ...] | None = None
     # 使った MCP。保存の欄名は mcp_servers のまま（既存の記録を読めるように）
     mcp: McpRecord = UNKNOWN_MCP
 
@@ -496,17 +543,12 @@ class ShardedGroupRun(GroupRun):
     def from_json(cls, value: Mapping[str, Any]) -> "ShardedGroupRun":
         stored_stops = value.get("budget_stops")
         stored_mcp = value.get("mcp_servers")
+        head = cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "budget_stops", "mcp_servers"))
+        head.update({key: value.get(key) for key in cls._OWN_PLAIN_KEYS})
         return cls(
-            **cls._head_from_json(value, (*cls._OWN_PLAIN_KEYS, "budget_stops", "mcp_servers")),
+            **head,
             mcp=McpRecord.from_stored(stored_mcp),
-            shards=value.get("shards"),
-            succeeded_shards=value.get("succeeded_shards"),
-            target_files=value.get("target_files"),
-            reviewed_files=value.get("reviewed_files"),
-            dropped_outside_shard=value.get("dropped_outside_shard"),
-            failed_splits=value.get("failed_splits"),
-            unverified_candidates=value.get("unverified_candidates"),
-            budget_stops=None if stored_stops is None else tuple(stored_stops),
+            budget_stops=_read_stops(stored_stops),
         )
 
     def to_json(self) -> dict[str, Any]:
@@ -515,7 +557,7 @@ class ShardedGroupRun(GroupRun):
             if getattr(self, key) is not None:
                 stored[key] = getattr(self, key)
         if self.budget_stops is not None:
-            stored["budget_stops"] = [dict(item) for item in self.budget_stops]
+            stored["budget_stops"] = [item.as_record() for item in self.budget_stops]
         stored_mcp = self.mcp.to_stored()
         if stored_mcp is not None:
             stored["mcp_servers"] = stored_mcp
@@ -638,6 +680,14 @@ def write_runs(directory: Path, runs: Mapping[GroupId, GroupRun]) -> None:
     write_json(directory / RUNS_FILE, dump_runs(runs))
 
 
+@dataclass(frozen=True)
+class GroupRunResult[RunT: GroupRun]:
+    """群の一回の実行が呼び側へ返す結果の共通の形。群ごとの型は知らせなどを足す。"""
+
+    findings: tuple[TriagedFinding, ...]
+    run_state: RunT
+
+
 def save_run(
     review: Review,
     result: GroupResult,
@@ -659,6 +709,32 @@ def save_run(
         runs = read_runs(directory)
         previous = runs.get(group)
         runs[group] = run_state if previous is None else previous.next_round(run_state)
+        write_runs(directory, runs)
+
+
+def record_estimate(
+    directory: Path, group: GroupId, stamp: EstimateStamp, started_at: datetime
+) -> None:
+    """その群の最新の回の記録へ、発見役の見積もりと数え方の版を足す。
+
+    started_at 以降に書かれた記録にだけ足す。この起動が記録を書かずに終わった（見送り、
+    図が走らなかった回など）ときの最新は前の回のもので、今回の見積もりを付けてはならない。
+    """
+    with review_lock(directory):
+        runs = read_runs(directory)
+        run = runs.get(group)
+        if run is None or run.ran_at is None:
+            # 足す先が無い
+            return
+        try:
+            ran_at = datetime.fromisoformat(run.ran_at)
+        except ValueError:
+            # 保存済みの値の形が不正。いつの回か分からないので刻印を足さない
+            return
+        if ran_at < started_at.replace(microsecond=0):
+            # 前の回の記録。倍率の元にしない
+            return
+        runs[group] = replace(run, estimate_stamp=stamp)
         write_runs(directory, runs)
 
 
@@ -725,26 +801,48 @@ def summarize_invocations(run: GroupRun) -> dict[str, Any]:
             for item in invocations
             if item.budget_outcome is not None
         ],
-        # 上限で見送る起動の記録は、シャードの群だけが持つ
-        "budget_stops": list(run.budget_stops or ()) if isinstance(run, ShardedGroupRun) else [],
+        # 上限で見送る起動の記録は、シャードの群と方針の群が持つ
+        "budget_stops": list(budget_stops_of(run)),
     }
 
 
-def over_budget_lines(totals: dict[str, Any]) -> list[str]:
-    """上限で止まった起動、上限を超えた起動と、入力の見積もりで起動しなかった役を、一行ずつの文にする。"""
-    lines = [
-        f"{'上限で停止' if item['outcome'] == BudgetOutcome.STOPPED_AT_LIMIT else '上限超過'}: "
-        f"{describe_invocation(item['role'], item['split_index'])}が {item['cost_usd']:.4f} USD"
-        + ("" if item["max_budget_usd"] is None else f"（上限 {item['max_budget_usd']:g} USD）")
-        for item in totals["over_budget"]
-    ]
-    lines += [
-        f"起動せず: {describe_invocation(item['role'], item['index'])}、"
-        f"入力の見積もり {item['estimated_input_tokens']} トークン"
-        f"（{item['estimated_input_usd']:.4f} USD）、上限 {item['max_budget_usd']:g} USD"
-        for item in totals["budget_stops"]
-    ]
-    return lines
+def totals_record(totals: Mapping[str, Any]) -> dict[str, Any]:
+    """起動の集計を JSON の辞書にする唯一の写し。見送りは保存した記録と同じ辞書に戻す。"""
+    return {**totals, "budget_stops": [stop.as_record() for stop in totals["budget_stops"]]}
+
+
+def budget_stops_of(run: GroupRun) -> tuple[StoredBudgetStop, ...]:
+    """その回で見送った起動。方針の群とシャードの群だけが持つ。"""
+    if isinstance(run, (ShardedGroupRun, PolicyGroupRun)):
+        return run.budget_stops or ()
+    return ()
+
+
+@dataclass(frozen=True)
+class LaunchGap:
+    """この回で最終的に通らなかった起動の失敗の一件。"""
+
+    failure: SelectedFailure
+
+
+@dataclass(frozen=True)
+class BudgetStopGap:
+    """入力の見積もりで見送った起動の一件。"""
+
+    stop: StoredBudgetStop
+
+
+type RunGap = LaunchGap | BudgetStopGap
+
+
+def run_gaps(run: GroupRun) -> tuple[RunGap, ...]:
+    """この回で最終的に通らなかった起動の失敗と、入力の見積もりで見送った起動の一覧。
+
+    失敗は selected_failures の選び方で、前の回から持ち越した記録と走らせ直して通った記録を除く。
+    """
+    failures = (LaunchGap(selected) for selected in selected_failures(run.launch_failures or ()))
+    stops = budget_stops_of(run)
+    return (*failures, *(BudgetStopGap(stop) for stop in stops))
 
 
 def format_elapsed(elapsed_s: float) -> str:
@@ -776,4 +874,4 @@ def past_run(
         return None
     if shape is not None and run.shape != shape:
         return None
-    return {**summarize_invocations(run), "model": run.model}
+    return {**totals_record(summarize_invocations(run)), "model": run.model}

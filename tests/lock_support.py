@@ -8,7 +8,7 @@ from review_fakes import stored_finding
 
 from jigane.findings.records import read_stored_state, save_findings_state
 from jigane.groups.definitions import GroupId
-from jigane.storage.store import review_lock
+from jigane.storage.locking import review_lock
 
 
 def run_in_threads(targets: list[Callable[[], object]]) -> None:

@@ -6,6 +6,7 @@
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 
 from jigane.git.tree_files import walk_tree_files
@@ -14,6 +15,13 @@ from jigane.languages import registry
 from jigane.languages.base import SequenceAdapter
 from jigane.policy_materials import changed_files
 from jigane.policy_materials.moved_declarations import PlacedDeclaration, find_moved
+from jigane.policy_materials.siblings import (
+    NotSearched,
+    Searched,
+    Siblings,
+    SiblingSearch,
+    siblings_of,
+)
 from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import Member, TypeInfo, TypeKey
 from jigane.sequence.indexes import Indexes
@@ -131,6 +139,15 @@ def referenced_types(indexes: Indexes, changed: list[TypeInfo]) -> list[TypeInfo
     return sorted(found.values(), key=lambda t: (t.path, t.line))
 
 
+class TypeRole(Enum):
+    """図に出す型の役割。注記と、項目を名前だけにするかは、ここから決まる。"""
+
+    CHANGED = "changed"
+    REFERENCED = "referenced"
+    BASE = "base"
+    SIBLING = "sibling"
+
+
 def _marks(
     after: TypeInfo, name: str, before: TypeInfo | None
 ) -> tuple[dict[tuple[str, int], str], list[str], list[str]]:
@@ -216,7 +233,7 @@ class TypeDelta:
     """一つの型の、変更前後の差。member_marks は組み立てた後に書き換えない。"""
 
     info: TypeInfo
-    changed: bool  # 変更した型なら真、参照されるだけの型なら偽
+    role: TypeRole
     added: bool
     moved_from: TypeInfo | None
     member_marks: dict[tuple[str, int], str]  # (パス, 行) → `+` か `~`
@@ -225,6 +242,10 @@ class TypeDelta:
     shape: TypeShapeChange | None
     value_marks: tuple[tuple[str, str], ...]  # 列挙の値 → `+` か空
     removed_values: tuple[str, ...] = ()  # removed_members のうち、削除した列挙の値
+
+    @property
+    def changed(self) -> bool:
+        return self.role is TypeRole.CHANGED
 
 
 @dataclass(frozen=True)
@@ -235,6 +256,30 @@ class TypeDeltas:
     indexes: Indexes
     before_indexes: Indexes | None
     unsupported: tuple[str, ...]
+    # 兄弟を探したかと、探した結果。ファイルのレビューは探さない
+    siblings: SiblingSearch
+
+
+def _named_only(info: TypeInfo, names: set[str]) -> TypeInfo:
+    """変更した型のどれかと同じ名前の項目だけを残した型。兄弟の型で資料の行が増え過ぎないようにする。"""
+    return replace(info, members={n: g for n, g in info.members.items() if n in names})
+
+
+def _placed(
+    changed: list[TypeInfo], referenced: list[TypeInfo], siblings: tuple[Siblings, ...]
+) -> dict[TypeKey, tuple[TypeInfo, TypeRole]]:
+    """図に出す型を、役割つきで並べる。先に入った役割を残す。"""
+    placed: dict[TypeKey, tuple[TypeInfo, TypeRole]] = {}
+    names = {name for info in changed for name in info.members}
+    for info in changed:
+        placed[info.key] = (info, TypeRole.CHANGED)
+    for info in referenced:
+        placed.setdefault(info.key, (info, TypeRole.REFERENCED))
+    for group in siblings:
+        placed.setdefault(group.base.key, (_named_only(group.base, names), TypeRole.BASE))
+        for sibling in group.siblings:
+            placed.setdefault(sibling.key, (_named_only(sibling, names), TypeRole.SIBLING))
+    return placed
 
 
 def type_deltas(review: Review) -> TypeDeltas:
@@ -253,17 +298,24 @@ def type_deltas(review: Review) -> TypeDeltas:
     segments = review.map_kind.segments
     changed = _without_unchanged_variables(_changed_types(indexes, segments), segments)
     if not changed:
-        return TypeDeltas((), indexes, None, unsupported)
+        return TypeDeltas((), indexes, None, unsupported, NotSearched())
     referenced = _without_unchanged_variables(referenced_types(indexes, changed), segments)
+    # ファイルのレビューの索引には変更していないファイルの型が無く、探しても不完全になる
+    siblings: SiblingSearch = NotSearched()
+    if review.is_diff:
+        shown_keys = {t.key for t in [*changed, *referenced]}
+        siblings = Searched(siblings_of(indexes, changed, shown_keys))
+    placed = _placed(
+        changed, referenced, siblings.groups if isinstance(siblings, Searched) else ()
+    )
     before_indexes: Indexes | None = None
     if review.base_tree_path is not None:
         before_paths = list(changed_files.file_changes(review, before=True))
         before_indexes = Indexes(review.base_tree_path, before_paths)
-    changed_keys = {t.key for t in changed}
     moved = _moved_origins(indexes, before_indexes, changed) if before_indexes is not None else {}
     deltas: list[TypeDelta] = []
-    for info in [*changed, *referenced]:
-        is_changed = info.key in changed_keys
+    for info, role in placed.values():
+        is_changed = role is TypeRole.CHANGED
         marks: dict[tuple[str, int], str] = {}
         added = False
         moved_from = None
@@ -293,7 +345,7 @@ def type_deltas(review: Review) -> TypeDeltas:
         deltas.append(
             TypeDelta(
                 info,
-                is_changed,
+                role,
                 added,
                 moved_from,
                 marks,
@@ -304,4 +356,4 @@ def type_deltas(review: Review) -> TypeDeltas:
                 tuple(removed_values),
             )
         )
-    return TypeDeltas(tuple(deltas), indexes, before_indexes, unsupported)
+    return TypeDeltas(tuple(deltas), indexes, before_indexes, unsupported, siblings)

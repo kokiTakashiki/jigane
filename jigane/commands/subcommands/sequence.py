@@ -5,10 +5,13 @@ import json
 
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK
-from jigane.reviews.lifecycle import load_review, resolve_review
-from jigane.sequence.diagram import DEFAULT_DEPTH, to_mermaid
+from jigane.reviews.catalog import load_review
+from jigane.reviews.resolution import resolve_review
+from jigane.sequence.diagram import DEFAULT_DEPTH
+from jigane.sequence.diagram_mermaid import to_mermaid
+from jigane.sequence.model_json import model_to_json
 from jigane.sequence.review_diagrams import build_model
-from jigane.sequence.roots import Side
+from jigane.sequence.side import Side
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -38,7 +41,7 @@ def run(args: argparse.Namespace, context: Context) -> int:
         side=Side(args.side),
     )
     if args.format == "json":
-        print(json.dumps(model, ensure_ascii=False, indent=2))
+        print(json.dumps(model_to_json(model), ensure_ascii=False, indent=2))
         return EXIT_OK
     chunks = []
     for d in model["diagrams"]:

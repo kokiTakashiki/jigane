@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 
 from jigane.figures.models import NoteText, Panel, SequenceFigure, SequenceFlow
-from jigane.sequence.review_diagrams import BeforeAbsence
+from jigane.sequence.before_diagrams import BeforeAbsence
 from jigane.sequence.roots import SequenceError
 
 NOTE = NoteText("変更前にこの入口が無い", "変更前にこの入口がありません")

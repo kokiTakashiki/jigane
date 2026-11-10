@@ -7,6 +7,7 @@ from pathlib import Path
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_GATE_VIOLATION, EXIT_OK
 from jigane.commands.output import print_lines
+from jigane.commands.unparsed_files import print_unparsed_notice
 from jigane.commands.views.review import (
     gate_lines,
     has_gate_violation,
@@ -157,4 +158,5 @@ def run(args: argparse.Namespace, context: Context) -> int:
             DeclaredInputs(sarif, args.intent, args.intent_file),
         )
     print_new(review, as_json=args.json)
+    print_unparsed_notice(review)
     return EXIT_GATE_VIOLATION if has_gate_violation(review) else EXIT_OK

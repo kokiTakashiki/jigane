@@ -13,15 +13,15 @@ from jigane.findings.records import (
     ScopeConclusion,
     judge_scope,
 )
+from jigane.reviews.catalog import scope_files
 from jigane.reviews.lifecycle import (
-    PAIRS_FILE,
     DiffSource,
     PullRequestInfo,
     PullRequestOrigin,
     Review,
     create_feature_review,
-    scope_files,
 )
+from jigane.reviews.review_formats import PAIRS_FILE
 from jigane.skills.scope import InScope, OutOfScope, classify, conclusion_of
 
 

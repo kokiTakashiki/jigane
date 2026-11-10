@@ -203,3 +203,9 @@ def test_declared_names_and_labels_are_not_counted_as_uses_of_a_type() -> None:
         ),
     }
     assert _names({}, after, {"A.swift"})["Draft"].callers == ("B.swift の User",)
+
+
+def test_same_top_level_function_in_two_files_is_two_names() -> None:
+    after = {"A.swift": "func send() {}\n", "B.swift": "func send() {}\n"}
+    found = _added({}, after, set(after))
+    assert [(n.name, n.path) for n in found] == [("send", "A.swift"), ("send", "B.swift")]

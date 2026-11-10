@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import assert_never
 
 from jigane.publishing import rendering as templates_module
-from jigane.reviews.lifecycle import ReviewError, load_review, resolve_review
+from jigane.reviews.catalog import load_review
+from jigane.reviews.lifecycle import ReviewError
+from jigane.reviews.resolution import resolve_review
 
 
 class ExportKind(StrEnum):

@@ -36,6 +36,7 @@ from jigane.design.recommend import (
     WriterReason,
     recommend,
 )
+from jigane.design.submodule_notes import submodule_lines
 from jigane.groups.definitions import GROUP_BY_ID, GroupId
 from jigane.markdown.cells import markdown_table
 from jigane.policy_materials.current_shape import current_shape
@@ -306,11 +307,13 @@ def _mentions_text(recommendation: Recommendation) -> str:
                 where,
             ]
         )
-    return markdown_table(
+    table = markdown_table(
         ["名指し", "種類", "節", "設計書の行", "照合", "引き当て先"],
         rows,
         ["codespan", "raw", "cell", "raw", "raw", "cell"],
     )
+    notes = submodule_lines(recommendation.submodules)
+    return "\n\n".join([table, *notes]) if notes else table
 
 
 def _reason_text(reason: Reason) -> str:

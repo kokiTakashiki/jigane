@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from jigane.git.tree_files import read_tree_text, work_files
 from jigane.languages import registry
@@ -18,6 +18,7 @@ from jigane.languages.base import (
     StringComparison,
     ValueSetReader,
 )
+from jigane.text.document_files import is_document_path
 
 # 追跡されたファイルのこの割合未満にしか現れない値を、珍しい値とする
 RARE_VALUE_RATIO = 0.05
@@ -29,7 +30,6 @@ MIN_RARE_VALUES = 3
 CONTAINING_VALUE_RATIO = 0.5
 # 二つの組の珍しい値の Jaccard 係数がこの値以上なら、一つにまとめる
 MERGE_OVERLAP = 0.5
-DOCUMENT_SUFFIXES = frozenset({".md", ".rst", ".txt"})
 
 
 class FileKind(StrEnum):
@@ -86,8 +86,7 @@ WORD_PATTERN = re.compile(r"[\w-]+")
 def kind_of(path: str) -> FileKind:
     if registry.is_test_path(path, registry.adapters()):
         return FileKind.TEST
-    suffix = PurePosixPath(path).suffix.lower()
-    return FileKind.DOCUMENT if suffix in DOCUMENT_SUFFIXES else FileKind.CODE
+    return FileKind.DOCUMENT if is_document_path(path) else FileKind.CODE
 
 
 def _files_containing(values: set[str], texts: Mapping[str, str]) -> dict[str, set[str]]:

@@ -100,8 +100,3 @@ def _swift_collection_name(inner: str) -> str:
         elif character == ":" and depth == 0:
             return "Dictionary"
     return "Array"
-
-
-def capitalized_is_external_type(name: str) -> bool:
-    """型の名前を大文字で始める慣習の言語で、索引に無い大文字始まりの識別子を型の名前とみなす。"""
-    return name[:1].isupper()

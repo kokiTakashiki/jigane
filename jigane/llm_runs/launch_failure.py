@@ -481,47 +481,21 @@ def stopped_rerun_count(failures: Iterable[StoredFailure]) -> int:
 
 
 @dataclass(frozen=True)
-class FailureView:
-    """保存した失敗を画面向けにした一件。show と実行の結果はこの型から引く。"""
+class SelectedFailure:
+    """指定した回で最終的に通らなかった失敗の、起動の単位ごとの事実。表示の文は持たない。"""
 
-    stage: Stage
-    scope: FailureScope
-    index: int
-    role: str | None
-    kind: FailureKind
-    reason: str
-    # 代表の失敗を言う一文。走らせ直しの回数は含めない
-    line: str
+    # 同じ起動単位の代表の失敗。最後の失敗
+    failure: StoredFailure
     # 同じ起動単位で実際に起動した走らせ直しの回数
     reruns: int
     # 同じ起動単位で、入力の見積もりで止めて起動しなかった走らせ直しの回数
     stopped_reruns: int
 
-    @property
-    def text(self) -> str:
-        """この失敗を言う一文。文の組み立てはここだけが持つ。"""
-        launched = f"、走らせ直し {self.reruns} 回" if self.reruns else ""
-        stopped = "、走らせ直しは見積もりで止めた" if self.stopped_reruns else ""
-        return self.line + launched + stopped
 
-    def to_json(self) -> dict[str, Any]:
-        return {
-            "stage": self.stage.value,
-            "scope": self.scope.value,
-            "index": self.index,
-            "role": self.role,
-            "kind": self.kind.value,
-            "reason": self.reason,
-            "reruns": self.reruns,
-            "stopped_reruns": self.stopped_reruns,
-            "text": self.text,
-        }
-
-
-def failure_views(
+def selected_failures(
     failures: Iterable[StoredFailure], failure_round: FailureRound = FailureRound.CURRENT
-) -> tuple[FailureView, ...]:
-    """指定した回で最終的に通らなかった失敗を、画面向けの一件ずつにする唯一の口。既定は今回の回。
+) -> tuple[SelectedFailure, ...]:
+    """指定した回で最終的に通らなかった失敗を、起動の単位ごとの事実にする唯一の口。既定は今回の回。
 
     走らせ直して通った失敗（RECOVERED）は除く。同じ起動単位（段、範囲、番号、欠けた候補では
     役も）の失敗は一件にまとめる。走らせ直しの契機の失敗と最後の失敗が並ぶためで、代表は
@@ -540,35 +514,22 @@ def failure_views(
             case _ as unreachable:
                 assert_never(unreachable)
         groups.setdefault((failure.stage, failure.scope, failure.index, role), []).append(failure)
-    views = []
-    for group in groups.values():
-        last = group[-1]
-        views.append(
-            FailureView(
-                last.stage,
-                last.scope,
-                last.index,
-                last.role,
-                last.kind,
-                last.reason,
-                last.line,
-                rerun_count(group),
-                stopped_rerun_count(group),
-            )
-        )
-    return tuple(views)
+    return tuple(
+        SelectedFailure(group[-1], rerun_count(group), stopped_rerun_count(group))
+        for group in groups.values()
+    )
 
 
 @dataclass(frozen=True)
 class EarlierFailures:
-    """今回の回の前に起きた失敗の要約。画面は一行に畳み、一件ずつは開けば見せる。
+    """今回の回の前に起きた失敗の事実。表示の文と JSON は failure_views が作る。
 
-    文は四つの項を別々に言い、0 の項は出さない。通らなかった失敗の件数（views）、走らせ直して
-    通った起動（recovered_count）、額、額の記録なしの失敗（unrecorded_cost_count）である。額は
-    課金された分を漏らさないため、走らせ直して通った失敗も含む前の回の全失敗が起動した分を数える。
+    額は課金された分を漏らさないため、走らせ直して通った失敗も含む前の回の全失敗が起動した分を
+    数える。
     """
 
-    views: tuple[FailureView, ...]
+    # 前の回で最終的に通らなかった失敗の、起動の単位ごとの項目
+    selected: tuple[SelectedFailure, ...]
     # 前の回で走らせ直して通った失敗（RECOVERED）の数
     recovered_count: int
     # 前の回の全失敗のうち起動の記録を持つものの数。額が数える対象と同じ
@@ -578,59 +539,20 @@ class EarlierFailures:
     # 起動の記録を持たず、額にも起動の数にも入らない失敗の数
     unrecorded_cost_count: int
 
-    @property
-    def text(self) -> str:
-        """一行の文。0 の項は出さない。文の組み立てはここだけが持つ。"""
-        parts = []
-        if self.views:
-            parts.append(f"通らなかった失敗 {len(self.views)} 件")
-        if self.recovered_count:
-            parts.append(f"回復した起動 {self.recovered_count} 回")
-        if self.totals.usd:
-            estimated = (
-                f"（うち推定 {self.totals.limit_substitute:.2f} USD）"
-                if self.totals.limit_substitute
-                else ""
-            )
-            parts.append(f"計 {self.totals.usd:.2f} USD{estimated}")
-        if self.unrecorded_cost_count:
-            parts.append(f"額の記録なし {self.unrecorded_cost_count} 件")
-        return "前の回: " + "、".join(parts)
-
-    def to_json(self) -> dict[str, Any]:
-        return {
-            # 通らなかった失敗の起動単位の数。意味は従来のまま
-            "count": len(self.views),
-            "recovered_count": self.recovered_count,
-            "unrecorded_cost_count": self.unrecorded_cost_count,
-            # 課金のある起動ではなく、起動の記録を持つ全失敗の数。意味は従来のまま
-            "invocation_count": self.invocation_count,
-            "cost_usd": self.totals.usd,
-            "substituted_cost_usd": self.totals.limit_substitute,
-            "text": self.text,
-            "failures": [view.to_json() for view in self.views],
-        }
-
 
 def earlier_failures(failures: Iterable[StoredFailure]) -> EarlierFailures | None:
-    """前の回の失敗の要約。通らなかった失敗も課金も額の記録なしの失敗も無ければ None。"""
+    """前の回の失敗の事実。通らなかった失敗も課金も額の記録なしの失敗も無ければ None。"""
     stored = list(failures)
-    views = failure_views(stored, FailureRound.EARLIER)
+    selected = selected_failures(stored, FailureRound.EARLIER)
     earlier = [failure for failure in stored if failure.round is FailureRound.EARLIER]
     costs = failed_invocation_costs(earlier)
     totals = total_by_source(costs)
     unrecorded = sum(1 for failure in earlier if failure.invocation is None)
-    if not views and not totals.usd and not unrecorded:
+    if not selected and not totals.usd and not unrecorded:
         # 全て走らせ直して通り、課金も無いので、利用者へ知らせる事実が無い
         return None
     recovered = sum(1 for failure in earlier if failure.disposition is Disposition.RECOVERED)
-    return EarlierFailures(views, recovered, len(costs), totals, unrecorded)
-
-
-def earlier_failures_json(failures: Iterable[StoredFailure]) -> dict[str, Any] | None:
-    """run --json と show --json が共有する、前の回の失敗の欄。"""
-    earlier = earlier_failures(failures)
-    return None if earlier is None else earlier.to_json()
+    return EarlierFailures(selected, recovered, len(costs), totals, unrecorded)
 
 
 def failed_invocations(failures: Iterable[StoredFailure]) -> list[StoredInvocation]:

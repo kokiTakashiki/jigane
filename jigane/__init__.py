@@ -1,7 +1,7 @@
 import os
 import sys
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 
 def _drop_working_directory_from_import_path() -> None:

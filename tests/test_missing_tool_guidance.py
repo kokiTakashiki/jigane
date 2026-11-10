@@ -15,7 +15,8 @@ from jigane.llm_runs.claude import (
     run,
 )
 from jigane.pull_request_context import fetching as pull_request
-from jigane.reviews.lifecycle import ReviewError, resolve_range
+from jigane.reviews.lifecycle import ReviewError
+from jigane.reviews.range_head import resolve_range
 
 MISSING_TITLE = "必要なコマンドが見つかりません"
 

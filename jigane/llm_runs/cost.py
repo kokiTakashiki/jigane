@@ -37,6 +37,16 @@ class NotCharged:
 
 Cost = Measured | LimitSubstitute | NotCharged | Unreported
 
+
+class CostSource(StrEnum):
+    """runs.json の cost_source の値。"""
+
+    MEASURED = "measured"
+    LIMIT_SUBSTITUTE = "limit_substitute"
+    NOT_CHARGED = "not_charged"
+    UNREPORTED = "unreported"
+
+
 # 引数と dataclass の既定値に置く不変の一つ。リンタが既定値での生成を禁じる
 UNREPORTED = Unreported()
 
@@ -48,30 +58,34 @@ def cost_as_record(cost: Cost) -> dict[str, Any]:
     """
     match cost:
         case Measured(usd):
-            return {"cost_usd": usd, "cost_source": "measured"}
+            return {"cost_usd": usd, "cost_source": CostSource.MEASURED.value}
         case LimitSubstitute(usd):
-            return {"cost_usd": usd, "cost_source": "limit_substitute"}
+            return {"cost_usd": usd, "cost_source": CostSource.LIMIT_SUBSTITUTE.value}
         case NotCharged():
-            return {"cost_usd": 0.0, "cost_source": "not_charged"}
+            return {"cost_usd": 0.0, "cost_source": CostSource.NOT_CHARGED.value}
         case Unreported():
-            return {"cost_usd": 0.0, "cost_source": "unreported"}
+            return {"cost_usd": 0.0, "cost_source": CostSource.UNREPORTED.value}
         case _:
             assert_never(cost)
 
 
 def cost_from_record(record: dict[str, Any]) -> Cost:
     """cost_usd と cost_source を持つ記録から読む。"""
-    source = record["cost_source"]
-    if source == "unreported":
-        return Unreported()
-    if source == "not_charged":
-        return NotCharged()
-    usd = float(record["cost_usd"])
-    if source == "limit_substitute":
-        return LimitSubstitute(usd)
-    if source != "measured":
-        raise ValueError(f"未知の金額の出所です: {source}")
-    return Measured(usd)
+    try:
+        source = CostSource(record["cost_source"])
+    except ValueError:
+        raise ValueError(f"未知の金額の出所です: {record['cost_source']}") from None
+    match source:
+        case CostSource.UNREPORTED:
+            return Unreported()
+        case CostSource.NOT_CHARGED:
+            return NotCharged()
+        case CostSource.LIMIT_SUBSTITUTE:
+            return LimitSubstitute(float(record["cost_usd"]))
+        case CostSource.MEASURED:
+            return Measured(float(record["cost_usd"]))
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def with_limit(cost: Cost, limit_usd: float) -> Cost:

@@ -12,6 +12,7 @@ from tree_sitter import Node
 from jigane.figures.models import MermaidFigure, Panel
 from jigane.git.tree_files import walk_tree_files
 from jigane.judgment_map.classification import Segment
+from jigane.languages import registry
 from jigane.languages.base import Branch, DiscriminatorReader, Return, Span, Step
 from jigane.languages.base import Member as MemberRef
 from jigane.policy_materials import er
@@ -26,10 +27,9 @@ _QUALIFIED_MIN_PARTS = 2  # 列挙型と値
 
 SECTION_DISCRIMINATORS = "判別の流れ図"
 SECTION_READERS = "読む側の対応"
-DISCRIMINATOR_LEGEND = (
+_DISCRIMINATOR_LEGEND_HEAD = (
     "変更した範囲の関数のうち、列挙型の値を返す分岐を持つものの、条件の原文と、その腕で返す列挙型の値だけ。"
     "腕の中のそれ以外の文は描かない。菱形が条件、角の丸い箱が返す値。"
-    "Python、Java、Swift の関数だけを読む。"
 )
 READER_LEGEND = (
     "ER 図の任意の項目ごとに、その型（または派生の型）の項目を属性として参照する（`.項目名`）"
@@ -41,6 +41,19 @@ READER_LEGEND = (
 _ATTRIBUTE_NODES = {"attribute", "member_access_expression", "navigation_expression"}
 
 Pending = list[tuple[str, str]]
+
+
+def _reader_labels() -> str:
+    """判別の流れ図を読めるアダプタの言語名を、登録の順に「、」で並べる。"""
+    return "、".join(
+        registry.label_for(adapter.name)
+        for adapter in registry.adapters()
+        if isinstance(adapter, DiscriminatorReader)
+    )
+
+
+def discriminator_legend() -> str:
+    return f"{_DISCRIMINATOR_LEGEND_HEAD}{_reader_labels()} の関数だけを読む。"
 
 
 def _label(text: str) -> str:
@@ -223,11 +236,11 @@ def discriminator_diagram(review: Review) -> MermaidFigure | None:
     if not blocks:
         return None
     note = (
-        f"対応言語の外で省いたもの: Python、Java、Swift 以外の言語の関数 {skipped} 件。"
+        f"対応言語の外で省いたもの: {_reader_labels()} 以外の言語の関数 {skipped} 件。"
         if skipped
         else None
     )
-    return MermaidFigure(DISCRIMINATOR_LEGEND, tuple(blocks), note)
+    return MermaidFigure(discriminator_legend(), tuple(blocks), note)
 
 
 def _attribute_reads(

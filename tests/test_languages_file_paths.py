@@ -1,14 +1,11 @@
-import pytest
+from fakes import NoSequenceAdapter
 
 from jigane.languages.base import (
     FilePathAdapter,
     FilePathPattern,
     FileUsage,
-    LanguageAdapter,
     parse,
 )
-from jigane.languages.csharp import CSharpAdapter
-from jigane.languages.java import JavaAdapter
 from jigane.languages.python import PythonAdapter
 
 
@@ -85,10 +82,9 @@ def test_outermost_path_expression_only_once() -> None:
     assert pairs(code) == [('Path(root) / f"{a}" / "b.txt"', FileUsage.UNKNOWN)]
 
 
-@pytest.mark.parametrize("adapter", [CSharpAdapter(), JavaAdapter()])
-def test_other_languages_do_not_offer_the_reader(adapter: LanguageAdapter) -> None:
-    # 未対応の言語は口を持たない。該当なし（空の一覧）と区別するため
-    assert not isinstance(adapter, FilePathAdapter)
+def test_language_without_the_reader_does_not_offer_it() -> None:
+    # 読み口を持たない言語は口を持たない。該当なし（空の一覧）と区別するため
+    assert not isinstance(NoSequenceAdapter(), FilePathAdapter)
 
 
 def test_wrapper_read_text_keeps_whole_call() -> None:

@@ -86,6 +86,8 @@ public class Rules : Base
 
     public void Rule8() { ArgumentNullException.ThrowIfNull(store); }
 
+    public void ExternalByAnnotation(Stream stream) { stream.Flush(); }
+
     public void Unresolved() { thing.Frob(); mystery.Do(); }
 
     public void Rule9() { Run(new Store()); }

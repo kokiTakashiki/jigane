@@ -4,9 +4,9 @@ from typing import Any
 
 from jigane.markdown.cells import CellKind, markdown_table
 from jigane.reviews.lifecycle import Review
-from jigane.technology_list.build import build_model, still_used_elsewhere
+from jigane.technology_list.build import build_model
 from jigane.technology_list.changes import ADDED, CHANGE_TEXT, LANGUAGE_OS, REMOVED
-from jigane.technology_list.tables import CLASSIFICATION_TEXT
+from jigane.technology_list.tables import CLASSIFICATION_TEXT, removed_change_text, still_used_key
 
 
 def _section(section: dict[str, Any]) -> str:
@@ -26,18 +26,7 @@ SHORT_INTRO = (
 )
 
 
-MAX_LISTED_PATHS = 3
-
-
-def _still_used_text(paths: list[str]) -> str:
-    listed = "、".join(paths[:MAX_LISTED_PATHS])
-    rest = len(paths) - MAX_LISTED_PATHS
-    return f"{listed} ほか {rest} 件" if rest > 0 else listed
-
-
-def _short_change(
-    technology: dict[str, Any], still_used: dict[tuple[str, str], list[str]]
-) -> str | None:
+def _short_change(technology: dict[str, Any], still_used: dict[str, list[str]]) -> str | None:
     """変化の文言。変わっていなければ None。
 
     変更前の無いファイルのレビューは言語と OS の技術を除く。
@@ -46,12 +35,9 @@ def _short_change(
     if change is None:
         return None if technology["classification"] == LANGUAGE_OS else "対象のファイルが使う"
     if change == REMOVED:
-        paths = still_used.get((technology["language"], technology["name"]))
-        if paths:
-            # 数えたのは変更したファイルの中だけで、リポジトリから無くなったとは限らない
-            places = _still_used_text(paths)
-            return f"{CHANGE_TEXT[change]}（変更したファイルから。他では使い続けている: {places}）"
-        return CHANGE_TEXT[change]
+        return removed_change_text(
+            still_used.get(still_used_key(technology["language"], technology["name"]))
+        )
     if change == ADDED:
         return CHANGE_TEXT[change]
     if before["files"] != after["files"]:
@@ -71,10 +57,7 @@ def short_section_text(review: Review) -> str:
     rows: list[list[str]] = []
     names: set[str] = set()
     unchanged = 0
-    still_used = still_used_elsewhere(
-        review,
-        {(t["language"], t["name"]) for t in model["technologies"] if t["change"] == REMOVED},
-    )
+    still_used = model["still_used_elsewhere"]
     for technology in model["technologies"]:
         text = _short_change(technology, still_used)
         if text is None:

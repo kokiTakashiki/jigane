@@ -1,9 +1,12 @@
 """起動の前の入力の見積もりと、1 回の起動の上限の検査。群によらず、全ての群が共有する。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, assert_never
 
 from jigane.llm_runs import claude, pricing
+from jigane.skills import launch_index
+from jigane.skills.launch_index import LaunchKind
 
 LARGEST_SECTION_COUNT = 3
 SECTION_HEADING_PREFIX = "### "
@@ -18,6 +21,10 @@ class SectionSize:
 
     def as_record(self) -> dict[str, Any]:
         return {"heading": self.heading, "bytes": self.bytes}
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "SectionSize":
+        return cls(record["heading"], record["bytes"])
 
     def text(self) -> str:
         return f"{self.heading}（{self.bytes} バイト）"
@@ -45,12 +52,28 @@ ROLE_NAMES = {
     "alternative": "代案役",
     "defense": "擁護役",
     "themes": "束ねの役",
-    "diagram": "方針の役",
+    launch_index.role_of_kind(LaunchKind.DIAGRAM).value: "方針の役",
 }
 
 
-def describe_invocation(role: str, index: int | None) -> str:
-    """「発見役（シャード 2）」のように、役と、あればシャードか検証の分割の番号を文にする。"""
+def describe_invocation(role: str | None, index: int | None) -> str:
+    """「発見役（シャード 2）」のように、役と、あればシャードか検証の分割の番号を文にする。
+
+    role が None の記録は役の区別が無い方針の群で、
+    index が図の起動（0）か、問う原則の起動の並びの位置（1 から）を表す。
+    原則の番号ではない。
+    """
+    if role is None:
+        match launch_index.kind_of(index):
+            case LaunchKind.PRINCIPLE:
+                return f"方針の原則の起動（{index} 本目）"
+            case LaunchKind.DIAGRAM:
+                return "方針の図の起動"
+            case None:
+                # 番号を持たない記録は図の起動として数える。負の番号は壊れた記録で、番号を添える
+                return "方針の図の起動" if index is None else f"方針の起動（番号 {index}）"
+            case _ as unreachable:
+                assert_never(unreachable)
     name = ROLE_NAMES.get(role, role)
     if index is None:
         return name
@@ -69,6 +92,39 @@ def stop_limit_text(*, reserved: bool) -> str:
 def cost_basis_text(*, with_output: bool) -> str:
     """止めの文が費用の根拠として言う語。出力の見込みを含めた組はその旨を言う。"""
     return "入力と出力の見込みで" if with_output else "入力だけで"
+
+
+@dataclass(frozen=True)
+class StoredBudgetStop:
+    """保存する見送りの記録。記録の鍵を読み書きするのは from_record と as_record だけ。"""
+
+    role: str | None
+    index: int | None
+    tokens: int
+    estimated_usd: float
+    limit_usd: float
+    sections: tuple[SectionSize, ...] = ()
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "StoredBudgetStop":
+        return cls(
+            record["role"],
+            record["index"],
+            record["estimated_input_tokens"],
+            record["estimated_input_usd"],
+            record["max_budget_usd"],
+            tuple(SectionSize.from_record(item) for item in record.get("largest_sections", ())),
+        )
+
+    def as_record(self) -> dict[str, Any]:
+        return {
+            "role": self.role,
+            "index": self.index,
+            "estimated_input_tokens": self.tokens,
+            "estimated_input_usd": self.estimated_usd,
+            "max_budget_usd": self.limit_usd,
+            "largest_sections": [item.as_record() for item in self.sections],
+        }
 
 
 @dataclass(frozen=True)
@@ -106,15 +162,10 @@ class BudgetStop:
             + (f"。{self.notice}" if self.notice else "")
         )
 
-    def as_record(self) -> dict[str, Any]:
-        return {
-            "role": self.role,
-            "index": self.index,
-            "estimated_input_tokens": self.tokens,
-            "estimated_input_usd": self.estimated_usd,
-            "max_budget_usd": self.limit_usd,
-            "largest_sections": [item.as_record() for item in self.sections],
-        }
+    def stored(self) -> StoredBudgetStop:
+        return StoredBudgetStop(
+            self.role, self.index, self.tokens, self.estimated_usd, self.limit_usd, self.sections
+        )
 
 
 @dataclass(frozen=True)

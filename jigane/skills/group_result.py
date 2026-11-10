@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from jigane.llm_runs.launch_failure import failure_views
-from jigane.policy_materials.missing import MissingMaterial, missing_texts, ordered_missing
+from jigane.llm_runs.failure_views import failure_views
+from jigane.policy_materials.missing import RecordedMissing
 from jigane.skills.pipeline import GroupRun, PolicyGroupRun, ShardedGroupRun
 
 
@@ -18,19 +18,6 @@ class GroupResult(StrEnum):
     NO_FINDINGS = "no_findings"
     FINDINGS = "findings"
     NO_MATERIAL = "no_material"
-
-
-def stored_missing(run: GroupRun) -> tuple[MissingMaterial, ...]:
-    """runs.json の `no_material`（欠けの種類の値の配列）を列挙型へ戻す。
-
-    列挙型に無い値は読み捨てる。読めた値が無ければ空の組で、材料なしの記録とは見なさない。
-    """
-    if not isinstance(run, PolicyGroupRun):
-        # 材料なしを記録するのは方針の群だけ。シャードの群の記録は欠けを持たない
-        return ()
-    values = run.no_material or ()
-    known = {kind.value: kind for kind in MissingMaterial}
-    return ordered_missing(known[value] for value in values if value in known)
 
 
 @dataclass(frozen=True)
@@ -82,17 +69,18 @@ class HasFindings:
 class NoMaterial:
     """資料が空で、モデルを呼ばなかった実行。指摘が 0 件の回（NoFindings）とは別の状態。
 
-    missing は、何が無かったかの種類。runs.json の `no_material` には値を保存し、文は持たない。
+    missing は、何が無かったかの読み替えの結果（知っている種類と未知の有無）。runs.json の
+    `no_material` には値を保存し、文は持たない。
     """
 
     result: ClassVar[GroupResult] = GroupResult.NO_MATERIAL
-    missing: tuple[MissingMaterial, ...]
+    missing: RecordedMissing
 
     def to_json(self) -> dict[str, Any]:
         return {
             "result": self.result.value,
-            "no_material": [kind.value for kind in self.missing],
-            "no_material_texts": list(missing_texts(self.missing)),
+            "no_material": [kind.value for kind in self.missing.known],
+            "no_material_texts": list(self.missing.texts),
             **result_fields(self),
         }
 
@@ -163,9 +151,11 @@ def group_outcome(run: GroupRun | None, finding_count: int) -> GroupOutcome:
         return NOT_RUN_OUTCOME
     if finding_count > 0:
         return HasFindings()
-    missing = stored_missing(run)
-    if missing:
-        return NoMaterial(missing)
+    if isinstance(run, PolicyGroupRun):
+        # 材料なしを記録するのは方針の群だけ。シャードの群の記録は欠けを持たない
+        missing = run.missing_materials
+        if missing is not None:
+            return NoMaterial(missing)
     reason = _failure_reason(run)
     if reason is not None:
         return Failed(reason)
@@ -198,7 +188,7 @@ def result_fields(outcome: GroupOutcome) -> dict[str, str]:
             }
         case NoMaterial(missing):
             # 件数ではなく欠けた材料を言う文なので、件数を別の行で出す画面にも同じ文を出す
-            note = f"（{'、'.join(missing_texts(missing))}{NO_MATERIAL_SUFFIX}）"
+            note = f"（{'、'.join(missing.texts)}{NO_MATERIAL_SUFFIX}）"
             return {
                 "result_title": NO_MATERIAL_TEXT,
                 "result_note": note,

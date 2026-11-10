@@ -1,6 +1,6 @@
 [project]
 name = "jigane"
-version = "0.1.6"
+version = "0.1.7"
 description = "GitHub の PR のレビューを助ける CLI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -68,6 +68,8 @@ min_confidence = 60
 [tool.ruff]
 line-length = 99
 target-version = "py312"
+# 根で走らせる ruff check . が、根の下に置いた他の作業ツリーの未完の変更まで拾わないようにする
+extend-exclude = ["worktree", ".claude"]
 
 [tool.ruff.lint]
 # PLW1514（unspecified-encoding）は preview の規則。preview = true だけでは他の preview の規則も
@@ -139,8 +141,10 @@ max-args = 7
 # 開発の道具の起動の口。配布物に入らず、本体から import できない（import-linter の契約「本体（jigane/）は開発の道具の起動口（scripts/dev_launch）を読まない」）。
 "scripts/dev_launch.py" = ["TID251", "S603"]
 "jigane/llm_runs/claude.py" = ["TID251", "S607"]
-# OS の判定とホームディレクトリの唯一の読み出し口。
+# OS の判定を読むのは store、locking、atomic_write の三つ。ホームの読み出しは store だけ。
 "jigane/storage/store.py" = ["TID251"]
+"jigane/storage/locking.py" = ["TID251"]
+"jigane/storage/atomic_write.py" = ["TID251"]
 # 実物の git を起動して作り物のリポジトリを組み立てる。
 "tests/test_bots.py" = ["TID251", "S607"]
 # 見張りが効くことを、子の pytest を起こして確かめる。
@@ -159,6 +163,7 @@ max-args = 7
 "tests_posix/test_preflight_make.py" = ["TID251", "S603"]
 # 持ち主のプロセスを別に起こし、落としてもロックが外れることを確かめる。
 "tests/test_review_lock.py" = ["TID251", "S603"]
+"tests/test_review_store_case.py" = ["TID251", "S603"]
 "tests/test_pull_request.py" = ["TID251", "S607"]
 "tests/pr_support.py" = ["TID251", "S607", "S603"]
 "tests/test_repository.py" = ["TID251", "S607", "S603"]
@@ -180,6 +185,7 @@ max-args = 7
 "jigane/commands/context.py" = ["T201"]
 "jigane/commands/consent.py" = ["T201"]
 "jigane/commands/terms_consent.py" = ["T201"]
+"jigane/commands/unparsed_files.py" = ["T201"]
 "jigane/commands/subcommands/*.py" = ["T201"]
 
 [tool.importlinter]
@@ -637,6 +643,37 @@ forbidden_modules = [
 allow_indirect_imports = true
 
 # END GENERATED: sibling-contracts
+
+# locking と atomic_write は jigane.storage の底の層で、store を含む他のモジュールを読まない。review_creation と review_access は store と locking の上の層で、store はそれらを読まない（読めば循環になる）。
+[[tool.importlinter.contracts]]
+name = "locking と atomic_write は jigane.storage の他のモジュールを読まない"
+type = "forbidden"
+source_modules = ["jigane.storage.locking", "jigane.storage.atomic_write"]
+forbidden_modules = [
+    "jigane.storage.store",
+    "jigane.storage.store_format",
+    "jigane.storage.store_suffixes",
+    "jigane.storage.review_error",
+    "jigane.storage.review_creation",
+    "jigane.storage.review_access",
+]
+
+[[tool.importlinter.contracts]]
+name = "store は review_creation、review_access、locking、atomic_write を読まない"
+type = "forbidden"
+source_modules = ["jigane.storage.store"]
+forbidden_modules = [
+    "jigane.storage.review_creation",
+    "jigane.storage.review_access",
+    "jigane.storage.locking",
+    "jigane.storage.atomic_write",
+]
+
+# lifecycle の上に review_refresh を載せる枝で、層を上へ足す。型を外へ出す将来には、lifecycle と review_formats の間に review_types を挿す。
+[[tool.importlinter.contracts]]
+name = "reviews の層（resolution は catalog の上、catalog は lifecycle の上、lifecycle は review_formats の上、下の層は上の層を読まない）"
+type = "layers"
+layers = ["jigane.reviews.resolution", "jigane.reviews.catalog", "jigane.reviews.lifecycle", "jigane.reviews.review_formats"]
 
 # 言語ごとの実装を引く registry は、文法の定義と言語の基底から読まない（registry がそれらを読むので、逆向きは循環になる）。
 # flaky の検出は registry を読むが、関数の中で読むことだけを tests/test_grammar_layering.py が禁じる。この契約は関数の中かを区別できない。

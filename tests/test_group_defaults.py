@@ -44,7 +44,7 @@ def test_macro_defaults_reach_every_invocation(project: Path) -> None:
     assert len(fake.calls) == 5
     assert settings(fake.calls) == {
         ("claude-sonnet-5-5", "high", 0.36),
-        ("claude-haiku-5-5", "high", 0.02),
+        ("claude-haiku-5-5", "high", 0.04),
     }
     runs = json.loads((review.id.directory() / "runs.json").read_text("utf-8"))
     assert runs["macro"]["model"] == "claude-sonnet-5-5"
@@ -160,7 +160,7 @@ def test_run_help_is_built_from_defaults(capsys: pytest.CaptureFixture[str]) -> 
     assert "方針は0.36USD、実装は0.5USD、セキュリティは0.5USD" in out
     assert (
         "方針の図の形は、既定では図の起動に0.36USD、"
-        "原則の起動に1本0.02USD（P1〜P4）で、和は0.44USDです。"
+        "原則の起動に1本0.04USD（P1〜P4）で、和は0.52USDです。"
         "原則の起動は、その原則を問える図の形があるときだけ走ります。"
         "この値を渡すと図と原則のすべての起動の上限になり、実行全体の目安は最大でこの値の5倍です"
     ) in out
@@ -220,6 +220,13 @@ EXPECTED_KEYS = {
     "exceeds_budget",
 }
 OPTIONAL_EXPECTED_KEYS = {"skipped_usage_rows", "budget_warning"}
+GROUP_EXPECTATION_KEYS = {
+    "total_usd",
+    "version",
+    "discovery_estimate_usd",
+    "verifier_multiplier",
+    "verifier_multiplier_source",
+}
 CONDITIONAL_KEYS = {"budget_stop_warning", "expected"}
 
 
@@ -255,9 +262,14 @@ def test_estimate_json_keys_are_fixed_per_group(
     assert set(data) - CONDITIONAL_KEYS == COMMON_ESTIMATE_KEYS | specific_keys
     # 改めた鍵の古い名前と、外した鍵は出ない
     assert not set(data) & {"blockers", "invocation_count", "origin"}
+    # 群の見込みは、どの群も expected に持つ
+    assert data["expected"].keys() >= GROUP_EXPECTATION_KEYS
     if group == "macro" and data["shape"] == "design":
-        assert EXPECTED_KEYS <= data["expected"].keys() <= EXPECTED_KEYS | OPTIONAL_EXPECTED_KEYS
+        assert data["expected"].keys() >= EXPECTED_KEYS
+        assert data["expected"].keys() <= (
+            EXPECTED_KEYS | OPTIONAL_EXPECTED_KEYS | GROUP_EXPECTATION_KEYS
+        )
     else:
-        assert "expected" not in data
+        assert data["expected"].keys() == GROUP_EXPECTATION_KEYS
     assert data["run_guide"].keys() == {"review_kind", "text"}
     assert data["past_run"] is None or "invocation_count" in data["past_run"]
