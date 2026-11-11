@@ -6,6 +6,8 @@
 #   黙って落ちるコマンドがあっても、どの段で止まったかが出力に残る。
 # [[task]] の posix_commands は、commands の後に Makefile（macOS・Linux）にだけ続けて走らせるコマンド。
 #   justfile（Windows）には出さない。POSIX の仕組みに頼る試験の置き場（tests_posix）を走らせるのに使う。
+# [[task]] の omit_from_public_copy = true は、公開の写しの入口に出さない作業。
+#   scripts/export_public.py が、写しの entrypoints.toml からこの作業を外して入口を作り直す。
 # [[task]] の commands の中の置換:
 #   {args}           呼び出し側が渡した引数（make は ARGS="..."、just は後ろに続けた引数）
 #   {invocation_dir} 呼び出した場所

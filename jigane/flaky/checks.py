@@ -14,6 +14,7 @@ from jigane.languages.java_nodes import COMPUTED_EXPRESSIONS as JAVA_COMPUTED_EX
 from jigane.languages.java_nodes import METHOD_INVOCATION
 from jigane.languages.node_text import text_of
 from jigane.languages.swift_nodes import STRING_LITERALS as SWIFT_STRING_LITERALS
+from jigane.languages.swift_nodes import IdentifierName, function_name_of
 from jigane.preconditions.required import required
 
 _COMPARISON_OPERAND_COUNT = 2
@@ -202,9 +203,10 @@ def _swift_in_test_function(node: Node) -> bool:
     function = _ancestor(node, _SWIFT_FUNCTIONS)
     if function is None:
         return False
-    name = next((c for c in function.children if c.type == "simple_identifier"), None)
+    # 演算子関数は名前なしと同じく、テスト関数の名前を持たない
+    name = function_name_of(function)
     modifiers = next((c for c in function.children if c.type == "modifiers"), None)
-    return (name is not None and text_of(name).startswith("test")) or (
+    return (isinstance(name, IdentifierName) and text_of(name.node).startswith("test")) or (
         modifiers is not None and "@Test" in text_of(modifiers)
     )
 
@@ -310,6 +312,7 @@ def _inside_scoped_fixation(node: Node) -> bool:
     while current is not None:
         if current.child_by_field_name("body") == child:
             if current.type == "with_statement":
+                # with_statement は with_clause を必ず持つ（欠ければ MISSING の節点で補われる）
                 clause = next(c for c in current.children if c.type == "with_clause")
                 for item in clause.named_children:
                     value = item.child_by_field_name("value")
@@ -1004,11 +1007,9 @@ def _swift_methods(root: Node) -> Iterator[tuple[str, Node]]:
             only = statement.child_by_field_name("result")
         elif statement.type in ("property_declaration", "if_statement", "guard_statement"):
             continue
-        if only is not None:
-            yield (
-                text_of(required(next(c for c in node.children if c.type == "simple_identifier"))),
-                only,
-            )
+        name = function_name_of(node)
+        if only is not None and isinstance(name, IdentifierName):
+            yield text_of(name.node), only
 
 
 def _swift_call_name(node: Node) -> str | None:

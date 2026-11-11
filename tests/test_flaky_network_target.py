@@ -179,3 +179,18 @@ def test_network_target(case: Case) -> None:
     )
     network = [(d.undetermined, d.reason) for d in found if d.item_id == "FLK-NETWORK"]
     assert network == ([] if case.expected is None else [case.expected])
+
+
+def test_swift_operator_function_does_not_stop_target_resolution() -> None:
+    # 演算子関数（`func +`）は simple_identifier の名前を持たない
+    source = (
+        SWIFT_CLASS.replace(
+            "    func route",
+            "    static func + (a: Int, b: Int) -> Int { a }\n    func route",
+        )
+        % 'URLSession.shared.data(from: route("/a"))'
+    )
+    found = detect_source(
+        "Tests/NetworkTests.swift", source.encode(), ADAPTERS["swift"], CATALOG, AllLines()
+    )
+    assert [d.item_id for d in found if d.item_id == "FLK-NETWORK"] == []

@@ -16,7 +16,9 @@ def _violation(tmp_path: Path, path: str, code: str) -> dict[str, Any]:
     (tmp_path / Path(path).parent).mkdir(parents=True)
     (tmp_path / path).write_text(code, encoding="utf-8")
     (tmp_path / "out").mkdir()
-    gates = update_gates(tmp_path / "out", tmp_path, [path], [], CATALOG, renames={})
+    gates = update_gates(
+        tmp_path / "out", tmp_path, [path], [], CATALOG, renames={}, unreadable_segments=()
+    )
     found = gates.violations + gates.warnings
     assert len(found) == 1
     return found[0].to_json()

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from review_fakes import changed_segment
 
+from jigane.gates.tree_side import TreeSide
 from jigane.languages.csharp import CSharpAdapter
 from jigane.sequence.diagram import (
     ArrowHit,
@@ -23,7 +24,6 @@ from jigane.sequence.index import Index, build_index
 from jigane.sequence.model_json import model_to_json
 from jigane.sequence.review_diagrams import build_diagrams
 from jigane.sequence.roots import RootSelection, changed_members, select_roots
-from jigane.sequence.side import Side, TreeSide
 
 if TYPE_CHECKING:
     from jigane.judgment_map.classification import Segment
@@ -74,7 +74,7 @@ def _selection(index: Index, name: str = "Service.Run") -> RootSelection:
     return select_roots(index, changed, CSharpAdapter())
 
 
-def _model(index: Index, side: TreeSide = Side.AFTER) -> dict[str, Any]:
+def _model(index: Index, side: TreeSide = TreeSide.AFTER) -> dict[str, Any]:
     model = build_diagrams(DiagramInputs(index, _selection(index), [], 4, full=True), side)
     return model_to_json(model)
 
@@ -126,8 +126,8 @@ def test_reordering_arrows_keeps_each_identifier(tmp_path: Path) -> None:
     built = construct_diagrams(DiagramInputs(index, _selection(index), [], 4, full=True))
     diagram = next(d for d in built.diagrams if len(d.arrows) == 4)
     reordered = dataclasses.replace(diagram, arrows=list(reversed(diagram.arrows)))
-    original_ids = identities_of(_single(diagram), Side.AFTER)[0].identities
-    reordered_ids = identities_of(_single(reordered), Side.AFTER)[0].identities
+    original_ids = identities_of(_single(diagram), TreeSide.AFTER)[0].identities
+    reordered_ids = identities_of(_single(reordered), TreeSide.AFTER)[0].identities
     assert reordered_ids.diagram_id == original_ids.diagram_id
     assert {(i.arrow.line, i.arrow.name, i.arrow_id) for i in reordered_ids.arrows} == {
         (i.arrow.line, i.arrow.name, i.arrow_id) for i in original_ids.arrows
@@ -153,15 +153,15 @@ def test_identical_calls_on_one_line_are_told_apart_by_occurrence(tmp_path: Path
 
 def test_the_side_changes_the_diagram_identifier(tmp_path: Path) -> None:
     index = _index(tmp_path)
-    after = _by_arity(_model(index, Side.AFTER))[4]
-    before = _by_arity(_model(index, Side.BEFORE))[4]
+    after = _by_arity(_model(index, TreeSide.AFTER))[4]
+    before = _by_arity(_model(index, TreeSide.BEFORE))[4]
     assert after["id"] != before["id"]
 
 
 def test_root_identifier_is_shared_by_both_sides(tmp_path: Path) -> None:
     index = _index(tmp_path)
-    after = _by_arity(_model(index, Side.AFTER))[4]
-    before = _by_arity(_model(index, Side.BEFORE))[4]
+    after = _by_arity(_model(index, TreeSide.AFTER))[4]
+    before = _by_arity(_model(index, TreeSide.BEFORE))[4]
     assert after["root_id"] == before["root_id"]
     assert re.fullmatch(r"r_[0-9a-f]{12}", after["root_id"])
     assert re.fullmatch(r"d_[0-9a-f]{12}", after["id"])
@@ -177,7 +177,7 @@ def test_identities_pair_each_arrow_with_its_identifier(tmp_path: Path) -> None:
     index = _index(tmp_path)
     built = construct_diagrams(DiagramInputs(index, _selection(index), [], 4, full=True))
     diagram = next(d for d in built.diagrams if len(d.arrows) == 4)
-    identified = identities_of(_single(diagram), Side.AFTER)[0]
+    identified = identities_of(_single(diagram), TreeSide.AFTER)[0]
     identities = identified.identities
     assert [i.arrow for i in identities.arrows] == diagram.arrows
     assert len({i.arrow_id for i in identities.arrows}) == 4
@@ -187,7 +187,7 @@ def test_a_diagram_refuses_identities_of_a_different_arrow_list(tmp_path: Path) 
     index = _index(tmp_path)
     built = construct_diagrams(DiagramInputs(index, _selection(index), [], 4, full=True))
     diagram = next(d for d in built.diagrams if len(d.arrows) == 4)
-    identified = identities_of(_single(diagram), Side.AFTER)[0]
+    identified = identities_of(_single(diagram), TreeSide.AFTER)[0]
     identities = identified.identities
     reordered = dataclasses.replace(diagram, arrows=list(reversed(diagram.arrows)))
     with pytest.raises(ValueError, match="食い違"):
@@ -209,13 +209,13 @@ def test_moving_a_call_line_changes_the_arrow_identifier(tmp_path: Path) -> None
 
 def test_the_side_field_follows_the_argument() -> None:
     empty = DiagramSet((), DiagramSetNotes({}, (), ()))
-    for side in (Side.BEFORE, Side.AFTER):
+    for side in (TreeSide.BEFORE, TreeSide.AFTER):
         assert diagrams_to_dict(identities_of(empty, side), empty.notes, side)["side"] is side
 
 
 def test_identities_of_returns_only_the_identified_diagrams() -> None:
     notes = DiagramSetNotes({}, (), ("A.B",))
-    assert identities_of(DiagramSet((), notes), Side.AFTER) == ()
+    assert identities_of(DiagramSet((), notes), TreeSide.AFTER) == ()
 
 
 def test_diagrams_to_dict_writes_the_given_notes() -> None:
@@ -224,7 +224,7 @@ def test_diagrams_to_dict_writes_the_given_notes() -> None:
         (UnreachableRegion("J9", "a.py", "A.b", "s"),),
         ("A.B",),
     )
-    result = diagrams_to_dict((), notes, Side.AFTER)
+    result = diagrams_to_dict((), notes, TreeSide.AFTER)
     assert result["region_index"] == {
         "r": [
             {"diagram": "D", "arrow": 1, "participant": None},

@@ -21,8 +21,8 @@
 | `diagram_mermaid.to_mermaid` | 図のモデルを Mermaid の `sequenceDiagram` に変換します。`diagram_diff` を読みます |
 | `diagram_select.select_diagrams` | 図のモデルから、根や判断の箇所で図を選びます。`region_ids` が図に載る判断の箇所の番号を引きます。描画（`diagram_mermaid`）と `diagram_diff` を読みません |
 | `diagram_diff.mark_differences` | 変更前と変更後の矢印の列を突き合わせ、対比の印（`PlainMark`、`Retargeted`）を付けます。図のモデルの構築（`diagram`）を読みません |
-| `side.Side` | 図や変更の集合をどちらの木から取るかを表します。一つの木を指す型（`TreeSide`）も持ちます |
-| `identifiers.identities_of` | `DiagramSet` と木の側（`side.TreeSide`）から、図ごとに図と識別子（`DiagramIdentities`）を対にした `IdentifiedDiagram` の並びを返します。図の本体は `IdentifiedDiagram.diagram` の一か所だけが持ち、図以外の項目（`DiagramSetNotes`）は運びません。導出はここだけが持ちます。依存は `review_diagrams` → `diagram_json`、`identifiers`、`before_tree` と `before_diagrams`、`before_diagrams` → `before_tree`、`before_diagrams` → `diagram_json`、`before_diagrams` → `identifiers`、`diagram_json` → `identifiers` → `diagram` の一方向で、`diagram` は識別子を知りません |
+| `side.Side` | 図や変更の集合をどちらの木から取るかの選択（変更前、変更後、両方）を表します。一つの木の側は `gates.tree_side.TreeSide` です |
+| `identifiers.identities_of` | `DiagramSet` と木の側（`gates.tree_side.TreeSide`）から、図ごとに図と識別子（`DiagramIdentities`）を対にした `IdentifiedDiagram` の並びを返します。図の本体は `IdentifiedDiagram.diagram` の一か所だけが持ち、図以外の項目（`DiagramSetNotes`）は運びません。導出はここだけが持ちます。依存は `review_diagrams` → `diagram_json`、`identifiers`、`before_tree` と `before_diagrams`、`before_diagrams` → `before_tree`、`before_diagrams` → `diagram_json`、`before_diagrams` → `identifiers`、`diagram_json` → `identifiers` → `diagram` の一方向で、`diagram` は識別子を知りません |
 | `model_json.model_to_json` | 図のモデルを JSON の辞書にします。対比の印の書き出しはここだけが持ちます |
 | `review_diagrams.build_model` | レビューから図のモデルまでを通します。CLI の `jigane sequence` が使います |
 
@@ -30,7 +30,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`figures`、`git`、`judgment_map`、`languages`、`preconditions`、`reviews`
+読むサブパッケージ：`figures`、`gates`、`git`、`judgment_map`、`languages`、`preconditions`、`reviews`
 
 読まれるサブパッケージ：`commands`、`design`、`policy_materials`、`skills`
 

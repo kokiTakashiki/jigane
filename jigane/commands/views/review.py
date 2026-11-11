@@ -6,7 +6,8 @@ from typing import Any, assert_never
 
 from jigane.design.review_documents import attachment_candidates
 from jigane.findings.records import HistoryLoad, load_findings_state
-from jigane.gates.entry import Allowed, FlakyDetail, RegexDetail
+from jigane.gates.entry import Allowed, FlakyDetail, RegexDetail, UnreadableDetail
+from jigane.gates.tree_side import TreeSide
 from jigane.groups.definitions import GROUPS
 from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.kinds import Kind
@@ -314,6 +315,9 @@ def gate_lines(review: Review) -> list[str]:
                 lines.append(f"{head}（{entry.severity}） {entry.explanation['text']}")
             case FlakyDetail(cause=cause, reason=reason):
                 lines.append(f"{head}（{cause}）" + (f" {reason}" if reason else ""))
+            case UnreadableDetail(side=side):
+                label = "（変更前）" if side is TreeSide.BEFORE else ""
+                lines.append(f"{head}{label} {entry.explanation['text']}")
     return lines
 
 

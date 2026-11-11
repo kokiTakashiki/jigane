@@ -474,9 +474,7 @@ def run_fetch(args: argparse.Namespace, context: Context) -> int:
     )
     try:
         outcome = (
-            fetch_main.fetch_and_report()
-            if names is None
-            else (fetch_main.fetch_and_report(names))
+            fetch_main.fetch_and_report() if names is None else fetch_main.fetch_and_report(names)
         )
     finally:
         # 取得の前に求めた状態は、文法の有無が古い

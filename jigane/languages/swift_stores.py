@@ -15,7 +15,10 @@ from tree_sitter import Node
 from jigane.languages.base import StoreAccess, StoreRole, StoreSide
 from jigane.languages.file_paths_core import qualified_name, text
 from jigane.languages.swift_file_paths import RULES as SWIFT_RULES
-from jigane.languages.swift_nodes import DECLARED_FUNCTION_NODES
+from jigane.languages.swift_nodes import (
+    DECLARED_FUNCTION_NODES,
+    function_name_of,
+)
 from jigane.languages.swift_store_codable import codable_json
 from jigane.languages.swift_store_common import ACCESSOR_NODES, Touch, ancestors
 from jigane.languages.swift_store_keychain import keychain
@@ -30,9 +33,10 @@ _ROADS: tuple[Road, ...] = (user_defaults, codable_json, keychain)
 def _functions(root: Node) -> Iterator[tuple[Node, str]]:
     for node in walk_nodes(root):
         if node.type in DECLARED_FUNCTION_NODES:
-            own = node.child_by_field_name("name")
+            own = function_name_of(node)
             if own is not None:
-                yield node, ".".join(filter(None, (qualified_name(node, SWIFT_RULES), text(own))))
+                scope = qualified_name(node, SWIFT_RULES)
+                yield node, ".".join(filter(None, (scope, text(own.node))))
         elif node.type in ACCESSOR_NODES:
             yield from _accessor(node)
 
@@ -78,6 +82,7 @@ def store_accesses(sources: Mapping[str, str], parse: Callable[[str], Node]) -> 
         parsed[path] = root
     found: list[StoreAccess] = []
     for path, root in parsed.items():
+        accesses: list[StoreAccess] = []
         try:
             units = list(_functions(root))
             for function, qualified in units:
@@ -90,11 +95,13 @@ def store_accesses(sources: Mapping[str, str], parse: Callable[[str], Node]) -> 
                         for role in (StoreRole.WRITE, StoreRole.READ)
                         if (side := _side(role, qualified, path, own)) is not None
                     )
-                    found.append(
+                    accesses.append(
                         StoreAccess(
                             path=path, names=frozenset({name}), pair_owner=None, sides=sides
                         )
                     )
         except (RecursionError, MemoryError, ValueError):
+            # 途中まで集めた項目を残さないため、走査が通ったときだけ全体へ足す
             continue
+        found.extend(accesses)
     return found

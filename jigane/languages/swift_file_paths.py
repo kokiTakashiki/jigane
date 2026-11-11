@@ -61,7 +61,7 @@ def _builds_string(node: Node) -> bool:
     return False
 
 
-class _Call:
+class Call:
     """`呼び出し先(引数...)` の呼び出し先の名前、受け手の原文、ラベル付きの引数。"""
 
     def __init__(self, node: Node) -> None:
@@ -93,14 +93,14 @@ class _Call:
                 self.arguments[text(label)] = value
 
 
-def _initializer(call: _Call) -> list[tuple[Node, FileUsage]]:
+def _initializer(call: Call) -> list[tuple[Node, FileUsage]]:
     for label in _READING_INITIALIZERS.get(call.name, ()):
         if label in call.arguments:
             return [(call.arguments[label], FileUsage.READ)]
     return []
 
 
-def _write_call(call: _Call) -> list[tuple[Node, FileUsage]]:
+def _write_call(call: Call) -> list[tuple[Node, FileUsage]]:
     for label in _WRITING_LABELS:
         argument = call.arguments.get(label)
         # `to: &stream` は文字列の出力先であり、ファイルの名前ではない
@@ -110,7 +110,7 @@ def _write_call(call: _Call) -> list[tuple[Node, FileUsage]]:
     return []
 
 
-def _file_manager_call(call: _Call) -> list[tuple[Node, FileUsage]]:
+def _file_manager_call(call: Call) -> list[tuple[Node, FileUsage]]:
     if call.name == "urls":
         # ディレクトリの問い合わせ。引数はパスでなく場所の列挙なので、呼び出し全体を取る
         return [(call.node, FileUsage.READ)]
@@ -122,7 +122,7 @@ def _file_manager_call(call: _Call) -> list[tuple[Node, FileUsage]]:
 
 
 def _io_arguments(node: Node) -> list[tuple[Node, FileUsage]]:
-    call = _Call(node)
+    call = Call(node)
     if call.receiver is None:
         return _initializer(call)
     if text(call.receiver) == _FILE_MANAGER:
@@ -134,7 +134,7 @@ def _io_arguments(node: Node) -> list[tuple[Node, FileUsage]]:
 
 
 def _is_name_building(node: Node) -> bool:
-    call = _Call(node)
+    call = Call(node)
     if call.receiver is None:
         return call.name == "URL" and bool(_URL_LABELS & call.arguments.keys())
     return call.name in _APPENDING_METHODS

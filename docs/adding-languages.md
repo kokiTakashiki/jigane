@@ -18,6 +18,8 @@
 
 `jigane languages list [--json]` は、言語ごとの出どころ、状態、拡張子、使える図と対応外の図を示します。図は、アダプタが満たす口（`SequenceAdapter`、`DiscriminatorReader` など）で決まります。判別の流れ図は `DiscriminatorReader`（`discriminator_branches`）、足した型と同じ項目を持つ型は `TypeFieldReader`（`type_fields`）を実装した言語だけが対応し、足した公開の口と呼ぶ側は `PublicNameReader`（`added_public_names`）を実装した言語だけが対応します。有効にした言語が使えないと、`languages` の副コマンド以外は止まります。ただし、文法がまだ置き場に無いだけのときは止まらず、その言語を文法を取得していない言語として扱い（`languages list` の状態は `grammar_absent`）、名前を標準エラーに示します。文法を取得すれば使えます。
 
+プラグインの言語に及ぶ読めない記述の検出は、構文エラー（構文木のルートの誤り）だけです。Swift と C# の個別の規則は、組み込みの言語にだけ当たります。詳しくは [commands.md](commands.md#読めない記述の案内) を読んでください。
+
 作り方の例は `examples/jigane-language-kotlin/README.md` にあります。
 
 追加の言語のコードと文法の共有ライブラリは、jigane と同じ権限で動きます。jigane は審査しません。出どころを確かめてから有効にします。詳しくは SECURITY.md の「追加の言語」を読んでください。

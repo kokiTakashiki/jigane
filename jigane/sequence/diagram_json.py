@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from typing import Any
 
+from jigane.gates.tree_side import TreeSide
 from jigane.sequence.diagram import (
     ArrowHit,
     DiagramSetNotes,
@@ -10,7 +11,6 @@ from jigane.sequence.diagram import (
     UnreachableRegion,
 )
 from jigane.sequence.identifiers import IdentifiedArrow, IdentifiedDiagram
-from jigane.sequence.side import TreeSide
 
 
 def _arrow_to_dict(identified: IdentifiedArrow) -> dict[str, Any]:

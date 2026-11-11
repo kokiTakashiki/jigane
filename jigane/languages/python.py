@@ -606,6 +606,7 @@ class PythonAdapter:
                 )
                 body = definition.child_by_field_name("body")
                 body = required(body)
+                # 定義は : を必ず持つ（欠ければ MISSING の節点で補われる）
                 colon = next(c for c in definition.children if c.type == ":")
                 spans = split_declaration(outer, BodyBounds(colon, body))
             elif statement.type == "assignment":

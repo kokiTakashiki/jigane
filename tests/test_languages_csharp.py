@@ -255,6 +255,25 @@ def test_fields_share_a_span() -> None:
     assert found["C.b"].body is None
 
 
+def test_declarations_skip_a_declarator_without_a_name() -> None:
+    # `Foo.Bar(x);` は子が tuple_pattern だけの宣言子として読まれる
+    found = declarations("public class C { Foo.Bar(x); public int a; }")
+    assert set(found) == {"C", "C.a"}
+
+
+def test_field_receiver_members_skip_a_declarator_without_a_name() -> None:
+    _, members = _type_members("public class C { Foo.Bar(x); public int a; }")
+    assert [(m.name, m.kind) for m in members] == [("a", "field")]
+
+
+def test_locals_of_skips_a_declarator_without_a_name() -> None:
+    source = b"class C { void M() { A.B (x) = 1; int a = 1; } }"
+    root = parse(adapter, source).root_node
+    member = next(d for d in adapter.type_members(root, source, "C.cs") if d.name == "M")
+    body = required(adapter.body_of(member.node))
+    assert [v.name for v in adapter.locals_of(body).variables] == ["a"]
+
+
 def test_class_body_starts_after_opening_line() -> None:
     code = "public class C\n{\n    public int a;\n}\n"
     found = declarations(code)["C"]

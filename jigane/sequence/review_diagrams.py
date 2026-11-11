@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from jigane.figures.models import NoteText, Panel, SequenceFigure, SequenceFlow
+from jigane.gates.tree_side import TreeSide
 from jigane.git.tree_files import walk_tree_files
 from jigane.languages import registry
 from jigane.languages.base import SequenceAdapter
@@ -38,7 +39,7 @@ from jigane.sequence.roots import (
     changed_members,
     select_roots,
 )
-from jigane.sequence.side import Side, TreeSide
+from jigane.sequence.side import Side
 
 # 注記の文は二本で持つ。*_TEXT と *_NOTE は LLM に渡す資料の常体、*_DISPLAY は利用者に見せる敬体。
 # 資料の文は評価の結果を動かさないため変えない
@@ -88,9 +89,9 @@ def _required_adapter(review: Review) -> SequenceAdapter:
     return adapter
 
 
-def build_diagrams(inputs: DiagramInputs, side: TreeSide = Side.AFTER) -> dict[str, Any]:
+def build_diagrams(inputs: DiagramInputs, side: TreeSide = TreeSide.AFTER) -> dict[str, Any]:
     """図を作り、識別子を導いて辞書にする。side が BEFORE の図は、関係の矢印を足さない。"""
-    built = construct_diagrams(inputs, relations=side is Side.AFTER)
+    built = construct_diagrams(inputs, relations=side is TreeSide.AFTER)
     return diagrams_to_dict(identities_of(built, side), built.notes, side)
 
 

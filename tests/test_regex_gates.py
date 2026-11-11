@@ -32,7 +32,14 @@ def _gates(tmp_path: Path, source: str, name: str = "a.py", *, with_base: bool =
         base.mkdir(exist_ok=True)
     segment = cast("Segment", SimpleNamespace(new_path=f"src/{name}", old_path=None))
     return update_gates(
-        out, tmp_path, [f"src/{name}"], [segment], load_catalog(), base_root=base, renames={}
+        out,
+        tmp_path,
+        [f"src/{name}"],
+        [segment],
+        load_catalog(),
+        base_root=base,
+        renames={},
+        unreadable_segments=(),
     )
 
 
@@ -74,7 +81,16 @@ def test_pattern_already_in_base_is_not_a_tag(tmp_path: Path) -> None:
     (head / "src" / "a.py").write_text(WARNING_SOURCE, encoding="utf-8")
     out = tmp_path / "out"
     out.mkdir()
-    gates = update_gates(out, head, ["src/a.py"], [], load_catalog(), base_root=base, renames={})
+    gates = update_gates(
+        out,
+        head,
+        ["src/a.py"],
+        [],
+        load_catalog(),
+        base_root=base,
+        renames={},
+        unreadable_segments=(),
+    )
     assert gates.violations == ()
 
 
@@ -148,7 +164,14 @@ def test_annotation_untouched_by_the_change_is_not_reported(tmp_path: Path) -> N
     out.mkdir()
     segment = cast("Segment", SimpleNamespace(new_path="src/a.py", old_path="src/a.py"))
     gates = update_gates(
-        out, trees[1], ["src/a.py"], [segment], load_catalog(), renames={}, base_root=trees[0]
+        out,
+        trees[1],
+        ["src/a.py"],
+        [segment],
+        load_catalog(),
+        renames={},
+        base_root=trees[0],
+        unreadable_segments=(),
     )
     assert gates.violations == ()
 
@@ -221,6 +244,7 @@ def _moved(tmp_path: Path, old_source: str, new_source: str) -> Gates:
         load_catalog(),
         base_root=tmp_path / "base",
         renames={"src/new.py": "src/old.py"},
+        unreadable_segments=(),
     )
 
 
@@ -254,6 +278,7 @@ def test_added_file_with_same_pattern_as_another_file_still_makes_a_tag(tmp_path
         load_catalog(),
         renames={},
         base_root=tmp_path / "base",
+        unreadable_segments=(),
     )
     [entry] = gates.violations
     assert (entry.id, entry.severity) == ("R6", GateSeverity.REGEX_NIT)

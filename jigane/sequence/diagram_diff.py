@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from jigane.gates.tree_side import TreeSide
+
 
 def _arrow_signature(arrow: Mapping[str, Any]) -> tuple[str, str, str]:
     return arrow["sender"], arrow["receiver"], arrow["name"]
@@ -19,19 +21,12 @@ class PlainMark(StrEnum):
     REMOVED = "removed"
 
 
-class PairedSide(StrEnum):
-    """付け替えの相手の矢印が、変更前と変更後のどちらの図にあるか。"""
-
-    BEFORE = "before"
-    AFTER = "after"
-
-
 @dataclass(frozen=True)
 class Retargeted:
     """呼び先だけを替えた削除と追加の組。対の受け手と側は、この印だけが持つ。"""
 
     paired_receiver: str
-    paired_side: PairedSide
+    paired_side: TreeSide
 
 
 ArrowMark = PlainMark | Retargeted
@@ -75,8 +70,8 @@ def mark_differences(before: list[dict[str, Any]], after: list[dict[str, Any]]) 
     bounds = [(-1, -1), *anchors, (len(old), len(new))]
     for (i0, j0), (i1, j1) in itertools.pairwise(bounds):
         for gone, arrived in _pair_retargeted(before[i0 + 1 : i1], after[j0 + 1 : j1]):
-            gone["mark"] = Retargeted(arrived["receiver"], PairedSide.AFTER)
-            arrived["mark"] = Retargeted(gone["receiver"], PairedSide.BEFORE)
+            gone["mark"] = Retargeted(arrived["receiver"], TreeSide.AFTER)
+            arrived["mark"] = Retargeted(gone["receiver"], TreeSide.BEFORE)
 
 
 def _pair_retargeted(

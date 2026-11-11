@@ -301,6 +301,19 @@ def adapter_for(path: str) -> LanguageAdapter | None:
     return None
 
 
+def parsing_adapter_for(path: str) -> LanguageAdapter | None:
+    """宣言を読む対象のアダプタを引く。ビルドのファイルは、拡張子が当たってもNoneを返す。"""
+    # ビルドのファイルならアダプタを引かない短絡を保つため、述語を一つの引きにはまとめない
+    if is_build_path(path, adapters()):
+        return None
+    return adapter_for(path)
+
+
+def is_parsed_or_build(path: str) -> bool:
+    """アダプタがあるか、ビルドのファイルか。解析しない言語の案内は、この二つを数えない。"""
+    return adapter_for(path) is not None or is_build_path(path, adapters())
+
+
 def language_for_suffix(path: str) -> LanguageReady | LanguageGrammarAbsent | None:
     """拡張子から選べる言語（組み込みと有効にした追加の言語）の状態を引く。
 

@@ -32,13 +32,10 @@ from jigane.languages.public_names_core import (
     added_public_names,
     sites_of,
 )
-from jigane.languages.swift_nodes import TYPE_DECLARATIONS, TYPE_KEYWORDS
+from jigane.languages.swift_nodes import FUNCTION_NODES, TYPE_DECLARATIONS, TYPE_KEYWORDS
 
 _MODULE_LEVEL = "モジュール"
-_FUNCTIONS = frozenset(
-    {"function_declaration", "protocol_function_declaration", "init_declaration"}
-)
-_DECLARATIONS = _FUNCTIONS | TYPE_DECLARATIONS
+_DECLARATIONS = FUNCTION_NODES | TYPE_DECLARATIONS
 _PRIVATE = frozenset({b"private", b"fileprivate"})
 _IDENTIFIERS = frozenset({"simple_identifier", "type_identifier"})
 _DECLARED_NAMES = _IDENTIFIERS | {"pattern", "value_argument_label"}

@@ -47,6 +47,7 @@ def _saved(tmp_path: Path, name: str, *, with_base: bool) -> Gates:
         load_catalog(),
         renames={},
         base_root=base if with_base else None,
+        unreadable_segments=(),
     )
 
 
@@ -119,7 +120,7 @@ def test_version_1_file_with_the_real_key_order_is_read_and_rewritten_as_version
     saved = loaded.to_json()
     assert (saved["source"], saved["origin"]) == ("flaky", CITATION)
     assert "remedy" not in saved
-    assert gates.to_json()["format"] == 2
+    assert gates.to_json()["format"] == 3
 
 
 def test_version_1_entry_missing_fields_is_filled_from_the_catalog(tmp_path: Path) -> None:
@@ -158,7 +159,7 @@ def test_version_2_entry_with_an_invalid_source_is_an_error(tmp_path: Path) -> N
 
 
 def test_unknown_version_is_an_error(tmp_path: Path) -> None:
-    _write(tmp_path, {"format": 3, "violations": [], "warnings": []})
+    _write(tmp_path, {"format": 4, "violations": [], "warnings": []})
     with pytest.raises(ReviewError, match="版"):
         load_gates(tmp_path)
 
@@ -304,8 +305,19 @@ def test_every_source_takes_its_number_from_the_one_ledger(
     base.mkdir()
     paths = ["tests/test_a.py"]
     # base_root を渡さない回は flaky だけ、渡す回は正規表現の札だけを検出する
-    flaky = update_gates(out, tmp_path, paths, [], load_catalog(), renames={})
-    regex = update_gates(out, tmp_path, paths, [], load_catalog(), base_root=base, renames={})
+    flaky = update_gates(
+        out, tmp_path, paths, [], load_catalog(), renames={}, unreadable_segments=()
+    )
+    regex = update_gates(
+        out,
+        tmp_path,
+        paths,
+        [],
+        load_catalog(),
+        base_root=base,
+        renames={},
+        unreadable_segments=(),
+    )
     assert {e.source for e in flaky.violations} == {GateSource.FLAKY}
     assert {e.source for e in regex.violations} == {GateSource.REGEX}
     assert len(calls) == len(flaky.violations) + len(flaky.warnings) + len(regex.violations)
@@ -336,11 +348,12 @@ def test_numbers_are_carried_from_a_version_1_file(tmp_path: Path) -> None:
         load_catalog(),
         renames={},
         base_root=tmp_path / "base",
+        unreadable_segments=(),
     )
     assert [e.number for e in second.violations] == [
         f"G{int(e.number[1:]) + 10}" for e in first.violations
     ]
-    assert json.loads((out / GATES_FILE).read_text(encoding="utf-8"))["format"] == 2
+    assert json.loads((out / GATES_FILE).read_text(encoding="utf-8"))["format"] == 3
     assert second.ledger.next_violation == 50
 
 

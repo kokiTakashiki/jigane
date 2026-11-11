@@ -1,7 +1,9 @@
-"""図や変更の集合を取る木の側（変更前、変更後、両方）。"""
+"""図や変更の集合を取る木の側の選択（変更前、変更後、両方）。
+
+一つの木の側は gates.tree_side.TreeSide で、Side は BOTH を含む選択を表す。
+"""
 
 from enum import StrEnum
-from typing import Literal
 
 
 class Side(StrEnum):
@@ -10,7 +12,3 @@ class Side(StrEnum):
     BEFORE = "before"
     AFTER = "after"
     BOTH = "both"
-
-
-# 図を作る木は変更前か変更後の一つ。BOTH は二つの図を並べる指定で、一つの木を指さない
-TreeSide = Literal[Side.BEFORE, Side.AFTER]

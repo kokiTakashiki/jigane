@@ -4,9 +4,9 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from jigane.gates.tree_side import TreeSide
 from jigane.sequence.diagram import Arrow, Diagram, DiagramSet
 from jigane.sequence.index import Member
-from jigane.sequence.side import TreeSide
 
 _SEPARATOR = "\x1f"
 _DIGEST_LENGTH = 12

@@ -11,7 +11,7 @@ from tree_sitter import Node
 
 from jigane.languages.base import StoreRole
 from jigane.languages.file_paths_core import text
-from jigane.languages.swift_file_paths import _Call
+from jigane.languages.swift_file_paths import Call
 from jigane.languages.swift_store_common import Touch, own_nodes, positional_first
 from jigane.languages.swift_store_lexicon import Lexicon, Vocabulary
 
@@ -32,7 +32,7 @@ def _keychain_calls(function: Node) -> Iterator[_KeychainCall]:
     for node in own_nodes(function):
         if node.type != "call_expression":
             continue
-        call = _Call(node)
+        call = Call(node)
         if call.receiver is not None:
             continue  # 受け手の有る同名のメソッドは、Security の関数でない
         if call.name in _WRITING_CALLS:

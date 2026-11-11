@@ -463,6 +463,8 @@ class Task:
     # Makefile（macOS・Linux）にだけ、commands の後に続けて走らせるコマンド。
     # justfile（Windows）には出さない。POSIX の仕組みに頼る試験の置き場を走らせる
     posix_commands: tuple[str, ...] = ()
+    # 公開の写しの入口に出さない作業。生成に使わず、export_public.py が写しから外す
+    omit_from_public_copy: bool = False
 
     @property
     def uses_args(self) -> bool:
@@ -529,6 +531,8 @@ GUARD_FLAGS = (
 
 # 作業の真偽値の鍵。GUARD_FLAGS は先頭の確かめ、show_commands は本文の行の表示
 TASK_FLAGS = (*GUARD_FLAGS, "show_commands")
+# 公開の写しの入口に出さない作業の鍵。生成には使わず、export_public.py が読む
+OMIT_FROM_PUBLIC_COPY = "omit_from_public_copy"
 
 
 def _parse_tool(table: dict[str, Any], index: int) -> Tool:
@@ -563,6 +567,13 @@ def _posix_commands(
     return posix_commands
 
 
+def _bool_key(table: dict[str, Any], key: str, name: str) -> bool:
+    value = table.get(key, False)
+    if not isinstance(value, bool):
+        raise ValueError(f"{name}: {key} は真偽値でなければならない")  # noqa: TRY004 宣言の誤りは ValueError に揃える
+    return value
+
+
 def _parse_task(table: dict[str, Any], index: int) -> Task:
     name = table.get("name")
     if not isinstance(name, str):
@@ -573,6 +584,7 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
         "commands",
         "depends",
         "posix_commands",
+        OMIT_FROM_PUBLIC_COPY,
         *TASK_FLAGS,
     }
     if unknown:
@@ -580,12 +592,8 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
     description = table.get("description")
     if not isinstance(description, str):
         raise ValueError(f"{name}: description は文字列でなければならない")  # noqa: TRY004 宣言の誤りは ValueError に揃える
-    flags: dict[str, bool] = {}
-    for flag in TASK_FLAGS:
-        value = table.get(flag, False)
-        if not isinstance(value, bool):
-            raise ValueError(f"{name}: {flag} は真偽値でなければならない")  # noqa: TRY004 宣言の誤りは ValueError に揃える
-        flags[flag] = value
+    flags = {flag: _bool_key(table, flag, name) for flag in TASK_FLAGS}
+    omit_from_public_copy = _bool_key(table, OMIT_FROM_PUBLIC_COPY, name)
     commands = _string_list(table, "commands", name)
     depends = _string_list(table, "depends", name)
     posix_commands = _posix_commands(table, name, commands)
@@ -598,7 +606,15 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
             raise ValueError(f"{name}: 未定義の置換 {sorted(unknown_names)}")
     if any(flags.values()) and depends:
         raise ValueError(f"{name}: {sorted(TASK_FLAGS)} は commands を持つ作業にだけ付ける")
-    return Task(name, description, commands, depends, posix_commands=posix_commands, **flags)
+    return Task(
+        name,
+        description,
+        commands,
+        depends,
+        posix_commands=posix_commands,
+        omit_from_public_copy=omit_from_public_copy,
+        **flags,
+    )
 
 
 def _check_task(task: Task, facts: Facts, names: list[str]) -> None:

@@ -19,6 +19,7 @@ from jigane.judgment_map.classification import (
     FilePair,
     FindingTouch,
     JudgmentMap,
+    Segment,
     build_judgment_map,
     file_line_counts,
 )
@@ -727,6 +728,11 @@ class DesignDocContent(ContentBase[DesignDocOrigin]):
 Content = ReviewContent | PullRequestContent | DesignDocContent
 
 
+def unreadable_segments_of(map_kind: JudgmentMapKind) -> Sequence[Segment]:
+    """読めない記述を検出する区間。設計書のレビューは宣言を読む対象ではないので空。"""
+    return map_kind.segments if isinstance(map_kind, CodeMap) else ()
+
+
 def map_kind_of(content: Content) -> JudgmentMapKind:
     """保存する判断の地図の種類。地図の組み立ての出所ごとの分岐は、ここだけに置く。"""
     origin = content.origin
@@ -829,6 +835,7 @@ def _save_review(
         load_catalog(),
         base_root=physical(diff_source.base_tree_path) if diff_source else None,
         renames=judgment_map.renames,
+        unreadable_segments=unreadable_segments_of(map_kind),
     )
     review = Review(
         review_id,
@@ -1449,6 +1456,7 @@ def _rebuild_stored_map(refreshed: RefreshResult, source: DiffSource) -> Refresh
         load_catalog(),
         base_root=base_tree,
         renames=judgment_map.renames,
+        unreadable_segments=judgment_map.segments,
     )
     if (
         _comparable_map(review.map_kind) == _comparable_map(CodeMap.of(judgment_map))
@@ -1561,6 +1569,7 @@ def refresh_from_content(
         content.judgment_map.segments,
         load_catalog(),
         renames=content.judgment_map.renames,
+        unreadable_segments=unreadable_segments_of(map_kind_of(content)),
     )
     if (
         not force_save

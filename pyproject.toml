@@ -1,6 +1,6 @@
 [project]
 name = "jigane"
-version = "0.1.7"
+version = "0.1.8"
 description = "GitHub の PR のレビューを助ける CLI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -178,6 +178,7 @@ max-args = 7
 "scripts/check_repo_settings.py" = ["T201"]
 "scripts/export_public.py" = ["T201"]
 "scripts/gate_stamp.py" = ["T201"]
+"scripts/public_sync.py" = ["T201"]
 # CLI の出力そのものを担う。
 "jigane/commands/__init__.py" = ["T201"]
 "jigane/commands/generation.py" = ["T201"]

@@ -12,6 +12,7 @@ from jigane.git.tree_files import read_tree_bytes
 from jigane.judgment_map.configuration import Config
 from jigane.judgment_map.kinds import LEVEL_OF_KIND, Kind, Level, StoredMode
 from jigane.judgment_map.region_table import CodeRegion, LineCounts, RegionTable
+from jigane.judgment_map.tree_parsing import read_and_parse
 from jigane.languages import registry
 from jigane.languages.base import (
     Declaration,
@@ -19,7 +20,6 @@ from jigane.languages.base import (
     Span,
     Visibility,
     leaves_and_comments,
-    parse,
 )
 from jigane.preconditions.required import required
 
@@ -146,16 +146,21 @@ class _Side:
         self.lines: list[str] = []
         if root is None or path is None:
             return
-        data = read_tree_bytes(root, path)
+        if adapter is None:
+            data = read_tree_bytes(root, path)
+            tree = None
+        else:
+            parsed = read_and_parse(root, path, adapter)
+            data, tree = parsed if parsed is not None else (None, None)
         if data is None:
             # 木の外へ出るリンクなどは、中身を読まず空の側として扱う
             return
         self.lines = data.decode("utf-8", errors="replace").split("\n")
         if self.lines[-1] == "":
             self.lines.pop()
-        if adapter is None:
+        if adapter is None or tree is None:
+            # 解析しない側は行だけを持つ
             return
-        tree = parse(adapter, data)
         self.has_error = tree.root_node.has_error
         self.declarations = adapter.declarations(tree.root_node, data)
         for node, ancestors in leaves_and_comments(adapter, tree.root_node):
@@ -575,7 +580,7 @@ def _classify_file(
     if registry.is_build_path(path, registered):
         return _opcode_segments(pair, opcodes, Kind.DEPENDENCY_BUILD)
     logic_kind = Kind.SENSITIVE_LOGIC if matches_any(path, config.sensitive) else Kind.LOGIC
-    adapter = registry.adapter_for(path)
+    adapter = registry.parsing_adapter_for(path)
     if adapter is None:
         return _opcode_segments(pair, opcodes, logic_kind)
     if registry.is_test_path(path, registered):

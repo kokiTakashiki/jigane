@@ -4,7 +4,7 @@ from tree_sitter import Node
 
 from jigane.languages.base import StoreRole
 from jigane.languages.file_paths_core import text
-from jigane.languages.swift_file_paths import _Call
+from jigane.languages.swift_file_paths import Call
 from jigane.languages.swift_store_common import Touch, own_nodes
 from jigane.languages.swift_store_lexicon import Lexicon
 
@@ -33,7 +33,7 @@ def user_defaults(function: Node, lexicon: Lexicon) -> list[Touch]:
     for node in own_nodes(function):
         if node.type != "call_expression":
             continue
-        call = _Call(node)
+        call = Call(node)
         if call.receiver is None or text(call.receiver) != _USER_DEFAULTS_RECEIVER:
             continue
         if call.name in _WRITING_CALLS:

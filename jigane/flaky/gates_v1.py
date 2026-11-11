@@ -5,7 +5,7 @@ from typing import Any
 
 from jigane.flaky.catalog import Item
 from jigane.flaky.explanation import explain
-from jigane.gates.entry import GATES_FORMAT, GateSource
+from jigane.gates.entry import GateSource
 
 
 def _upgrade_entry(entry: dict[str, Any], by_id: Mapping[str, Item]) -> dict[str, Any]:
@@ -34,7 +34,8 @@ def upgrade_v1(state: dict[str, Any], by_id: Mapping[str, Item]) -> dict[str, An
     """知らない鍵は読み捨てる。番号の台帳の鍵は版を跨いでそのまま引き継ぎ、無いファイルは読む境が拒む。"""
     return {
         **state,
-        "format": GATES_FORMAT,
+        # 結果は版 2 の形。現行の GATES_FORMAT を書くと、版を上げたとき意味が食い違う
+        "format": 2,
         "violations": [_upgrade_entry(e, by_id) for e in state["violations"]],
         "warnings": [_upgrade_entry(e, by_id) for e in state["warnings"]],
     }

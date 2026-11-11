@@ -3,11 +3,16 @@
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from jigane.commands.consent import ConsentDeclinedError, is_yes
+from jigane.commands.unreadable_notice import unreadable_text
 from jigane.git.process import CONSENT_PROMPT_END
 from jigane.judgment_map.map_kind import CodeMap
+from jigane.judgment_map.unreadable_constructs import (
+    UnreadableConstructs,
+    unreadable_constructs,
+)
 from jigane.languages import registry
 from jigane.languages.grammars import FETCH_COMMAND
 from jigane.languages.states import LanguageGrammarAbsent
@@ -53,9 +58,7 @@ def unparsed_files(review: Review) -> UnparsedFiles:
         if not suffix or suffix in NON_SOURCE_SUFFIXES:
             # 拡張子が無いと言語を決められず、文書とデータの形式は言語ではない
             continue
-        if registry.adapter_for(path) is not None or registry.is_build_path(
-            path, registry.adapters()
-        ):
+        if registry.is_parsed_or_build(path):
             # アダプタがあるか、ビルドのファイルで「重要」になるので、確認の対象にしない
             continue
         language = registry.language_for_suffix(path)
@@ -108,18 +111,33 @@ def unparsed_text(found: UnparsedFiles) -> list[str]:
     return lines
 
 
+def review_unreadable_constructs(review: Review) -> UnreadableConstructs:
+    """レビューの区間と二つの木から、読めない記述を検出する。設計書のレビューは対象外。"""
+    if not isinstance(review.map_kind, CodeMap):
+        return UnreadableConstructs()
+    return unreadable_constructs(
+        review.map_kind.segments, Path(review.repository_root), review.base_tree_path
+    )
+
+
+def _notice_lines(review: Review) -> list[str]:
+    return unparsed_text(unparsed_files(review)) + unreadable_text(
+        review_unreadable_constructs(review)
+    )
+
+
 def print_unparsed_notice(review: Review) -> None:
     """解析しない言語の案内を標準エラーへ出す。止めず、尋ねず、何も無ければ何も出さない。"""
-    for line in unparsed_text(unparsed_files(review)):
+    for line in _notice_lines(review):
         print(line, file=sys.stderr)
 
 
 def require_unparsed_consent(review: Review, *, read_answer: Callable[[str], str]) -> None:
-    """解析しない言語のファイルがあるとき、y か yes のときだけ返る。
+    """解析しない言語のファイルか読めない記述があるとき、y か yes のときだけ返る。
 
     端末かどうかは費用の同意（require_consent）が先に確かめているので、ここでは確かめない。
     """
-    lines = unparsed_text(unparsed_files(review))
+    lines = _notice_lines(review)
     if not lines:
         return
     for line in lines:

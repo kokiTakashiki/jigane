@@ -18,7 +18,13 @@ from collections.abc import Callable, Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import TypeFields
-from jigane.languages.csharp_nodes import NAMESPACES, TYPE_KINDS, flatten, namespace_container
+from jigane.languages.csharp_nodes import (
+    NAMESPACES,
+    TYPE_KINDS,
+    flatten,
+    named_declarators,
+    namespace_container,
+)
 from jigane.languages.node_text import text_or_empty
 
 _READ_KINDS = frozenset({"class", "struct", "record", "enum"})
@@ -44,15 +50,7 @@ def _is_auto_property(node: Node) -> bool:
 
 
 def _field_declaration_names(node: Node) -> list[str]:
-    names: list[str] = []
-    for declaration in node.children:
-        if declaration.type != "variable_declaration":
-            continue
-        for declarator in declaration.children:
-            name = declarator.child_by_field_name("name")
-            if declarator.type == "variable_declarator" and name is not None:
-                names.append(text_or_empty(name))
-    return names
+    return [text_or_empty(name) for _, name in named_declarators(node)]
 
 
 def _member_names(member: Node) -> list[str]:

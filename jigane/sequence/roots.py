@@ -4,12 +4,12 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 
 from jigane.figures.models import NoteText
+from jigane.gates.tree_side import TreeSide
 from jigane.judgment_map.classification import Segment
 from jigane.languages.base import SequenceAdapter
 from jigane.languages.registry import is_test_path
 from jigane.sequence.index import Index, Member, TypeKey
 from jigane.sequence.resolve import Call, Extraction, Resolved, extract_calls
-from jigane.sequence.side import Side, TreeSide
 
 UNREACHABLE_ENTRY_LABEL = "呼び手を静的に見つけられない入口の候補"
 
@@ -48,7 +48,7 @@ def changed_members(
     adapter: SequenceAdapter,
     *,
     include_tests: bool,
-    side: TreeSide = Side.AFTER,
+    side: TreeSide = TreeSide.AFTER,
 ) -> dict[Key, Member]:
     """判断の地図の segment のうち、索引の木で本体を持つメソッドを索引のメンバへ写す。
 
@@ -59,7 +59,7 @@ def changed_members(
     for member in index.callables.values():
         by_path.setdefault(member.path, []).append(member)
     found: dict[Key, Member] = {}
-    before = side is Side.BEFORE
+    before = side is TreeSide.BEFORE
     for segment in segments:
         path = segment.old_path if before else segment.new_path
         span = segment.old_span if before else segment.new_span

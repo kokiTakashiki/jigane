@@ -29,6 +29,7 @@ from pathlib import Path
 
 import tomlkit
 from dev_launch import run_tool
+from generate_entrypoints import OMIT_FROM_PUBLIC_COPY
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from workflow_rules import EXCLUDE_LIST, PUBLIC_COPY_KINDS, read_entries, violations
@@ -42,8 +43,6 @@ PULL_REQUEST_LIMIT_KEY = "open-pull-requests-limit"
 Runner = Callable[..., str]
 SKIPPED_DIRECTORIES = {".venv", "dist", ".git"}
 ENTRYPOINTS_PATH = Path("entrypoints.toml")
-# 写しの入口に出さない作業。除く一覧と非公開の名前の一覧が写しに無く、動かないため
-PRIVATE_TASKS = ("export-public",)
 # 写しの作業から外す行の目印。開発のゲートの設定で、写しは .git が無く、
 # 利用者の git config にも書かせないため
 PRIVATE_COMMAND_MARKER = "claude.gateCommand"
@@ -121,7 +120,9 @@ def silence_version_updates(tree: Path) -> int:
 
 
 def drop_private_tasks(text: str) -> tuple[str, list[str]]:
-    """entrypoints.toml の文面から PRIVATE_TASKS の [[task]] を外す。外した作業の名前も返す。
+    """entrypoints.toml の文面から、OMIT_FROM_PUBLIC_COPY が真の [[task]] を外す。
+
+    外した作業の名前も返す。
 
     残す作業の commands からも、PRIVATE_COMMAND_MARKER を含む開発用の行を外す。
     """
@@ -132,7 +133,7 @@ def drop_private_tasks(text: str) -> tuple[str, list[str]]:
     # 後ろから外し、これから見る要素の添字を動かさない
     for index in reversed(range(len(tasks))):
         name = tasks[index].get("name")
-        if name in PRIVATE_TASKS:
+        if tasks[index].get(OMIT_FROM_PUBLIC_COPY) is True:
             dropped.insert(0, name)
             del tasks[index]
             continue
@@ -152,9 +153,9 @@ def regenerate_entrypoints(tree: Path, run: Runner, env: dict[str, str]) -> list
     if not path.exists():
         raise StageError("入口", f"写しに {ENTRYPOINTS_PATH} が無い")
     text, dropped = drop_private_tasks(path.read_text(encoding="utf-8"))
-    if sorted(dropped) != sorted(PRIVATE_TASKS):
+    if not dropped:
         raise StageError(
-            "入口", f"外した作業 {dropped} が非公開の作業 {list(PRIVATE_TASKS)} と違う"
+            "入口", f"{OMIT_FROM_PUBLIC_COPY} の作業が無く、非公開の作業を外せなかった"
         )
     path.write_text(text, encoding="utf-8")
     command_stage(run, "入口", [sys.executable, "scripts/generate_entrypoints.py"], tree, env)

@@ -25,6 +25,7 @@ from jigane.languages.csharp_nodes import (
     TYPE_KINDS,
     declared_visibility,
     flatten,
+    named_declarators,
     namespace_container,
 )
 from jigane.languages.node_text import text_or_empty
@@ -207,18 +208,13 @@ class _Walker:
         if not any(c.type == "modifier" and c.text == b"const" for c in node.children):
             return
         visibility = self._visibility(node, context)
-        for declaration in node.children:
-            if declaration.type != "variable_declaration":
-                continue
-            for declarator in declaration.children:
-                name = declarator.child_by_field_name("name")
-                if declarator.type == "variable_declarator" and name is not None:
-                    self._define(
-                        PublicNameKind.ENUM_VALUE,
-                        context.qualify(text_or_empty(name)),
-                        node,
-                        visibility=visibility,
-                    )
+        for _, name in named_declarators(node):
+            self._define(
+                PublicNameKind.ENUM_VALUE,
+                context.qualify(text_or_empty(name)),
+                node,
+                visibility=visibility,
+            )
 
     def _enum_value(self, node: Node, context: _Context) -> None:
         name = text_or_empty(node.child_by_field_name("name"))

@@ -11,11 +11,11 @@
 | `detector.detect_source` | 一つのファイルを検出します（`jigane: allow-flaky` の注記による除外も扱います） |
 | `checks.CHECKS` | query の結果に掛ける検査を、名前から関数への対応で持ちます |
 | `target.resolve` | 通信の宛先がローカルか、ローカルの外か、確かめられないかを、同じファイルの中で判定します |
-| `gates.update_gates` | 検出をやり直し、番号を割り当てて、`gates.json` に保存します |
+| `gates.update_gates` | 検出をやり直し、番号を割り当てて、`gates.json`（版 3）に保存します。読めない記述の警告も同じ列に足します |
 | `gates.load_gates` | 保存した `gates.json` を読み込みます |
 | `finding.to_finding` | 検出一件を区分と説明つきの `Finding` にします。`jigane flaky` の終了コードと、テキストと JSON の出力は、ここから引きます |
 | `explanation.explain` | ゲート違反の説明（懸念、理由、直す向き）の三つの文を、目録の項目から組み立てます。返信の文面とレポートはここ以外で文を組みません |
-| `gates_v1.upgrade_v1` | 版 1（改名の前）の `gates.json` を版 2 の形へ読み替えます。読み替えの置き場はここだけです |
+| `gates_v1.upgrade_v1` | 版 1（改名の前）の `gates.json` を版 2 の形へ読み替えます（版 2 から版 3 は値を変えない移しで、`gates` が持ちます）。読み替えの置き場はここだけです |
 
 ## 他のモジュールとの関係
 

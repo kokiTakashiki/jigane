@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from tree_sitter import Node
 
 from jigane.languages.base import TypeKind, Visibility
+from jigane.languages.value_set_core import walk_nodes
 from jigane.preconditions.required import required
 
 TYPE_KINDS: dict[str, TypeKind] = {
@@ -73,3 +74,37 @@ def declared_visibility(node: Node, default: Visibility) -> Visibility:
     if "internal" in found:
         return Visibility.INTERNAL
     return default
+
+
+def declarator_name(declarator: Node) -> Node | None:
+    # `Foo.Bar(x);` は文法上、子が tuple_pattern だけの宣言子として読まれ、名前を持たない
+    named = declarator.child_by_field_name("name")
+    if named is not None:
+        return named
+    return next((child for child in declarator.children if child.type == "identifier"), None)
+
+
+def named_declarations(declaration: Node) -> Iterator[tuple[Node, Node]]:
+    """`variable_declaration` の宣言子ごとに、宣言子と名前の節点を返す。
+
+    名前を取れない宣言子は飛ばす。
+    """
+    for declarator in declaration.children:
+        if declarator.type != "variable_declarator":
+            continue
+        name_node = declarator_name(declarator)
+        if name_node is not None:
+            yield declarator, name_node
+
+
+def named_declarators(node: Node) -> Iterator[tuple[Node, Node]]:
+    for declaration in (c for c in node.children if c.type == "variable_declaration"):
+        for _, name_node in named_declarations(declaration):
+            yield declaration, name_node
+
+
+def nameless_declarator_nodes(root: Node) -> Iterator[Node]:
+    """名前を取れない宣言子の節点。名前の有無は `declarator_name` で決める。"""
+    for node in walk_nodes(root):
+        if node.type == "variable_declarator" and declarator_name(node) is None:
+            yield node

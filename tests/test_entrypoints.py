@@ -497,6 +497,34 @@ def test_load_rejects_an_invalid_show_commands(
         load_text(tmp_path, FACTS_TOML + TASK_HEAD + task_body)
 
 
+@pytest.mark.parametrize("value", ['"yes"', "1"])
+def test_load_rejects_a_non_boolean_omit_from_public_copy(tmp_path: Path, value: str) -> None:
+    body = FACTS_TOML + TASK_HEAD + f'omit_from_public_copy = {value}\ncommands = ["echo"]\n'
+
+    with pytest.raises(ValueError, match="omit_from_public_copy"):
+        load_text(tmp_path, body)
+
+
+def test_the_omit_key_marks_the_task_without_changing_the_generated_files(
+    tmp_path: Path,
+) -> None:
+    generator = load_generator()
+    plain = FACTS_TOML + TASK_HEAD + 'commands = ["echo"]\n'
+    marked = FACTS_TOML + TASK_HEAD + 'omit_from_public_copy = true\ncommands = ["echo"]\n'
+
+    plain_definition = load_text(tmp_path, plain)
+    marked_definition = load_text(tmp_path, marked)
+
+    assert [task.omit_from_public_copy for task in plain_definition.tasks] == [False]
+    assert [task.omit_from_public_copy for task in marked_definition.tasks] == [True]
+    assert generator.render_makefile(marked_definition) == generator.render_makefile(
+        plain_definition
+    )
+    assert generator.render_justfile(marked_definition) == generator.render_justfile(
+        plain_definition
+    )
+
+
 def test_the_gate_tasks_show_their_commands() -> None:
     tasks = {task.name: task for task in load_generator().load().tasks}
     shown = {name for name, task in tasks.items() if task.show_commands}

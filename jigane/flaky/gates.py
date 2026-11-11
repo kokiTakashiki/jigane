@@ -1,5 +1,6 @@
 """ゲートの結果（違反 G と警告 W）の番号の割り当てと保存。"""
 
+import copy
 import difflib
 import json
 from collections.abc import Mapping, Sequence
@@ -23,6 +24,8 @@ from jigane.gates.line_scope import AllLines, ChangedLines, LineScope
 from jigane.git.tree_files import read_tree_bytes
 from jigane.judgment_map.allow_annotation import split_rows
 from jigane.judgment_map.classification import Segment
+from jigane.judgment_map.unreadable_constructs import unreadable_constructs
+from jigane.judgment_map.unreadable_wording import ENTRY_IDS, unreadable_entry
 from jigane.regex.gate_tags import REGEX_ANNOTATION_ID, annotation_entry, detect_tags, regex_entry
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.store_format import Upgrade, upgrade_mapping
@@ -101,7 +104,7 @@ def gate_kind(detection: Detection, by_id: Mapping[str, Item]) -> GateKind:
     return GateKind.VIOLATION
 
 
-def update_gates(
+def update_gates(  # noqa: PLR0913 -- 呼び側が揃える入力で、束ねる型を新設しても読む手間が増えるだけ
     directory: Path,
     root: Path,
     paths: Sequence[str],
@@ -110,6 +113,7 @@ def update_gates(
     *,
     renames: Mapping[str, str],
     base_root: Path | None = None,
+    unreadable_segments: Sequence[Segment],
 ) -> Gates:
     """検出し直して番号を割り当て、gates.json に保存する。番号は再利用しない。"""
     previous = load_gates(directory)
@@ -134,6 +138,12 @@ def update_gates(
     for annotation in scan.violations:
         base = NumberLedger.base_key(annotation.path, REGEX_ANNOTATION_ID, annotation.excerpt)
         violations.append(annotation_entry(ledger.assign(base, GateKind.VIOLATION), annotation))
+    # 読めない記述は行で絞らず、案内と同じ集合を警告 W として載せる。検出する区間は呼び側が渡す
+    for item in unreadable_constructs(unreadable_segments, root, base_root).occurrences:
+        base = NumberLedger.base_key(
+            item.path, ENTRY_IDS[item.kind], f"{item.side}\0{item.excerpt}"
+        )
+        warnings.append(unreadable_entry(ledger.assign(base, GateKind.WARNING), item))
     gates = Gates(tuple(violations), tuple(warnings), ledger.settle())
     text = json.dumps(gates.to_json(), ensure_ascii=False, indent=2)
     write_text_atomic(directory / GATES_FILE, text)
@@ -145,8 +155,13 @@ def _upgrade_gates_v1(state: dict[str, Any]) -> dict[str, Any]:
     return upgrade_v1(state, {item.id: item for item in load_catalog()})
 
 
+def _upgrade_gates_v2(state: dict[str, Any]) -> dict[str, Any]:
+    """版 2 は読めない記述の項目を持たないだけで、値は変えない。"""
+    return copy.deepcopy(state)
+
+
 # 保存された版から次の版への移し。load_gates が GATES_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_gates_v1}
+_UPGRADES: dict[int, Upgrade] = {1: _upgrade_gates_v1, 2: _upgrade_gates_v2}
 
 
 def load_gates(directory: Path) -> Gates | None:

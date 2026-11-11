@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Any
 
 from jigane.figures.models import NoteText
+from jigane.gates.tree_side import TreeSide
 from jigane.sequence.before_tree import BeforeTree
 from jigane.sequence.diagram import (
     DiagramInputs,
@@ -16,7 +17,6 @@ from jigane.sequence.diagram_json import diagrams_to_dict
 from jigane.sequence.identifiers import identities_of
 from jigane.sequence.index import Member
 from jigane.sequence.roots import Key, Root, RootSelection, key_of
-from jigane.sequence.side import Side
 
 NO_BASE_TREE_TEXT = "変更前のツリーが無いため、変更前の図は作れない。"
 NO_BASE_TREE_DISPLAY = "変更前のツリーがないため、変更前の図は作れません。"
@@ -68,7 +68,7 @@ BeforeResult = BeforeFound | BeforeMissing
 def _build_before(inputs: DiagramInputs) -> dict[str, Any]:
     """変更前の木の図を辞書にする。関係の矢印は足さない。"""
     built = construct_diagrams(inputs, relations=False)
-    return diagrams_to_dict(identities_of(built, Side.BEFORE), built.notes, Side.BEFORE)
+    return diagrams_to_dict(identities_of(built, TreeSide.BEFORE), built.notes, TreeSide.BEFORE)
 
 
 def _before_of(diagram: dict[str, Any], tree: BeforeTree, after: DiagramInputs) -> BeforeResult:

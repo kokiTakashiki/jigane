@@ -54,7 +54,7 @@ from jigane.languages.base import (
 from jigane.languages.calls_core import Captures
 from jigane.languages.node_text import text_of
 from jigane.languages.queries import load_queries
-from jigane.languages.swift_nodes import TYPE_DECLARATIONS
+from jigane.languages.swift_nodes import TYPE_DECLARATIONS, function_name_of
 from jigane.preconditions.required import required
 
 _ASSIGNMENT_MIN_PARTS = 2  # 「=」と初期値
@@ -89,6 +89,7 @@ def _parameter_label(parameter: Node) -> str:
     external = parameter.child_by_field_name("external_name")
     if external is not None:
         return text_of(external)
+    # parameter は simple_identifier を必ず持つ（欠ければ tree-sitter が MISSING の節点で補う）
     return text_of(next(c for c in parameter.children if c.type == "simple_identifier"))
 
 
@@ -542,6 +543,9 @@ class SwiftAdapter:
         """型以外の宣言を一つ、種類ごとに result へ足す。"""
         if statement.type == "function_declaration":
             name = self.function_declaration_name(statement)
+            if name is None:
+                # 構文エラーで func か名前を欠いた宣言は、残りの宣言の処理を続けるために飛ばす
+                return
             self._add(
                 result,
                 statement,
@@ -552,6 +556,9 @@ class SwiftAdapter:
             )
         elif statement.type == "protocol_function_declaration":
             name = self.function_declaration_name(statement)
+            if name is None:
+                # 構文エラーで func か名前を欠いた宣言は、残りの宣言の処理を続けるために飛ばす
+                return
             self._add(
                 result,
                 statement,
@@ -680,11 +687,11 @@ class SwiftAdapter:
         )
 
     @staticmethod
-    def function_declaration_name(node: Node) -> str:
-        keyword = next(c for c in node.children if c.type == "func")
-        following = keyword.next_sibling
-        following = required(following)
-        return text_of(following)
+    def function_declaration_name(node: Node) -> str | None:
+        # None は func か名前の節点を欠いた宣言（構文エラー）で、呼ぶ側が飛ばす。
+        # 演算子関数は名前の文字をそのまま宣言の名前にする
+        name = function_name_of(node)
+        return None if name is None else text_of(name.node)
 
     def _computed(self, node: Node) -> Node | None:
         for child in node.children:
@@ -865,6 +872,9 @@ class SwiftAdapter:
             self._collect_type(node, f"{owner}.", path, result)
         elif node.type in ("function_declaration", "protocol_function_declaration"):
             name = self.function_declaration_name(node)
+            if name is None:
+                # 構文エラーで func か名前を欠いた宣言は、残りの宣言の処理を続けるために飛ばす
+                return
             result.append(
                 MemberDecl(
                     owner,

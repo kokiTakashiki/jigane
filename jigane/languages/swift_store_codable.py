@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from jigane.languages.base import StoreFormat, StoreRole
 from jigane.languages.file_paths_core import text
-from jigane.languages.swift_file_paths import _Call
+from jigane.languages.swift_file_paths import Call
 from jigane.languages.swift_store_common import Touch, own_nodes, positional_first, suffix
 from jigane.languages.swift_store_lexicon import CodableFields, Lexicon
 
@@ -33,7 +33,7 @@ def _json_calls(function: Node) -> Iterator[_JsonCall]:
     for node in own_nodes(function):
         if node.type != "call_expression":
             continue
-        call = _Call(node)
+        call = Call(node)
         if call.receiver is None or call.name not in {"encode", "decode"}:
             continue
         receiver = _TRY_PREFIX.sub("", text(call.receiver))

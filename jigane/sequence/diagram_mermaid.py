@@ -3,7 +3,8 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, assert_never
 
-from jigane.sequence.diagram_diff import ArrowMark, PairedSide, PlainMark, Retargeted
+from jigane.gates.tree_side import TreeSide
+from jigane.sequence.diagram_diff import ArrowMark, PlainMark, Retargeted
 
 # 参加者の名札に並べる判断の箇所の数。ツリー図の札（TAG_CAP）と同じ 3 件にして、
 # 名札が参加者の名前より長くならない幅に収める
@@ -35,7 +36,7 @@ def _arrow_mark_suffix(arrow: Mapping[str, Any], display: Mapping[str, str]) -> 
         case Retargeted():
             paired = mermaid_text(display.get(mark.paired_receiver, mark.paired_receiver))
             # 図の一枚の矢印は自分が変更前か変更後かを持たないので、相手がどちらの側かで言い分ける
-            when = "変更後" if mark.paired_side is PairedSide.AFTER else "変更前"
+            when = "変更後" if mark.paired_side is TreeSide.AFTER else "変更前"
             return f"（呼び先の変更: {when}は {paired}）"
         case _ as unreachable:
             assert_never(unreachable)

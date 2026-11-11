@@ -1,6 +1,6 @@
 """gates.json の違反と警告の一件の型。強さと出所を一か所で持ち、gates.json の形と往復させる。
 
-gates.json の全体の形（版 2）は次のとおり。
+gates.json の全体の形（版 3。版 2 からは警告に出所 unreadable の項目が増えただけ）は次のとおり。
 
 - `format`: 形の版。版 1 は版の鍵を持たず、flaky.gates_v1 が読み替える。
 - 番号の台帳の鍵: NumberLedger.to_json が書き、from_json が読む。どれも必須で、
@@ -15,12 +15,15 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from jigane.gates.tree_side import TreeSide
+
 
 class GateSource(StrEnum):
     """検出の出所。値は gates.json の source の綴り。"""
 
     FLAKY = "flaky"
     REGEX = "regex"
+    UNREADABLE = "unreadable"
 
 
 class GateSeverity(StrEnum):
@@ -29,10 +32,17 @@ class GateSeverity(StrEnum):
     FLAKY = "flaky"
     REGEX_WARNING = "warning"
     REGEX_NIT = "nit"
+    UNREADABLE = "unreadable"
 
     @property
     def source(self) -> GateSource:
-        return GateSource.FLAKY if self is GateSeverity.FLAKY else GateSource.REGEX
+        match self:
+            case GateSeverity.FLAKY:
+                return GateSource.FLAKY
+            case GateSeverity.UNREADABLE:
+                return GateSource.UNREADABLE
+            case GateSeverity.REGEX_WARNING | GateSeverity.REGEX_NIT:
+                return GateSource.REGEX
 
 
 @dataclass(frozen=True)
@@ -51,6 +61,21 @@ class FlakyDetail:
 @dataclass(frozen=True)
 class RegexDetail:
     """正規表現の札に固有の欄。強さは GateSeverity が持つので、今は欄を持たない。"""
+
+
+@dataclass(frozen=True)
+class UnreadableDetail:
+    """読めない記述に固有の欄。記述がある木の側だけを持つ。"""
+
+    side: TreeSide
+
+
+# 出所 -> 固有の欄の型
+_DETAIL_TYPES: dict[GateSource, type] = {
+    GateSource.FLAKY: FlakyDetail,
+    GateSource.REGEX: RegexDetail,
+    GateSource.UNREADABLE: UnreadableDetail,
+}
 
 
 @dataclass(frozen=True)
@@ -77,15 +102,17 @@ class GateEntry:
     excerpt: str
     explanation: dict[str, Any]
     severity: GateSeverity
-    detail: FlakyDetail | RegexDetail
+    detail: FlakyDetail | RegexDetail | UnreadableDetail
     state: GateState = Active()
 
     def __post_init__(self) -> None:
-        if isinstance(self.detail, FlakyDetail) != (self.severity.source is GateSource.FLAKY):
+        if type(self.detail) is not _DETAIL_TYPES[self.severity.source]:
             raise ValueError(f"強さ {self.severity} と固有の欄の型が合いません: {self.number}")
-        if isinstance(self.state, Allowed) and self.severity.source is GateSource.FLAKY:
-            # flaky の外しは検出の段で注記が吸収するので、札としては残らない
-            raise ValueError(f"flaky の札は外せません: {self.number}")
+        if isinstance(self.state, Allowed) and self.severity.source is not GateSource.REGEX:
+            # flaky の外しは検出の段で注記が吸収する。読めない記述は外す注記を持たない
+            raise ValueError(
+                f"この出所の札は外せません。外せるのは正規表現の札だけです: {self.number}"
+            )
 
     @property
     def source(self) -> GateSource:
@@ -120,6 +147,8 @@ class GateEntry:
                     data["equivalent"] = detail.equivalent
             case RegexDetail():
                 data["severity"] = str(self.severity)
+            case UnreadableDetail() as detail:
+                data["side"] = str(detail.side)
         if isinstance(self.state, Allowed):
             data["allowed"] = self.state.reason
         return data
@@ -145,6 +174,12 @@ class GateEntry:
                 detail=RegexDetail(),
                 state=state,
             )
+        if source is GateSource.UNREADABLE:
+            return cls(
+                **common,
+                severity=GateSeverity.UNREADABLE,
+                detail=UnreadableDetail(TreeSide(data["side"])),
+            )
         detail = FlakyDetail(
             reason=data["reason"],
             cause=data["cause"],
@@ -158,7 +193,7 @@ class GateEntry:
 
 
 # gates.json の形の版。版 1 は改名の前の形で、最上位に版の鍵を持たない
-GATES_FORMAT = 2
+GATES_FORMAT = 3
 
 
 class GateKind(StrEnum):
@@ -286,7 +321,7 @@ class Gates:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "Gates":
-        """現行の形（版 2）だけを厳しく読む。版 1 は flaky.gates_v1 が読み替えてから渡す。"""
+        """現行の形（版 3）だけを厳しく読む。古い版は flaky.gates が読み替えてから渡す。"""
         if data["format"] != GATES_FORMAT:
             raise ValueError(f"知らない gates.json の版です: {data['format']}")
         return cls(

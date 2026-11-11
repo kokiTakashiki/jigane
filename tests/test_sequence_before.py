@@ -8,9 +8,10 @@ from review_fakes import make_review, with_map
 
 from jigane.commands.subcommands import sequence as sequence_command
 from jigane.figures.models import NoteText
+from jigane.gates.tree_side import TreeSide
 from jigane.reviews.lifecycle import DiffSource, LocalRange, RangeOrigin, Review
 from jigane.sequence.before_diagrams import BEFORE_NO_ROOT_NOTE, NO_BASE_TREE_DISPLAY
-from jigane.sequence.diagram_diff import PairedSide, PlainMark, Retargeted, mark_differences
+from jigane.sequence.diagram_diff import PlainMark, Retargeted, mark_differences
 from jigane.sequence.diagram_mermaid import to_mermaid
 from jigane.sequence.model_json import model_to_json
 from jigane.sequence.review_diagrams import build_model, review_sequences
@@ -137,13 +138,13 @@ def test_cli_json_flattens_a_retargeted_mark_through_model_to_json(
         "sender": "A",
         "receiver": "B",
         "name": "x",
-        "mark": Retargeted("C", PairedSide.AFTER),
+        "mark": Retargeted("C", TreeSide.AFTER),
     }
     before_arrow = {
         "sender": "A",
         "receiver": "C",
         "name": "x",
-        "mark": Retargeted("B", PairedSide.BEFORE),
+        "mark": Retargeted("B", TreeSide.BEFORE),
     }
     before = {"root": "A.run", "arrows": [before_arrow], "before": None}
     model = {"diagrams": [{"root": "A.run", "arrows": [arrow], "before": before}]}
@@ -417,7 +418,7 @@ def test_retargeted_arrow_reaches_the_built_model_and_the_mermaid_text(tmp_path:
 def test_retargeted_is_the_only_mark_that_carries_a_pair_and_serializes_flat() -> None:
     before, after = [_arrow("A", "claude", "price")], [_arrow("A", "pricing", "price")]
     mark_differences(before, after)
-    assert before[0]["mark"] == Retargeted("pricing", PairedSide.AFTER)
+    assert before[0]["mark"] == Retargeted("pricing", TreeSide.AFTER)
     plain = [_arrow("A", "B", "x")]
     mark_differences(plain, [])
     assert plain[0]["mark"] is PlainMark.REMOVED

@@ -465,9 +465,17 @@ def test_refresh_feature_compares_gates(project: Path, monkeypatch: pytest.Monke
         *,
         renames: Mapping[str, str],
         base_root: Path | None = None,
+        unreadable_segments: Sequence[Segment] = (),
     ) -> Gates:
         gates = real(
-            directory, root, paths, segments, catalog, base_root=base_root, renames=renames
+            directory,
+            root,
+            paths,
+            segments,
+            catalog,
+            base_root=base_root,
+            renames=renames,
+            unreadable_segments=unreadable_segments,
         )
         return Gates(gates.violations, (*gates.warnings, EXTRA_WARNING))
 

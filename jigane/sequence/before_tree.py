@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass
 
+from jigane.gates.tree_side import TreeSide
 from jigane.git.tree_files import walk_tree_files
 from jigane.languages.base import SequenceAdapter
 from jigane.reviews.lifecycle import Review
 from jigane.sequence.index import Index, Member, build_index
 from jigane.sequence.roots import Key, changed_members
-from jigane.sequence.side import Side
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ def load_before_tree(
     index = build_index(base_root, walk_tree_files(base_root, base_root), adapter)
     # 変更前の集合は、判断の地図の segment の変更前の側（old_path と old_span）から作る
     changed = changed_members(
-        index, review.map_kind.segments, adapter, include_tests=include_tests, side=Side.BEFORE
+        index, review.map_kind.segments, adapter, include_tests=include_tests, side=TreeSide.BEFORE
     )
     collected: dict[str, list[Member]] = {}
     for member in index.callables.values():

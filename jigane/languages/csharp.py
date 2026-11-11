@@ -56,9 +56,12 @@ from jigane.languages.csharp_nodes import (
     LAMBDAS,
     NAMESPACES,
     TYPE_KINDS,
+    declarator_name,
     declared_visibility,
     flatten,
     modifiers,
+    named_declarations,
+    named_declarators,
     namespace_container,
 )
 from jigane.languages.node_text import text_of
@@ -102,11 +105,9 @@ def _name(node: Node) -> str:
 
 
 def _identifier(node: Node) -> Node:
-    named = node.child_by_field_name("name")
-    if named is not None:
-        return named
-    # コンストラクタと列挙子は name フィールドを持たない
-    return next(child for child in node.children if child.type == "identifier")
+    # コンストラクタ、デストラクタ、列挙子は name フィールドを持たないが、識別子の子は必ず持つ
+    # （欠けた識別子は tree-sitter が MISSING の節点で補う）
+    return required(declarator_name(node))
 
 
 def _opener_and_closer(node: Node) -> tuple[Node, Node] | None:
@@ -116,6 +117,7 @@ def _opener_and_closer(node: Node) -> tuple[Node, Node] | None:
             opener = child.children[0]
             return opener, child
         if child.type == "arrow_expression_clause":
+            # arrow_expression_clause は => を必ず持つ（欠ければ MISSING の節点で補われる）
             arrow = next(c for c in child.children if c.type == "=>")
             return arrow, node
         if child.type == "accessor_list":
@@ -283,10 +285,8 @@ class _CSharpRules(calls_core.RuleDefaults):
         variables: list[LocalVariable] = []
         if node.type == "variable_declaration":
             type_node = node.child_by_field_name("type")
-            for declarator in node.children:
-                if declarator.type != "variable_declarator":
-                    continue
-                name = text_of(declarator.child_by_field_name("name") or declarator.children[0])
+            for declarator, declared_name in named_declarations(node):
+                name = text_of(declared_name)
                 init = declarator.named_children[-1] if declarator.named_child_count > 1 else None
                 variables.append(LocalVariable(name, _annotation(type_node), init))
         elif node.type in ("foreach_statement", "declaration_expression", "declaration_pattern"):
@@ -535,12 +535,9 @@ class CSharpAdapter:
                 )
             )
         elif node.type == "field_declaration":
-            declaration = next(c for c in node.children if c.type == "variable_declaration")
-            type_node = declaration.child_by_field_name("type")
-            for declarator in declaration.children:
-                if declarator.type == "variable_declarator":
-                    name_node = declarator.child_by_field_name("name") or declarator.children[0]
-                    result.append(make(text_of(name_node), "field", type_node, (), None))
+            for declaration, name_node in named_declarators(node):
+                type_node = declaration.child_by_field_name("type")
+                result.append(make(text_of(name_node), "field", type_node, (), None))
         else:
             # 演算子、インデクサ、イベント、列挙子など。受け手の解決の対象にしない
             return
@@ -631,13 +628,10 @@ class CSharpAdapter:
                 )
             elif node.type in _FIELDS:
                 visibility = declared_visibility(node, default).narrower(cap)
-                declaration = next(c for c in node.children if c.type == "variable_declaration")
-                for declarator in declaration.children:
-                    if declarator.type != "variable_declarator":
-                        continue
+                for _, name_node in named_declarators(node):
                     result.append(
                         Declaration(
-                            f"{prefix}{text_of(_identifier(declarator))}",
+                            f"{prefix}{text_of(name_node)}",
                             "variable",
                             visibility,
                             span_of(node),

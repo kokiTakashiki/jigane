@@ -291,3 +291,9 @@ def test_protocol_requirements_and_enum_cases_follow_container_level() -> None:
     found = declarations("public protocol P { func m() }\nenum E { case a }\n")
     assert found["P.m()"].visibility is Visibility.PUBLIC
     assert found["E.a"].visibility is Visibility.INTERNAL
+
+
+def test_declarations_skip_a_protocol_function_without_func_keyword() -> None:
+    # 構文エラーで func を欠いた protocol_function_declaration があっても、読み取りを続ける
+    found = declarations("protocol P { func p(x: Int{ }\n")
+    assert {"P", "P.p(x:)"} <= set(found)

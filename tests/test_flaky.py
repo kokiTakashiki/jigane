@@ -215,7 +215,13 @@ def test_only_test_files_are_scanned(tmp_path: Path) -> None:
     (tmp_path / "tests" / "test_a.py").write_text(code, encoding="utf-8")
     (tmp_path / "out").mkdir()
     gates = update_gates(
-        tmp_path / "out", tmp_path, ["src/a.py", "tests/test_a.py"], [], CATALOG, renames={}
+        tmp_path / "out",
+        tmp_path,
+        ["src/a.py", "tests/test_a.py"],
+        [],
+        CATALOG,
+        renames={},
+        unreadable_segments=(),
     )
     assert [v.path for v in gates.violations] == ["tests/test_a.py"]
     item = next(i for i in CATALOG if i.id == "FLK-ASYNC-WAIT")
@@ -261,17 +267,26 @@ def test_numbers_are_never_reused(tmp_path: Path) -> None:
     out = tmp_path / "out"
     out.mkdir()
     test.write_text("import time\n\n\ndef test_a():\n    time.sleep(1)\n", encoding="utf-8")
-    first = update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    first = update_gates(
+        out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+    )
     assert first.violations[0].number == "G1"
     test.write_text("def test_a():\n    pass\n", encoding="utf-8")
     assert (
-        update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}).violations == ()
+        update_gates(
+            out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+        ).violations
+        == ()
     )
     test.write_text("import time\n\n\ndef test_a():\n    time.sleep(5)\n", encoding="utf-8")
-    again = update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    again = update_gates(
+        out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+    )
     assert again.violations[0].number == "G2"
     test.write_text("import time\n\n\ndef test_a():\n    time.sleep(1)\n", encoding="utf-8")
-    back = update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    back = update_gates(
+        out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+    )
     assert back.violations[0].number == "G1"
 
 
@@ -298,10 +313,14 @@ def test_reclassified_detection_gets_number_of_new_class(
     out = tmp_path / "out"
     out.mkdir()
     monkeypatch.setattr(gates_module, "detect", fake_detect(undetermined=False))
-    first = update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    first = update_gates(
+        out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+    )
     assert [v.number for v in first.violations] == ["G1"]
     monkeypatch.setattr(gates_module, "detect", fake_detect(undetermined=True))
-    second = update_gates(out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    second = update_gates(
+        out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
+    )
     assert second.violations == ()
     assert [w.number for w in second.warnings] == ["W1"]
 
@@ -364,7 +383,14 @@ def test_diff_mode_ignores_unchanged_lines_between_changes(tmp_path: Path) -> No
     out = tmp_path / "out"
     out.mkdir()
     gates = update_gates(
-        out, head, ["tests/test_a.py"], [segment], CATALOG, base_root=base, renames={}
+        out,
+        head,
+        ["tests/test_a.py"],
+        [segment],
+        CATALOG,
+        base_root=base,
+        renames={},
+        unreadable_segments=(),
     )
     assert [v.line for v in gates.violations] == [9]
 
@@ -390,7 +416,7 @@ def test_symlink_pointing_outside_tree_is_neither_read_nor_reported(tmp_path: Pa
     out = tmp_path / "out"
     out.mkdir()
     paths = ["tests/test_link.py", "tests/test_dir_link/test_secret.py"]
-    gates = update_gates(out, tree, paths, [], CATALOG, renames={})
+    gates = update_gates(out, tree, paths, [], CATALOG, renames={}, unreadable_segments=())
     assert gates == Gates()
     assert gates_module._read_lines(tree, "tests/test_link.py") is None
     assert gates_module._read_lines(tree, "tests/test_dir_link/test_secret.py") is None
@@ -437,7 +463,15 @@ def test_gate_entries_carry_the_explanation_not_only_the_id(tmp_path: Path) -> N
         "    x = 1  # jigane: allow-flaky FLK-NOPE -- x\n"
     )
     (tmp_path / "tests" / "test_a.py").write_text(code, encoding="utf-8")
-    gates = update_gates(tmp_path / "out", tmp_path, ["tests/test_a.py"], [], CATALOG, renames={})
+    gates = update_gates(
+        tmp_path / "out",
+        tmp_path,
+        ["tests/test_a.py"],
+        [],
+        CATALOG,
+        renames={},
+        unreadable_segments=(),
+    )
     by_id = {v.id: v for v in gates.violations}
     item = next(i for i in CATALOG if i.id == "FLK-ASYNC-WAIT")
     assert by_id["FLK-ASYNC-WAIT"].explanation == item.explanation.to_json()

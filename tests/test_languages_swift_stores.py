@@ -1,5 +1,6 @@
 import pytest
 
+from jigane.languages import swift_stores
 from jigane.languages.base import StoreAccess, StoreAccessReader, StoreFormat, StoreRole
 from jigane.languages.swift import SwiftAdapter
 
@@ -177,6 +178,28 @@ def test_vocabulary_of_a_file_that_fails_midway_is_not_kept(
     use = "struct S { func f() { _ = UserDefaults.standard.string(forKey: Keys.token) } }\n"
     found = _accesses(keys=keys, use=use)
     assert found["S.f"].sides[0].keys == frozenset()
+
+
+def test_accesses_of_a_file_that_fails_midway_are_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = swift_stores._side
+
+    def fail_on_second_function(role: StoreRole, function: str, *rest: object) -> object:
+        if function == "S.g":
+            raise ValueError
+        return original(role, function, *rest)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(swift_stores, "_side", fail_on_second_function)
+    broken = """
+struct S {
+    func f() { UserDefaults.standard.set(1, forKey: "a") }
+    func g() { UserDefaults.standard.set(1, forKey: "b") }
+}
+"""
+    healthy = 'struct T { func h() { UserDefaults.standard.set(1, forKey: "c") } }\n'
+    found = _accesses(broken=broken, healthy=healthy)
+    assert set(found) == {"T.h"}
 
 
 CODABLE_SOURCE = """
