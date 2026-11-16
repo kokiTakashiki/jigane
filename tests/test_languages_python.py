@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 
 from jigane.languages.base import (
-    Branch,
-    BranchArm,
     Declaration,
-    Return,
+    FlowBranch,
+    FlowBranchArm,
+    FlowReturn,
     Span,
     Visibility,
     parse,
@@ -143,7 +143,7 @@ def test_python_visibility_has_no_internal_level() -> None:
     assert found["_b"].visibility is Visibility.FILE
 
 
-def test_discriminator_branches_nest_elif_and_else() -> None:
+def test_discriminator_flow_steps_nest_elif_and_else() -> None:
     source = (
         b"def f(x):\n"
         b"    if x:\n"
@@ -153,20 +153,23 @@ def test_discriminator_branches_nest_elif_and_else() -> None:
         b"    else:\n"
         b"        return 1\n"
     )
-    body = adapter.body_of(parse(adapter, source).root_node.children[0])
+    body = adapter.body_node_of(parse(adapter, source).root_node.children[0])
     assert body is not None
-    steps = adapter.discriminator_branches(body, source)
+    steps = adapter.discriminator_flow_steps(body, source)
     assert steps == [
-        Branch(
+        FlowBranch(
             "x",
             (
-                BranchArm("yes", (Return("K.A"),)),
-                BranchArm(
+                FlowBranchArm("yes", (FlowReturn("K.A"),)),
+                FlowBranchArm(
                     "no",
                     (
-                        Branch(
+                        FlowBranch(
                             "y",
-                            (BranchArm("yes", (Return(None),)), BranchArm("no", (Return(None),))),
+                            (
+                                FlowBranchArm("yes", (FlowReturn(None),)),
+                                FlowBranchArm("no", (FlowReturn(None),)),
+                            ),
                             None,
                         ),
                     ),

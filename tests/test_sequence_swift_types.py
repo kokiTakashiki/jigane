@@ -1,7 +1,7 @@
 import pytest
 from tree_sitter import Node
 
-from jigane.languages.base import CallSite, Creation, parse
+from jigane.languages.base import CallSite, CreationReceiver, parse
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.python import PythonAdapter
 from jigane.languages.swift import SwiftAdapter
@@ -54,6 +54,6 @@ def test_generic_construction_is_a_creation_site() -> None:
     sites = [s for s in adapter.call_sites(body, b"") if isinstance(s, CallSite)]
     assert [(s.name, s.is_creation) for s in sites] == [("Array<Int>", True), ("Box<Foo>", True)]
     assert sites[1].arguments[0].name == "value"
-    kind = adapter.receiver_of(sites[0].node)
-    assert isinstance(kind, Creation)
+    kind = adapter.receiver_kind_of(sites[0].node)
+    assert isinstance(kind, CreationReceiver)
     assert kind.type_text == "Array<Int>"

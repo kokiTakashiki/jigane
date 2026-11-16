@@ -1,12 +1,11 @@
 """レビューボットのインラインのコメントと、指摘への対応の判定。"""
 
-import copy
 import difflib
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jigane.git import process
 from jigane.git.command_line import GitSubcommand, build_git_command
@@ -16,10 +15,11 @@ from jigane.judgment_map.classification import BotTouch
 from jigane.preconditions.required import required
 from jigane.pull_request_context import gh
 from jigane.storage.review_error import ReviewError
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
+from jigane.text.json_input import loads_bounded
 
 BOT_COMMENTS_FILE = "bot_comments.json"
-# bot_comments.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
+# bot_comments.json の形の版。保存物の形を変えたら一つ上げる
 BOT_COMMENTS_FORMAT = 3
 BODY_CHAR_LIMIT = 2000
 # 統一形式の差分の文脈の行数。GitHub がコメントと一緒に見せる範囲でもある
@@ -112,35 +112,13 @@ class StoredBotComments:
 def dump_bot_comments(
     analysis: BotAnalysis, region_keys: dict[int, list[str]] | None = None
 ) -> dict[str, Any]:
-    """bot_comments.json へ書く境の一か所。最上位に今の版を刻む。移した結果は書き戻さない。"""
+    """bot_comments.json へ書く境の一か所。最上位に今の版を刻む。"""
     return {"format": BOT_COMMENTS_FORMAT, **analysis.to_dict(region_keys)}
 
 
-def _upgrade_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の bot_comments.json を次の版へ移す。
-
-    版 1 から鍵も値も変わっていない。版の刻印だけが増えたので、移すものは無い。
-    """
-    return copy.deepcopy(dict(raw))
-
-
-def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の bot_comments.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 判定できなかった件数は、読み戻すときに judged の列から数え直す。書いてあった値は読まない
-    upgraded.pop("unavailable", None)
-    return upgraded
-
-
-# 保存された版から次の版への移し。load_bot_comments が BOT_COMMENTS_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2}
-
-
 def load_bot_comments(raw: Mapping[str, Any]) -> StoredBotComments:
-    """bot_comments.json を読む境の一か所。保存された版から今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(
-        BOT_COMMENTS_FILE, raw, current=BOT_COMMENTS_FORMAT, upgrades=_UPGRADES
-    )
+    """bot_comments.json を読む境の一か所。今の版以外は止める。"""
+    stored = require_current_version(BOT_COMMENTS_FILE, raw, current=BOT_COMMENTS_FORMAT)
     try:
         judgments = tuple(
             StoredBotJudgment(
@@ -184,8 +162,17 @@ def fetch_bot_comments(
     owner: str, repo: str, number: int, bots: tuple[str, ...]
 ) -> list[BotComment]:
     output = gh.pull_request_comments(owner, repo, number)
+    try:
+        pages = cast("list[list[dict[str, Any]]]", loads_bounded(output, gh.MAX_RESPONSE_NESTING))
+    except ValueError:
+        # 出力の中身は端末へ出さない。巨大な値や制御文字が混じりうる
+        raise ReviewError(
+            "gh api（PR のコメントの取得）の出力を JSON として読めませんでした。"
+            "構文に誤りがあるか、入れ子が深すぎます。"
+            "gh を新しいバージョンに更新してから、もう一度実行してください。"
+        ) from None
     # --slurp はページごとの配列を、さらに一つの配列に包む
-    raw = [comment for page in json.loads(output) for comment in page]
+    raw = [comment for page in pages for comment in page]
     found: list[BotComment] = []
     for comment in raw:
         if not _is_bot(comment, bots):

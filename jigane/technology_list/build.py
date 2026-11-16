@@ -8,7 +8,7 @@ from typing import Any
 
 from jigane.git.tree_files import read_tree_bytes, walk_tree_files
 from jigane.languages import registry
-from jigane.languages.base import ImportAdapter, parse
+from jigane.languages.base import ImportedModuleExtractor, parse
 from jigane.reviews.lifecycle import Review
 from jigane.technology_list import bridges, manifests, platforms, repository_modules, tables
 from jigane.technology_list.changes import (
@@ -40,17 +40,19 @@ def _usages(root: Path, paths: Iterable[str]) -> _Usages:
     usages: _Usages = {}
     for path in paths:
         adapter = registry.adapter_for(path)
-        if not isinstance(adapter, ImportAdapter):
+        if not isinstance(adapter, ImportedModuleExtractor):
             continue
         source = read_tree_bytes(root, path)
         if source is None:
             continue
         line_count = len(source.decode("utf-8", errors="replace").splitlines())
-        for item in adapter.imports(parse(adapter, source).root_node, source):
+        for item in adapter.imported_modules(parse(adapter, source).root_node, source):
             if item.module.startswith("."):
                 # 相対の import は同じリポジトリの中を指すので、技術の表に出さない
                 continue
-            usage = usages.setdefault((adapter.name, adapter.technology_of(item.module)), _Usage())
+            usage = usages.setdefault(
+                (adapter.name, adapter.technology_name_of(item.module)), _Usage()
+            )
             usage.lines[path] = line_count
             usage.statements[path] += 1
     return usages

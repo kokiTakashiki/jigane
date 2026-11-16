@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from dev_launch import run_tool
 from gates_support import write_gates_file
+from review_fakes import current_form_findings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
@@ -70,7 +71,9 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
             }
         ],
     }
-    (created.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (created.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return created
 
 
@@ -262,6 +265,7 @@ def gate_entry(number: str, line: int) -> dict[str, Any]:
         "reason": "",
         "origin": "o",
         "legitimate": "",
+        "detector_note": "",
     }
 
 
@@ -288,7 +292,7 @@ def test_an_allowed_regex_tag_is_shown_with_its_reason_and_not_counted(
         "id": "R6",
         "allowed": "外部の仕様のため",
     }
-    gates = {"format": 2, "violations": [allowed], "warnings": []}
+    gates = {"violations": [allowed], "warnings": []}
     write_gates_file(review.id.directory(), gates)
     pick(review, "F1")
     text = report_text(review, tmp_path, "reply")
@@ -345,7 +349,7 @@ def add_macro_nit(review: Review, number: int, viewpoint: str) -> None:
     nit["severity"] = "nit"
     nit["viewpoint"] = viewpoint
     state["groups"]["macro"].append(nit)
-    path.write_text(json.dumps(state), encoding="utf-8")
+    path.write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
 
 
 def test_picked_discarded_nit_goes_into_the_text(review: Review, tmp_path: Path) -> None:
@@ -367,7 +371,7 @@ def test_picked_discarded_nit_goes_into_the_text(review: Review, tmp_path: Path)
     assert "nit-claim9" not in text
 
 
-def test_show_json_marks_whether_each_finding_goes_into_the_reply(
+def test_show_json_lists_every_finding_without_an_in_reply_field(
     review: Review, capsys: pytest.CaptureFixture[str]
 ) -> None:
     add_macro_nit(review, 7, "discarded")
@@ -377,9 +381,6 @@ def test_show_json_marks_whether_each_finding_goes_into_the_reply(
     capsys.readouterr()
     assert main(["show", str(review.id), "macro", "--json"]) == EXIT_OK
     findings = json.loads(capsys.readouterr().out)["findings"]
-    in_reply = {f["id"]: f["in_reply"] for f in findings}
     # 捨てた候補から写した nit も、ほかの nit と同じに扱う。選んでいなくても除かない
-    assert in_reply["F7"] is True
-    assert in_reply["F8"] is True
-    assert in_reply["F5"] is True
-    assert in_reply["F9"] is True
+    assert {"F5", "F7", "F8", "F9"} <= {f["id"] for f in findings}
+    assert all("in_reply" not in f for f in findings)

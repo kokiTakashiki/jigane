@@ -3,6 +3,7 @@
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from enum import Enum
 
 from tree_sitter import Node
 
@@ -22,11 +23,17 @@ _ASSERT_EQUALS_ARGUMENT_COUNT = 2
 _EXPECTED_ACTUAL_COUNT = 2
 
 
+class Certainty(Enum):
+    CONFIRMED = "confirmed"
+    # 静的に確かめきれない当たり。警告に下げる
+    UNDETERMINED = "undetermined"
+
+
 @dataclass(frozen=True)
 class Finding:
     """検査が当たったときの付帯。宛先を確かめられない当たりは警告に下げ、理由を持たせる。"""
 
-    undetermined: bool
+    certainty: Certainty
     reason: str
 
 
@@ -42,8 +49,10 @@ def network_result(target: Target) -> bool | Finding:
     if target.verdict is Verdict.LOCAL:
         return False
     if target.verdict is Verdict.REMOTE:
-        return Finding(undetermined=False, reason=f"宛先がローカルの外（{target.host}）")
-    return Finding(undetermined=True, reason=UNDETERMINED_REASON)
+        return Finding(
+            certainty=Certainty.CONFIRMED, reason=f"宛先がローカルの外（{target.host}）"
+        )
+    return Finding(certainty=Certainty.UNDETERMINED, reason=UNDETERMINED_REASON)
 
 
 _MUTATORS = "^(append|extend|update|add|clear|pop|setdefault|insert|remove)$"
@@ -313,7 +322,9 @@ def _inside_scoped_fixation(node: Node) -> bool:
         if current.child_by_field_name("body") == child:
             if current.type == "with_statement":
                 # with_statement は with_clause を必ず持つ（欠ければ MISSING の節点で補われる）
-                clause = next(c for c in current.children if c.type == "with_clause")
+                clause = required(
+                    next((c for c in current.children if c.type == "with_clause"), None)
+                )
                 for item in clause.named_children:
                     value = item.child_by_field_name("value")
                     if value is not None and _is_scoping_call(value):
@@ -336,7 +347,7 @@ def time_without_fixation(node: Node, _source: bytes, context: FileContext, /) -
         return True
     fixation = context.time_fixations[0]
     return Finding(
-        undetermined=True,
+        certainty=Certainty.UNDETERMINED,
         reason=f"{fixation.path}:{fixation.line} の autouse の fixture が時刻を固定しています",
     )
 
@@ -368,7 +379,7 @@ def random_without_seed(node: Node, _source: bytes, context: FileContext, /) -> 
         return True
     fixation = context.seed_fixations[0]
     return Finding(
-        undetermined=True,
+        certainty=Certainty.UNDETERMINED,
         reason=f"{fixation.path}:{fixation.line} の autouse の fixture が乱数の種を固定しています",
     )
 

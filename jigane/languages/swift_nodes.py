@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from tree_sitter import Node
 
+from jigane.languages.file_paths_core import text
 from jigane.languages.value_set_core import plain_string, walk_nodes
 
 # 型を宣言する節点。`extension` も `class_declaration` で表されるので、
@@ -51,7 +52,11 @@ class OperatorName:
 
 @dataclass(frozen=True)
 class InitName:
-    """初期化子の名前（`init` キーワード）。関数の名前ではないので、読めない記述にあたらない。"""
+    """初期化子の名前（`init` キーワード）。関数の名前ではないので、読めない記述にあたらない。
+
+    `swift` と `swift_stores` が、関数と同じ単位の名前として `node` を読む。
+    `OperatorName` と型を分けるのは、`operator_function_nodes` が演算子だけを数えるため。
+    """
 
     node: Node
 
@@ -84,3 +89,38 @@ def operator_function_nodes(root: Node) -> Iterator[Node]:
     for node in walk_nodes(root):
         if node.type in NAMED_FUNCTION_NODES and isinstance(function_name_of(node), OperatorName):
             yield node
+
+
+class SwiftCallSite:
+    """`呼び出し先(引数...)` の呼び出し先の名前、受け手の原文、ラベル付きの引数。
+
+    `swift_file_paths` と `swift_store_*` の三つの道が引く。
+    """
+
+    def __init__(self, node: Node) -> None:
+        self.node = node
+        self.name = ""
+        self.receiver: Node | None = None
+        self.arguments: dict[str, Node] = {}
+        callee = node.children[0] if node.children else None
+        suffix = next((c for c in node.children if c.type == "call_suffix"), None)
+        if callee is None or suffix is None:
+            return
+        if callee.type == "simple_identifier":
+            self.name = text(callee)
+        elif callee.type == "navigation_expression":
+            member = callee.child_by_field_name("suffix")
+            member_name = member.child_by_field_name("suffix") if member is not None else None
+            if member_name is not None:
+                self.name = text(member_name)
+            self.receiver = callee.child_by_field_name("target")
+        for argument in (
+            c for v in suffix.children if v.type == "value_arguments" for c in v.children
+        ):
+            if argument.type != "value_argument":
+                continue
+            label = argument.child_by_field_name("name")
+            value = argument.child_by_field_name("value")
+            # ラベルの無い引数は、どのメソッドも位置で読まないので捨てる
+            if label is not None and value is not None:
+                self.arguments[text(label)] = value

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from review_fakes import current_form_findings
 from test_selection import finding
 
 from jigane.findings.discard import DiscardState, DiscardSummary
@@ -25,7 +26,6 @@ from jigane.reviews import selection as selection_module
 from jigane.reviews.lifecycle import Review, ReviewError, create_feature_review
 from jigane.reviews.selection import (
     NO_RAN_AT,
-    UNKNOWN_ORIGIN,
     Held,
     Objected,
     PastRoundInputs,
@@ -43,6 +43,7 @@ from jigane.reviews.selection import (
     unpick,
 )
 from jigane.storage.locking import review_lock
+from jigane.storage.store_format import OlderFormatError
 
 PAST_RAN_AT = "2026-01-01T00:00:00+00:00"
 NOW_RAN_AT = "2026-02-02T00:00:00+00:00"
@@ -80,7 +81,9 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
         "themes": [],
     }
     directory = created.id.directory()
-    (directory / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (directory / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     write_history(
         directory,
         [
@@ -135,19 +138,10 @@ def test_current_number_without_a_run_record_has_a_null_time(review: Review) -> 
     assert load_selection(directory).verdicts["F4"] == Held(RoundOrigin(GroupId.MICRO, NO_RAN_AT))
 
 
-def test_version_3_selection_keeps_verdicts_and_has_no_origin() -> None:
-    v3 = {
-        "format": 3,
-        "verdicts": {
-            "F1": {"kind": "picked"},
-            "F2": {"kind": "held"},
-            "F3": {"kind": "objected", "reason": "理由"},
-        },
-    }
-    verdicts = parse_selection(v3).verdicts
-    assert verdicts == {"F1": Picked(), "F2": Held(), "F3": Objected("理由")}
-    assert all(v.origin is UNKNOWN_ORIGIN for v in verdicts.values())
-    assert dump_selection(parse_selection(v3))["verdicts"]["F1"]["round"] is None
+def test_version_3_selection_stops_as_an_older_version() -> None:
+    v3 = {"format": 3, "verdicts": {"F1": {"kind": "picked"}}}
+    with pytest.raises(OlderFormatError, match="jigane new"):
+        parse_selection(v3)
 
 
 def test_round_without_recorded_time_maps_to_no_ran_at_and_back_to_null() -> None:
@@ -260,7 +254,9 @@ def test_theme_member_in_two_places_stops(review: Review) -> None:
             "triage": "must_read",
         }
     ]
-    (directory / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (directory / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     write_history(directory, [past_round(PAST_RAN_AT, [stored_finding(directory, 3)])])
     with pytest.raises(ReviewError, match=r"F3.*今の結果.*履歴"):
         pick(directory, ["B1"], reader(review))

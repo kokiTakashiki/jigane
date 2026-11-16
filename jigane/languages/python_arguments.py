@@ -220,21 +220,21 @@ def _argument(
     else:
         is_required = required_text == "True"
     return CommandArgument(
-        command=command,
-        names=names,
+        subcommand_name=command,
+        option_names=names,
         positional=is_positional,
-        dest=original("dest"),
-        default=original("default"),
+        dest_text=original("dest"),
+        default_text=original("default"),
         required_text=required_text,
         required=is_required,
-        help=original("help"),
-        action=original("action"),
-        type=original("type"),
-        choices=original("choices"),
+        help_text=original("help"),
+        action_text=original("action"),
+        type_text=original("type"),
+        choices_text=original("choices"),
         path=path,
         line=call.start_point.row + 1,
-        group=group,
-        exclusive=exclusive,
+        group_variable_name=group,
+        group_exclusive=exclusive,
     )
 
 

@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Any, ClassVar
 
 from jigane.markdown.cells import markdown_table
+from jigane.markdown.fence import fence
 
 DELETED_SIGNATURE_TEXT = "（削除）"
 ADDED_SIGNATURE_TEXT = "（新規）"
@@ -173,7 +174,7 @@ class TreeFigure:
 
     @staticmethod
     def _fenced(panel: Panel, empty_text: str) -> str:
-        return f"```mermaid\n{panel.mermaid}\n```" if panel.mermaid else empty_text
+        return fence(panel.mermaid, "mermaid") if panel.mermaid else empty_text
 
     def text(self) -> str:
         """資料の文。囲みつきのツリー図とファイルの一覧。"""
@@ -250,9 +251,7 @@ class SequenceFigure:
                 lines += [
                     f"{panel.title}",
                     "",
-                    "```mermaid",
-                    panel.mermaid.rstrip("\n"),
-                    "```",
+                    fence(panel.mermaid.rstrip("\n"), "mermaid"),
                     "",
                 ]
             if flow.note is not None:
@@ -282,7 +281,7 @@ class MermaidFigure:
     kind: ClassVar[FigureKind] = FigureKind.MERMAID
 
     def text(self) -> str:
-        blocks = [self.description, *(f"```mermaid\n{p.mermaid}\n```" for p in self.panels)]
+        blocks = [self.description, *(fence(p.mermaid, "mermaid") for p in self.panels)]
         if self.note is not None:
             blocks.append(self.note)
         return "\n\n".join(blocks)
@@ -398,13 +397,10 @@ def _signature_block(entry: SignatureEntry) -> str:
     if isinstance(entry, MovedSignature):
         return (
             f"#### {entry.name}（移した（{entry.old_place} → {entry.new_place}）、"
-            f"シグネチャは同じ）\n\n```\n{entry.text}\n```"
+            f"シグネチャは同じ）\n\n{fence(entry.text)}"
         )
-    return (
-        f"#### {entry.name}（{entry.place}）\n\n```\n"
-        f"- 変更前: {entry.old_text()}\n"
-        f"+ 変更後: {entry.new_text()}\n```"
-    )
+    changes = f"- 変更前: {entry.old_text()}\n+ 変更後: {entry.new_text()}"
+    return f"#### {entry.name}（{entry.place}）\n\n{fence(changes)}"
 
 
 @dataclass(frozen=True)

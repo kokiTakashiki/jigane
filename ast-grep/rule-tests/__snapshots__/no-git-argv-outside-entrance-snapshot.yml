@@ -1,0 +1,52 @@
+id: no-git-argv-outside-entrance
+snapshots:
+  "run_command((\"git\", \"-C\", d, \"log\"))":
+    labels:
+    - source: "\"git\""
+      style: primary
+      start: 13
+      end: 18
+    - source: ("git", "-C", d, "log")
+      style: secondary
+      start: 12
+      end: 35
+  "run_command([\"git\", \"status\"])":
+    labels:
+    - source: "\"git\""
+      style: primary
+      start: 13
+      end: 18
+    - source: "[\"git\", \"status\"]"
+      style: secondary
+      start: 12
+      end: 29
+  "run_command([\"git\"] + args)":
+    labels:
+    - source: "\"git\""
+      style: primary
+      start: 13
+      end: 18
+    - source: "[\"git\"]"
+      style: secondary
+      start: 12
+      end: 19
+  "run_command(['git', *args])":
+    labels:
+    - source: "'git'"
+      style: primary
+      start: 13
+      end: 18
+    - source: "['git', *args]"
+      style: secondary
+      start: 12
+      end: 26
+  "run_command([f\"git\", \"status\"])":
+    labels:
+    - source: f"git"
+      style: primary
+      start: 13
+      end: 19
+    - source: "[f\"git\", \"status\"]"
+      style: secondary
+      start: 12
+      end: 30

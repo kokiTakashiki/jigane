@@ -1,4 +1,4 @@
-"""review.json、regions.json、pairs.json の形の版: 読む境で古い版を移し、書く境で今の版を刻む。"""
+"""review.json、regions.json、pairs.json の形の版: 読む境で古い版を止め、書く境で今の版を刻む。"""
 
 import json
 from collections.abc import Callable
@@ -9,7 +9,6 @@ import pytest
 
 from jigane.judgment_map.classification import FilePair
 from jigane.reviews import lifecycle as review_module
-from jigane.reviews import review_formats
 from jigane.reviews.catalog import load_review_at, read_review_at
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.reviews.review_formats import (
@@ -24,70 +23,23 @@ from jigane.reviews.review_formats import (
     read_pairs,
 )
 from jigane.storage.review_error import ReviewError
+from jigane.storage.store_format import OlderFormatError
 
 STORE = Path(__file__).parent / "fixtures" / "store"
 
-DECLARATION_V1: dict[str, Any] = {"source": "intent", "intent": "text", "excerpts": []}
-PULL_REQUEST_FIELDS: dict[str, Any] = {
-    "url": "https://example.invalid/pull/1",
-    "number": 1,
-    "title": "title",
-    "linked_issues": [],
-}
-DIFF_FIELDS: dict[str, str] = {
-    "base_sha": "b",
-    "head_sha": "h",
-    "merge_base": "m",
-    "base_tree": "/t",
-}
-
+DECLARATION: dict[str, Any] = {"source": "intent", "intent": "text", "excerpts": []}
 # 版 4 で保存から外した鍵。id や宣言から導けるか、読み口が無い
 DERIVED_REVIEW_KEYS = {"kind", "mode", "is_diff", "is_pull_request", "warnings"}
 
-# 版 1 の各形の最小の辞書。鍵の欠け方が違う順に、ファイル、古い PR、新しい形の PR
-MINIMAL_REVIEW_V1: dict[str, dict[str, Any]] = {
-    "feature": {
-        "id": "owner/repo:sample",
-        "mode": "feature",
-        "created_at": "2026-10-17T09:35:07+00:00",
-        "repository_root": "/r",
-        "paths": ["a.py"],
-        "declaration": DECLARATION_V1,
-        "warnings": ["w"],
-    },
-    "pull_request_with_merged_source": {
-        "id": "owner/repo#1",
-        "mode": "diff",
-        "created_at": "2026-10-17T09:35:07+00:00",
-        "refreshed_at": None,
-        "repository_root": "/r",
-        "paths": ["a.py"],
-        "targets": None,
-        "declaration": DECLARATION_V1,
-        "warnings": [],
-        "pull_request": {**PULL_REQUEST_FIELDS, **DIFF_FIELDS},
-        "background": None,
-    },
-    "pull_request_with_separated_source": {
-        "id": "owner/repo#1",
-        "kind": "pull_request",
-        "mode": "diff",
-        "is_diff": True,
-        "is_pull_request": True,
-        "created_at": "2026-10-17T09:35:07+00:00",
-        "refreshed_at": None,
-        "repository_root": "/r",
-        "paths": ["a.py"],
-        "targets": None,
-        "declaration": {**DECLARATION_V1, "source_label": "label", "warnings": []},
-        "warnings": [],
-        "content_warnings": [],
-        "diff_source": DIFF_FIELDS,
-        "pull_request": PULL_REQUEST_FIELDS,
-        "local_range": None,
-        "design_doc": None,
-        "background": None,
-    },
+# ファイルのレビューの最小の辞書。版は format で足す
+MINIMAL_REVIEW: dict[str, Any] = {
+    "id": "owner/repo:sample",
+    "mode": "feature",
+    "created_at": "2026-10-17T09:35:07+00:00",
+    "repository_root": "/r",
+    "paths": ["a.py"],
+    "declaration": DECLARATION,
+    "warnings": ["w"],
 }
 
 
@@ -99,72 +51,6 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / "README.md").write_text("# Shop\n\nlead\n", encoding="utf-8")
     monkeypatch.chdir(root)
     return root
-
-
-def _written_review_keys(project: Path) -> tuple[set[str], set[str]]:
-    created = create_feature_review(project, ["src"], "payment")
-    written = json.loads((created.id.directory() / "review.json").read_text(encoding="utf-8"))
-    return set(written) - {"format"}, set(written["declaration"])
-
-
-@pytest.mark.parametrize("shape", MINIMAL_REVIEW_V1)
-def test_review_v1_shape_upgrades_to_the_keys_the_current_writer_writes(
-    shape: str, project: Path
-) -> None:
-    upgraded = load_review_meta(MINIMAL_REVIEW_V1[shape])
-    keys, declaration_keys = _written_review_keys(project)
-    assert set(upgraded) == keys
-    assert set(upgraded["declaration"]) == declaration_keys
-
-
-def test_review_upgrade_fills_defaults_and_does_not_touch_the_input() -> None:
-    raw = MINIMAL_REVIEW_V1["feature"]
-    upgraded = review_formats._REVIEW_UPGRADES[1](raw)
-    assert "content_warnings" not in raw
-    assert upgraded["content_warnings"] == ["w"]
-    assert upgraded["declaration"]["warnings"] == []
-    assert upgraded["targets"] is None
-    assert upgraded["refreshed_at"] is None
-
-
-def test_review_upgrade_splits_the_merged_pull_request_value() -> None:
-    upgraded = review_formats._REVIEW_UPGRADES[1](
-        MINIMAL_REVIEW_V1["pull_request_with_merged_source"]
-    )
-    assert upgraded["pull_request"] == PULL_REQUEST_FIELDS
-    assert upgraded["diff_source"] == DIFF_FIELDS
-
-
-def test_review_v2_drops_linked_issues_from_pull_request() -> None:
-    raw = {
-        **MINIMAL_REVIEW_V1["pull_request_with_separated_source"],
-        "format": 2,
-    }
-    upgraded = review_formats._REVIEW_UPGRADES[2](raw)
-    assert upgraded["pull_request"] == {
-        "url": PULL_REQUEST_FIELDS["url"],
-        "number": 1,
-        "title": "title",
-    }
-    # 入力は書き換えない
-    assert "linked_issues" in raw["pull_request"]
-
-
-def test_review_v2_keeps_a_record_without_pull_request() -> None:
-    upgraded = review_formats._REVIEW_UPGRADES[2]({"pull_request": None, "id": "x"})
-    assert upgraded == {"pull_request": None, "id": "x"}
-
-
-def test_review_v1_merged_source_reads_through_to_the_current_version() -> None:
-    raw = MINIMAL_REVIEW_V1["pull_request_with_merged_source"]
-    loaded = review_formats.load_review_meta(raw)
-    assert set(loaded["pull_request"]) == {"url", "number", "title"}
-    assert loaded["diff_source"] == DIFF_FIELDS
-
-
-def test_review_upgrade_keeps_a_separated_pull_request_as_it_is() -> None:
-    raw = MINIMAL_REVIEW_V1["pull_request_with_separated_source"]
-    assert review_formats._REVIEW_UPGRADES[1](raw) == raw
 
 
 def test_review_round_trips_through_the_write_boundary(project: Path) -> None:
@@ -180,16 +66,6 @@ def test_dump_review_puts_the_format_on_the_top_level_only() -> None:
     assert dump_review({"id": "x"}) == {"format": REVIEW_FORMAT, "id": "x"}
 
 
-def test_regions_v1_upgrade_drops_the_unread_judged_key() -> None:
-    raw: dict[str, Any] = {
-        "next_number": 2,
-        "regions": {"k": {"id": "J1", "content_hash": "h", "judged": False, "gone": True}},
-    }
-    upgraded = load_regions(raw)
-    assert upgraded["regions"]["k"] == {"id": "J1", "content_hash": "h", "gone": True}
-    assert "judged" in raw["regions"]["k"]
-
-
 def test_regions_round_trip() -> None:
     state = {"next_number": 2, "regions": {"k": {"id": "J1", "content_hash": "h"}}}
     dumped = dump_regions(state)
@@ -197,19 +73,9 @@ def test_regions_round_trip() -> None:
     assert load_regions(json.loads(json.dumps(dumped))) == state
 
 
-def test_regions_v1_keys_match_the_current_writer() -> None:
-    raw = {"next_number": 1, "regions": {}}
+def test_regions_keys_match_the_current_writer() -> None:
+    raw = {"format": REGIONS_FORMAT, "next_number": 1, "regions": {}}
     assert set(load_regions(raw)) | {"format"} == set(dump_regions(raw))
-
-
-def test_pairs_v1_array_upgrades_to_the_current_shape() -> None:
-    raw = [["a.py", "a.py"], [None, "b.py"], ["c.py", None]]
-    assert read_pairs(raw) == [
-        FilePair("a.py", "a.py"),
-        FilePair(None, "b.py"),
-        FilePair("c.py", None),
-    ]
-    assert review_formats._PAIRS_UPGRADES[1](raw) == {"pairs": raw}
 
 
 def test_pairs_round_trip() -> None:
@@ -223,7 +89,7 @@ def test_pairs_round_trip() -> None:
 @pytest.mark.parametrize(
     "load",
     [
-        lambda version: load_review_meta({**MINIMAL_REVIEW_V1["feature"], "format": version}),
+        lambda version: load_review_meta({**MINIMAL_REVIEW, "format": version}),
         lambda version: load_regions({"format": version, "next_number": 1, "regions": {}}),
         lambda version: read_pairs({"format": version, "pairs": []}),
     ],
@@ -250,47 +116,24 @@ def test_fixtures_exist(name: str) -> None:
     assert list(STORE.glob(f"{name}/*/*/*/*/{name}.json"))
 
 
-@pytest.mark.parametrize("path", sorted(STORE.glob("regions/*/*/*/*/regions.json")), ids=str)
-def test_every_stored_regions_reads_and_is_written_in_the_current_format(path: Path) -> None:
-    state = load_regions(json.loads(path.read_text(encoding="utf-8")))
-    assert dump_regions(state)["format"] == REGIONS_FORMAT
+STORED_LOADERS: dict[str, Callable[[object], object]] = {
+    "review": load_review_meta,
+    "regions": load_regions,
+    "pairs": read_pairs,
+}
 
 
-@pytest.mark.parametrize("path", sorted(STORE.glob("pairs/*/*/*/*/pairs.json")), ids=str)
-def test_every_stored_pairs_reads_and_is_written_in_the_current_format(path: Path) -> None:
-    pairs = read_pairs(json.loads(path.read_text(encoding="utf-8")))
-    assert pairs
-    assert dump_pairs(pairs)["format"] == PAIRS_FORMAT
+STORED_FIXTURES = [
+    (name, path)
+    for name in STORED_LOADERS
+    for path in sorted(STORE.glob(f"{name}/*/*/*/*/{name}.json"))
+]
 
 
-@pytest.mark.parametrize("path", sorted(STORE.glob("review/*/*/*/*/review.json")), ids=str)
-def test_every_stored_review_meta_upgrades_to_the_current_keys(path: Path) -> None:
-    upgraded = load_review_meta(json.loads(path.read_text(encoding="utf-8")))
-    assert {"content_warnings", "diff_source", "design_doc", "refreshed_at"} <= set(upgraded)
-    assert not set(upgraded) & DERIVED_REVIEW_KEYS
-    assert "source_label" not in upgraded["declaration"]
-
-
-def test_review_v3_drops_the_derivable_and_write_only_keys() -> None:
-    raw: dict[str, Any] = {
-        "id": "owner/repo:sample",
-        "kind": "feature",
-        "mode": "feature",
-        "is_diff": False,
-        "is_pull_request": False,
-        "warnings": ["w"],
-        "content_warnings": ["w"],
-        "declaration": {**DECLARATION_V1, "source_label": "x", "warnings": []},
-    }
-    upgraded = review_formats._REVIEW_UPGRADES[3](raw)
-    assert upgraded == {
-        "id": raw["id"],
-        "content_warnings": ["w"],
-        "declaration": {**DECLARATION_V1, "warnings": []},
-    }
-    # 入力は書き換えない
-    assert "kind" in raw
-    assert "source_label" in raw["declaration"]
+@pytest.mark.parametrize(("name", "path"), STORED_FIXTURES, ids=str)
+def test_every_stored_fixture_is_an_older_version_and_stops(name: str, path: Path) -> None:
+    with pytest.raises(OlderFormatError, match="jigane new"):
+        STORED_LOADERS[name](json.loads(path.read_text(encoding="utf-8")))
 
 
 def test_review_is_stored_without_the_derivable_keys_and_printed_with_them(project: Path) -> None:
@@ -303,3 +146,45 @@ def test_review_is_stored_without_the_derivable_keys_and_printed_with_them(proje
     assert printed["declaration"]["source_label"]
     # 保存の鍵は一つ残らず出力にも出る
     assert set(printed) >= set(created.to_stored_dict())
+
+
+def test_newer_review_json_stops_with_the_shared_wording() -> None:
+    future = REVIEW_FORMAT + 1
+    with pytest.raises(ReviewError) as caught:
+        load_review_meta({**MINIMAL_REVIEW, "format": future})
+    message = str(caught.value)
+    assert message.startswith("review.json は、この jigane より新しいバージョンの jigane が作った")
+    assert f"JSON の構造のバージョンは {future} で、" in message
+    assert f"この jigane が読み込めるのは {REVIEW_FORMAT} までです" in message
+    assert "`uv tool upgrade jigane`" in message
+    assert "`pipx upgrade jigane`" in message
+
+
+OLDER_CASES: list[tuple[str, object]] = [
+    *[("review", {**MINIMAL_REVIEW, "format": version}) for version in (1, 2, 3, 4)],
+    ("review", MINIMAL_REVIEW),
+    ("review", {}),
+    ("regions", {"format": 1, "next_number": 1, "regions": {}}),
+    ("regions", {"next_number": 1, "regions": {}}),
+    ("pairs", [["a.py", "a.py"]]),
+    ("pairs", []),
+]
+
+
+@pytest.mark.parametrize(("name", "raw"), OLDER_CASES, ids=str)
+def test_older_versions_stop_with_the_rebuild_hint(name: str, raw: object) -> None:
+    with pytest.raises(OlderFormatError) as caught:
+        STORED_LOADERS[name](raw)
+    message = str(caught.value)
+    assert f"{name}.json" in message
+    assert "`jigane new`" in message
+    assert "引き継がれません" in message
+
+
+def test_newer_and_broken_versions_keep_their_own_wording() -> None:
+    with pytest.raises(ReviewError, match="より新しいバージョン") as newer:
+        load_regions({"format": REGIONS_FORMAT + 1, "next_number": 1, "regions": {}})
+    assert not isinstance(newer.value, OlderFormatError)
+    with pytest.raises(ReviewError, match="整数ではありません") as broken:
+        read_pairs({"format": "2", "pairs": []})
+    assert not isinstance(broken.value, OlderFormatError)

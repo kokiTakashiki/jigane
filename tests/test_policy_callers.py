@@ -12,11 +12,16 @@ from tree_sitter import Node
 
 from jigane.figures.models import FigureKind, TableFigure
 from jigane.languages import registry
-from jigane.languages.base import Declaration, PublicName, PublicNameKind, PublicNameReader
+from jigane.languages.base import (
+    AddedPublicName,
+    AddedPublicNameFinder,
+    Declaration,
+    PublicNameKind,
+)
 from jigane.languages.java import JavaAdapter
 from jigane.languages.python_public_names import added_public_names
 from jigane.reviews.lifecycle import Review
-from jigane.skills import macro, policy_callers
+from jigane.skills import macro, policy_callers, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import (
     REGISTRY,
@@ -37,7 +42,7 @@ PRESENCE = {
 }
 
 
-def _names(before: dict[str, str], after: dict[str, str]) -> dict[str, PublicName]:
+def _names(before: dict[str, str], after: dict[str, str]) -> dict[str, AddedPublicName]:
     found = added_public_names(before, after, set(after))
     return {name.name: name for name in found}
 
@@ -387,9 +392,9 @@ class _FakeReaderAdapter:
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         return [
-            PublicName(f"fake_{path}", PublicNameKind.FUNCTION, path, 1, ())
+            AddedPublicName(f"fake_{path}", PublicNameKind.FUNCTION, path, 1, ())
             for path in changed
             if after[path] != before.get(path)
         ]
@@ -410,11 +415,13 @@ def test_each_reader_adds_its_own_rows_to_a_mixed_change(
 def test_registered_after_regions_and_reaches_prompt_and_diagrams(tmp_path: Path) -> None:
     entry = next(e for e in REGISTRY if e.key == "callers")
     assert entry.slot is FigureSlot.AFTER_REGIONS
-    assert entry.interface is PublicNameReader
+    assert entry.interface is AddedPublicNameFinder
     review = _case("p2-a07", tmp_path)
     placed = next(p for p in diagrams_of(review).figures if p.key == "callers")
     assert placed.to_json()["kind"] == "table"
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert "truncate_slug" in text
 
 

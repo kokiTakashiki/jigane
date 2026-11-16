@@ -53,7 +53,7 @@ def acquire_lock(directory: Path) -> IO[bytes]:
     raise RuntimeError(WIN32_MESSAGE)
 
 
-def run_command(command: list[str]) -> int:
+def run_child(command: list[str]) -> int:
     # 出力は受け止めずそのまま流す
     return subprocess.run(command, check=False).returncode
 
@@ -64,10 +64,10 @@ def main(command: list[str]) -> int:
         return 2
     if sys.platform == "win32":
         # 錠を取らない。理由は import の分岐と acquire_lock の末尾の分岐に書いた
-        return run_command(command)
+        return run_child(command)
     # 開いたままの fd が錠を持つ。子へは close_fds で渡らないので、子だけが残っても錠は放される
     with acquire_lock(lock_directory()):
-        return run_command(command)
+        return run_child(command)
 
 
 if __name__ == "__main__":

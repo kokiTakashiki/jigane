@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from fakes import MacroFake, discovered, settings_for
+from runs_support import write_runs_json
 from test_policy_field_copies import _range_review, _tree
 from test_usage import invocation
 
@@ -92,7 +93,7 @@ def test_usage_shows_a_principle_row(project: Path, capsys: pytest.CaptureFixtur
             "invocations": [invocation("diagram"), invocation("principle", split_index=1)],
         }
     }
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     assert main(["usage", str(review.id), "--csv"]) == EXIT_OK
     rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
     assert PolicyRole.PRINCIPLE.label in [r["role"] for r in rows]

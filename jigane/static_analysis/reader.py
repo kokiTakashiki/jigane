@@ -1,7 +1,6 @@
 """SARIF のファイルを、上限の中で読み、検証して、正規化した指摘にする。"""
 
 import hashlib
-import json
 import os
 import stat
 from collections import Counter
@@ -21,6 +20,7 @@ from jigane.static_analysis.models import (
     StaticFinding,
 )
 from jigane.static_analysis.paths import resolve_uri
+from jigane.text.json_input import JsonTooDeepError, loads_bounded
 from jigane.text.terminal import sanitize_text
 
 _MEGABYTE = 1024 * 1024
@@ -41,6 +41,8 @@ class SarifLimits:
     max_rule_id: int = 200
     max_message: int = 2_000
     max_revision_id: int = 200
+    # 実物の SARIF は浅い（ruff の出力で指摘 7821 件、12 段）。正しい入力を拒まない十分な余裕を取る
+    max_nesting: int = 200
 
 
 DEFAULT_LIMITS = SarifLimits()
@@ -72,7 +74,7 @@ def read_sarif(
     for path in sarif_paths:
         data = _read_capped(path, min(limits.max_file_bytes, remaining))
         remaining -= len(data)
-        log = _parse(path, data)
+        log = _parse(path, data, limits.max_nesting)
         result_count += sum(len(run.results or []) for run in log.runs)
         if result_count > limits.max_findings:
             raise SarifError(
@@ -153,11 +155,13 @@ def _read_capped(path: Path, limit: int) -> bytes:
     return data
 
 
-def _parse(path: Path, data: bytes) -> SarifLog:
+def _parse(path: Path, data: bytes, max_nesting: int) -> SarifLog:
     try:
-        document = json.loads(data)
-    except RecursionError as error:
-        raise SarifError(f"{path} は JSON の入れ子が深すぎて読めません") from error
+        document = loads_bounded(data, max_nesting)
+    except JsonTooDeepError as error:
+        raise SarifError(
+            f"{path} は JSON の入れ子が深すぎて読めません（上限 {error.limit} 段）"
+        ) from error
     except ValueError as error:
         # JSONDecodeError と UnicodeDecodeError は ValueError の下にある
         raise SarifError(f"{path} は JSON として読めません: {error}") from error

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jigane.languages.base import RegexDialect, RegexLiteral, RegexUse
+from jigane.languages.base import RegexDialect, RegexLiteralSite, RegexUse
 from jigane.regex.tags import (
     RULE_DEFINITIONS,
     CountedRegex,
@@ -19,9 +19,14 @@ from jigane.regex.tags import (
 STRENGTH_RULE = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,64}$"
 
 
-def literal(pattern: str, use: RegexUse = RegexUse.COMPILE) -> RegexLiteral:
-    return RegexLiteral(
-        pattern=pattern, dialect=RegexDialect.PYTHON, call="re.x", use=use, path="a.py", line=1
+def literal(pattern: str, use: RegexUse = RegexUse.COMPILE) -> RegexLiteralSite:
+    return RegexLiteralSite(
+        pattern=pattern,
+        dialect=RegexDialect.PYTHON,
+        call_name="re.x",
+        use=use,
+        path="a.py",
+        line=1,
     )
 
 
@@ -147,10 +152,10 @@ def test_rule_definitions_cover_every_rule() -> None:
 
 def test_r6_skips_test_file() -> None:
     for path, expected in (("a.py", True), ("tests/test_a.py", False), ("src/test_a.py", False)):
-        plain = RegexLiteral(
+        plain = RegexLiteralSite(
             pattern="foo",
             dialect=RegexDialect.PYTHON,
-            call="re.sub",
+            call_name="re.sub",
             use=RegexUse.REPLACE,
             path=path,
             line=1,

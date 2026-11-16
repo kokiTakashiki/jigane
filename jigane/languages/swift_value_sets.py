@@ -5,7 +5,7 @@
 - 配列と集合のリテラル（`["a", "b", "c"]`。集合も同じ記法で書く）
 - 生の値が `String` の列挙型で、すべての case が文字列の値を持つもの（`case a = "v"`）
 
-区別（`ValueSet.kind`）は、
+区別（`StringLiteralSet.definition_kind`）は、
 宣言の名前を取り出せた並びを名前に束ねた定義（NAMED）、
 名前が取れず、
 並びが `let`/`var` の宣言にも代入にも含まれない並びを名前の無いリテラル（LITERAL）、
@@ -21,7 +21,7 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import ValueSet
+from jigane.languages.base import StringLiteralSet
 from jigane.languages.swift_nodes import string_literal
 from jigane.languages.value_set_core import (
     field_text,
@@ -89,6 +89,6 @@ def _found(root: Node) -> Iterator[tuple[frozenset[str], int, str | None, bool]]
             )
 
 
-def value_sets_of(root: Node, path: str) -> list[ValueSet]:
+def value_sets_of(root: Node, path: str) -> list[StringLiteralSet]:
     """ファイルの値の組を、定義の行の順に返す。"""
     return ordered_value_sets(_found(root), path)

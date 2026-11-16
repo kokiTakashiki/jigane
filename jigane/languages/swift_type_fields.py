@@ -8,7 +8,7 @@
 
 from tree_sitter import Node
 
-from jigane.languages.base import TypeFields
+from jigane.languages.base import TypeFieldNames
 from jigane.languages.swift_nodes import TYPE_KEYWORDS
 
 _BODIES = frozenset({"class_body", "enum_class_body"})
@@ -52,9 +52,9 @@ def _field_names(body: Node) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
-def type_fields_of(root: Node, path: str) -> list[TypeFields]:
+def type_fields_of(root: Node, path: str) -> list[TypeFieldNames]:
     """ファイルのトップレベルの型を、文書順に返す。"""
-    found: list[TypeFields] = []
+    found: list[TypeFieldNames] = []
     for node in root.children:
         if node.type != "class_declaration":
             continue
@@ -68,5 +68,5 @@ def type_fields_of(root: Node, path: str) -> list[TypeFields]:
         fields = _field_names(body)
         if fields:
             line = node.start_point.row + 1
-            found.append(TypeFields((name.text or b"").decode(), path, line, fields))
+            found.append(TypeFieldNames((name.text or b"").decode(), path, line, fields))
     return found

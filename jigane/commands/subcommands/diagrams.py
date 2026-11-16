@@ -14,6 +14,7 @@ from jigane.figures.models import (
     TableFigure,
     TreeFigure,
 )
+from jigane.markdown.fence import fence
 from jigane.reviews.catalog import load_review
 from jigane.reviews.resolution import resolve_review
 from jigane.skills.policy_figures import PlacedFigure, diagrams_of
@@ -29,7 +30,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
 
 
 def _fenced(source: object) -> str:
-    return f"```mermaid\n{str(source).rstrip()}\n```"
+    return fence(str(source).rstrip(), "mermaid")
 
 
 def _mermaid_blocks(title: str, figure: MermaidFigure) -> list[str]:

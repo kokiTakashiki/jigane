@@ -15,6 +15,6 @@
 
 読むサブパッケージ：なし
 
-読まれるサブパッケージ：`flaky`、`judgment_map`、`languages`、`policy_materials`、`pull_request_context`、`sequence`、`skills`
+読まれるサブパッケージ：`findings`、`flaky`、`judgment_map`、`languages`、`llm_runs`、`policy_materials`、`pull_request_context`、`sequence`、`skills`
 
 <!-- END GENERATED: dependencies -->

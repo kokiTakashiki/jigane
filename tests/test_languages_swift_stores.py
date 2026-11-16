@@ -1,7 +1,8 @@
 import pytest
+from tree_sitter import Node
 
-from jigane.languages import swift_stores
-from jigane.languages.base import StoreAccess, StoreAccessReader, StoreFormat, StoreRole
+from jigane.languages import swift_nodes, swift_stores
+from jigane.languages.base import StoreAccess, StoreAccessExtractor, StoreFormat, StoreRole
 from jigane.languages.swift import SwiftAdapter
 
 adapter = SwiftAdapter()
@@ -9,11 +10,11 @@ adapter = SwiftAdapter()
 
 def _accesses(**sources: str) -> dict[str, StoreAccess]:
     files = {f"{name}.swift": text for name, text in sources.items()}
-    return {a.sides[0].function: a for a in adapter.store_accesses(files)}
+    return {a.sides[0].function_qualified_name: a for a in adapter.store_accesses(files)}
 
 
 def test_adapter_satisfies_store_access_reader() -> None:
-    assert isinstance(adapter, StoreAccessReader)
+    assert isinstance(adapter, StoreAccessExtractor)
 
 
 def test_set_and_string_for_key_are_the_write_and_read_sides() -> None:
@@ -29,8 +30,8 @@ struct Settings {
 """
     found = _accesses(s=source)
     save = found["Settings.save"]
-    assert save.names == frozenset({"UserDefaults"})
-    assert [(s.role, s.keys, s.kind) for s in save.sides] == [
+    assert save.file_names == frozenset({"UserDefaults"})
+    assert [(s.role, s.keys, s.format) for s in save.sides] == [
         (StoreRole.WRITE, frozenset({"token"}), StoreFormat.CUSTOM)
     ]
     assert found["Settings.load"].sides[0].role is StoreRole.READ
@@ -60,7 +61,7 @@ struct Store {
 """
     side = _accesses(s=source)["Store.f"].sides[0]
     assert side.keys == frozenset({"token-value", "own-value", "renamed-value", "plain"})
-    assert side.labels == frozenset({"Keys", "Store", "Key"})
+    assert side.key_vocabulary_names == frozenset({"Keys", "Store", "Key"})
 
 
 def test_unresolved_key_is_not_a_key_but_the_side_stays() -> None:
@@ -244,18 +245,18 @@ struct Store {
 def test_encode_and_decode_are_json_sides_keyed_by_the_type_fields() -> None:
     found = _accesses(s=CODABLE_SOURCE)
     save = found["Store.save"]
-    assert save.names == frozenset({"Settings の JSON"})
+    assert save.file_names == frozenset({"Settings の JSON"})
     (write,) = save.sides
-    assert (write.role, write.kind, write.keys, write.types) == (
+    assert (write.role, write.format, write.keys, write.created_type_names) == (
         StoreRole.WRITE,
         StoreFormat.JSON,
         frozenset({"theme", "size"}),
         frozenset(),
     )
     load = found["Store.load"]
-    assert load.names == frozenset({"Settings の JSON"})
+    assert load.file_names == frozenset({"Settings の JSON"})
     (read,) = load.sides
-    assert (read.role, read.kind, read.keys, read.types) == (
+    assert (read.role, read.format, read.keys, read.created_type_names) == (
         StoreRole.READ,
         StoreFormat.JSON,
         frozenset({"theme", "size"}),
@@ -264,7 +265,9 @@ def test_encode_and_decode_are_json_sides_keyed_by_the_type_fields() -> None:
 
 
 def test_local_variable_annotation_gives_the_encoded_type() -> None:
-    assert _accesses(s=CODABLE_SOURCE)["Store.saveLocal"].names == frozenset({"Settings の JSON"})
+    assert _accesses(s=CODABLE_SOURCE)["Store.saveLocal"].file_names == frozenset(
+        {"Settings の JSON"}
+    )
 
 
 def test_encode_without_a_type_annotation_has_no_write_side() -> None:
@@ -274,13 +277,13 @@ def test_encode_without_a_type_annotation_has_no_write_side() -> None:
 def test_file_name_does_not_change_the_store_name() -> None:
     # save だけがファイルの名前を書くが、名前は型から決まる
     found = _accesses(s=CODABLE_SOURCE)
-    assert found["Store.save"].names == found["Store.load"].names
+    assert found["Store.save"].file_names == found["Store.load"].file_names
 
 
 def test_non_codable_or_unknown_type_has_empty_keys() -> None:
     found = _accesses(s=CODABLE_SOURCE)
-    assert found["Store.plain"].names == frozenset({"Plain の JSON"})
-    assert found["Store.unknown"].names == frozenset({"Other の JSON"})
+    assert found["Store.plain"].file_names == frozenset({"Plain の JSON"})
+    assert found["Store.unknown"].file_names == frozenset({"Other の JSON"})
     assert found["Store.plain"].sides[0].keys == frozenset()
     assert found["Store.unknown"].sides[0].keys == frozenset()
 
@@ -301,9 +304,9 @@ def test_one_function_touching_two_stores_does_not_mix_keys() -> None:
     found = [
         a
         for a in adapter.store_accesses({"s.swift": CODABLE_SOURCE})
-        if a.sides[0].function == "Store.mixed"
+        if a.sides[0].function_qualified_name == "Store.mixed"
     ]
-    by_name = {next(iter(a.names)): a.sides[0].keys for a in found}
+    by_name = {next(iter(a.file_names)): a.sides[0].keys for a in found}
     assert by_name == {
         "UserDefaults": frozenset({"token"}),
         "Settings の JSON": frozenset({"theme", "size"}),
@@ -361,8 +364,8 @@ struct Vault {
 def test_keychain_add_is_the_write_side_and_copy_matching_the_read_side() -> None:
     found = _accesses(s=KEYCHAIN_SOURCE)
     add = found["Vault.add"]
-    assert add.names == frozenset({"Keychain"})
-    assert [(s.role, s.keys, s.kind) for s in add.sides] == [
+    assert add.file_names == frozenset({"Keychain"})
+    assert [(s.role, s.keys, s.format) for s in add.sides] == [
         (StoreRole.WRITE, frozenset({"literal-name"}), StoreFormat.CUSTOM)
     ]
     read = found["Vault.read"]
@@ -391,7 +394,7 @@ def test_keychain_update_and_delete_are_write_sides_and_update_reads_only_the_qu
 
 def test_keychain_service_does_not_change_the_store_name() -> None:
     found = _accesses(s=KEYCHAIN_SOURCE)
-    assert found["Vault.add"].names == found["Vault.withoutService"].names
+    assert found["Vault.add"].file_names == found["Vault.withoutService"].file_names
     assert found["Vault.add"].sides[0].keys == found["Vault.withoutService"].sides[0].keys
 
 
@@ -415,10 +418,51 @@ def test_keychain_and_user_defaults_in_one_function_do_not_mix_keys() -> None:
     found = [
         a
         for a in adapter.store_accesses({"s.swift": KEYCHAIN_SOURCE})
-        if a.sides[0].function == "Vault.mixed"
+        if a.sides[0].function_qualified_name == "Vault.mixed"
     ]
-    by_name = {next(iter(a.names)): a.sides[0].keys for a in found}
+    by_name = {next(iter(a.file_names)): a.sides[0].keys for a in found}
     assert by_name == {
         "UserDefaults": frozenset({"defaults-key"}),
         "Keychain": frozenset({"keychain-key"}),
     }
+
+
+def test_operator_function_is_a_store_access_unit_named_by_its_operator() -> None:
+    # 関数名を name フィールドでなく function_name_of で引いても、演算子関数は同じ名前の単位になる
+    source = (
+        "struct S {\n"
+        "    static func + (l: S, r: S) -> S {\n"
+        '        UserDefaults.standard.set(1, forKey: "k"); return l\n'
+        "    }\n"
+        "}\n"
+        'func - (a: Int) { UserDefaults.standard.set(1, forKey: "z") }\n'
+    )
+    found = _accesses(s=source)
+    assert {n: [(s.role, s.keys) for s in a.sides] for n, a in found.items()} == {
+        "S.+": [(StoreRole.WRITE, frozenset({"k"}))],
+        "-": [(StoreRole.WRITE, frozenset({"z"}))],
+    }
+
+
+def test_function_without_a_name_is_not_a_store_access_unit_and_others_remain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # tree-sitter は名前を欠く function_declaration を作らない。
+    # 名前の引き当てだけを差し替えて、名前を欠く分岐に入れる
+    original = swift_nodes.function_name_of
+    nameless = "nameless"
+
+    def lookup(node: Node) -> swift_nodes.FunctionName:
+        found = original(node)
+        return None if found is not None and found.node.text == nameless.encode() else found
+
+    monkeypatch.setattr(swift_stores, "function_name_of", lookup)
+    source = (
+        "struct S {\n"
+        '    func nameless() { UserDefaults.standard.set(1, forKey: "a") }\n'
+        '    func after() { UserDefaults.standard.set(1, forKey: "b") }\n'
+        "}\n"
+        'func top() { UserDefaults.standard.set(1, forKey: "c") }\n'
+    )
+    found = _accesses(s=source)
+    assert set(found) == {"S.after", "top"}

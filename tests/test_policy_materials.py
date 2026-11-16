@@ -15,7 +15,8 @@ from jigane.figures.models import (
 from jigane.policy_materials import changed_files
 from jigane.policy_materials.changed_files import FileChange, MovedAwayFileChange, MovedFileChange
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import macro
+from jigane.reviews.review_formats import PAIRS_FORMAT
+from jigane.skills import macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.storage.store import ReviewKind
 
@@ -66,7 +67,7 @@ def test_tree_draws_every_file_however_many() -> None:
 
 
 def test_tree_section_explains_the_tree_and_its_marks(review: Review) -> None:
-    section = macro.policy_sections(review).figures[changed_files.PrebuiltSection.TREE]
+    section = policy_figures.policy_sections(review).figures[changed_files.PrebuiltSection.TREE]
     intro = TREE_INTRO
     assert section.startswith(f"### 変更のツリー図\n\n{intro}")
     for word in ("ツリー", "追加", "削除", "変更", "移動", "移動元", "描かない", "縮め"):
@@ -281,7 +282,9 @@ def _with_pairs(
     )
     directory = review.id.directory()
     directory.mkdir(parents=True)
-    (directory / "pairs.json").write_text(json.dumps(pairs), encoding="utf-8")
+    (directory / "pairs.json").write_text(
+        json.dumps({"format": PAIRS_FORMAT, "pairs": pairs}), encoding="utf-8"
+    )
     return review
 
 
@@ -328,7 +331,7 @@ def test_folded_tree_is_one_tree_of_the_changed_branches_with_deleted_files(
 
 
 def test_policy_sections_carry_the_folded_tree_for_a_diff_review(tmp_path: Path) -> None:
-    tree = macro.policy_sections(_diff_review(tmp_path)).figures[
+    tree = policy_figures.policy_sections(_diff_review(tmp_path)).figures[
         changed_files.PrebuiltSection.TREE
     ]
     assert tree.count("```mermaid") == 1

@@ -7,6 +7,7 @@ import tree_sitter_language_pack
 from language_plugin_support import Installer, approved, fake_library
 
 from jigane import commands
+from jigane.commands.exit_codes import EXIT_PROCESSING_FAILURE
 from jigane.languages import fetch_main, grammars, queries, registry
 from jigane.languages.base import grammar_target
 from jigane.languages.plugin import GrammarSpec
@@ -351,10 +352,19 @@ def test_builtin_adapter_target_is_the_builtin_record() -> None:
     assert grammar_target(adapter) == grammars.BuiltinGrammar("python")
 
 
-def test_grammar_bound_without_inner_raises_instead_of_recursing() -> None:
-    bound = registry._GrammarBound.__new__(registry._GrammarBound)
-    with pytest.raises(AttributeError):
-        _ = bound.name
+def test_registry_returns_the_adapter_the_plugin_made_and_forgets_it_on_reset(
+    install: Installer, tmp_path: Path, store: Path
+) -> None:
+    fake_library(store, "zig", b"zig-library")
+    _enable_zig(install, tmp_path, _spec())
+    adapter = registry.adapter_for("a.zig")
+    assert adapter is not None
+    # 包みではなく、プラグインが作ったアダプタそのもの
+    assert type(adapter).__name__ == "Adapter"
+    assert grammar_target(adapter) == grammars.DeclaredGrammar("zig", "zig", _spec())
+    registry.set_states(None)
+    # 状態を求め直すと登録を捨てる。登録の無いアダプタは組み込みの記録に落ちる
+    assert grammar_target(adapter) == grammars.BuiltinGrammar("zig")
 
 
 def test_load_queries_checks_the_grammar_by_the_declared_target(
@@ -502,3 +512,222 @@ def test_languages_list_text_shows_a_missing_builtin_as_grammar_absent_with_a_fe
     assert "使えない" not in lines[index]
     assert lines[index + 1] == "    取得: jigane languages fetch python"
     assert not any("理由（" in line for line in lines)
+
+
+_PACK_ERROR = "failed to fetch https://example.invalid/grammars.tar.gz"
+
+
+def _failing_builtin_download(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def download(names: list[str]) -> None:
+        calls.append(list(names))
+        raise tree_sitter_language_pack.DownloadError(_PACK_ERROR)
+
+    monkeypatch.setattr(tree_sitter_language_pack, "download", download)
+    return calls
+
+
+def _assert_download_failure_line(err: str) -> None:
+    lines = err.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("jigane: ")
+    assert "Traceback" not in err
+    assert "組み込みの文法の取得に失敗しました" in lines[0]
+    assert _PACK_ERROR in lines[0]
+    assert "最初から取り直します" in lines[0]
+
+
+@pytest.mark.usefixtures("store")
+def test_builtin_download_error_aborts_fetch_main_with_exit_1(
+    install: Installer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _failing_builtin_download(monkeypatch)
+    _enable_zig(install, tmp_path, _spec())
+    assert fetch_main.main(["fetch"]) == 1
+    _assert_download_failure_line(capsys.readouterr().err)
+    assert calls == [list(grammars.GRAMMARS)]
+
+
+@pytest.mark.usefixtures("store")
+def test_builtin_download_error_aborts_languages_fetch_without_external(
+    install: Installer,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _failing_builtin_download(monkeypatch)
+    _enable_zig(install, tmp_path, _spec())
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == EXIT_PROCESSING_FAILURE
+    captured = capsys.readouterr()
+    assert _PACK_ERROR in captured.err
+    assert "Traceback" not in captured.err
+    assert calls == [list(grammars.GRAMMARS)]
+
+
+def _guarded_download(
+    store: Path, monkeypatch: pytest.MonkeyPatch, contents: dict[str, bytes]
+) -> list[tuple[list[str], dict[str, bool]]]:
+    """取得の関数を偽物にし、呼ばれた時点で各言語の共有ライブラリが置き場にあったかを記録する。"""
+    calls: list[tuple[list[str], dict[str, bool]]] = []
+
+    def download(names: list[str]) -> None:
+        present = {
+            name: grammars.library_path(store, name) is not None for name in [*names, "python"]
+        }
+        calls.append((list(names), present))
+        for name in names:
+            fake_library(store, "c_sharp" if name == "csharp" else name, contents[name])
+
+    monkeypatch.setattr(tree_sitter_language_pack, "download", download)
+    recorded = {name: _digest(_BUILTIN_CONTENTS[name]) for name in grammars.GRAMMARS}
+    monkeypatch.setattr(grammars, "_recorded", lambda: {grammars.platform_key(): recorded})
+    return calls
+
+
+def test_fetch_discards_a_mismatched_builtin_library_before_downloading(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = _guarded_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    fake_library(store, "python", b"tampered")
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == 0
+    assert calls[0][0] == list(grammars.GRAMMARS)
+    # 取得の関数が呼ばれた時点で、合わないファイルは既に消えている
+    assert calls[0][1]["python"] is False
+    assert capsys.readouterr().err == (
+        "文法 python のファイルが記録と合わないため、消して取り直します。\n"
+    )
+    grammars.verify(store, "python")
+
+
+def test_fetch_keeps_a_matching_builtin_library(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls = _guarded_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    fake_library(store, "python", b"python")
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == 0
+    assert calls[0][1]["python"] is True
+    assert capsys.readouterr().err == ""
+
+
+def test_fetch_discards_a_mismatched_external_library_before_downloading(
+    install: Installer,
+    tmp_path: Path,
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _guarded_download(store, monkeypatch, {**_BUILTIN_CONTENTS, "zig": b"zig-library"})
+    fake_library(store, "zig", b"tampered")
+    _enable_zig(install, tmp_path, _spec())
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == 0
+    zig_call = next(call for call in calls if call[0] == ["zig"])
+    assert zig_call[1]["zig"] is False
+    assert "文法 zig のファイルが記録と合わないため、消して取り直します。\n" in (
+        capsys.readouterr().err
+    )
+
+
+def test_fetch_keeps_a_matching_external_library(
+    install: Installer,
+    tmp_path: Path,
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _guarded_download(store, monkeypatch, {**_BUILTIN_CONTENTS, "zig": b"zig-library"})
+    fake_library(store, "zig", b"zig-library")
+    _enable_zig(install, tmp_path, _spec())
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == 0
+    assert next(call for call in calls if call[0] == ["zig"])[1]["zig"] is True
+    assert capsys.readouterr().err == ""
+
+
+def _assert_stopped_outside_store(
+    outside: Path, calls: list[tuple[list[str], dict[str, bool]]], err: str
+) -> None:
+    assert outside.read_bytes() == b"outside-content"
+    assert calls == []
+    assert "文法の置き場の外を指しているため、取得を止めました" in err
+    assert "jigane languages fetch" in err
+
+
+def test_fetch_stops_without_deleting_a_symlink_to_a_file_outside_the_store(
+    store: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _guarded_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    outside = tmp_path / "outside.so"
+    outside.write_bytes(b"outside-content")
+    link = grammars.library_dir(store) / "libtree_sitter_python.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == EXIT_PROCESSING_FAILURE
+    _assert_stopped_outside_store(outside, calls, capsys.readouterr().err)
+    assert link.is_symlink()
+
+
+@pytest.mark.parametrize("shape", ["broken_link", "directory"])
+def test_fetch_stops_without_deleting_an_unreadable_library_entry(
+    store: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    shape: str,
+) -> None:
+    calls = _guarded_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    entry = grammars.library_dir(store) / "libtree_sitter_python.so"
+    entry.parent.mkdir(parents=True)
+    if shape == "broken_link":
+        entry.symlink_to(tmp_path / "missing.so")
+    else:
+        entry.mkdir()
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == EXIT_PROCESSING_FAILURE
+    err = capsys.readouterr().err
+    assert calls == []
+    assert "を読めないため、取得を止めました" in err
+    assert "Traceback" not in err
+    assert entry.is_symlink() if shape == "broken_link" else entry.is_dir()
+
+
+def test_fetch_stops_without_deleting_a_file_reached_through_a_directory_link(
+    store: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _guarded_download(store, monkeypatch, dict(_BUILTIN_CONTENTS))
+    outside_dir = tmp_path / "outside-libs"
+    outside_dir.mkdir()
+    outside = outside_dir / "libtree_sitter_python.so"
+    outside.write_bytes(b"outside-content")
+    libs = grammars.library_dir(store)
+    libs.parent.mkdir(parents=True)
+    libs.symlink_to(outside_dir)
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == EXIT_PROCESSING_FAILURE
+    _assert_stopped_outside_store(outside, calls, capsys.readouterr().err)
+
+
+def test_fetch_stops_without_deleting_an_external_symlink_outside_the_store(
+    install: Installer,
+    tmp_path: Path,
+    store: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = _guarded_download(store, monkeypatch, {**_BUILTIN_CONTENTS, "zig": b"zig-library"})
+    outside = tmp_path / "outside.so"
+    outside.write_bytes(b"outside-content")
+    link = grammars.library_dir(store) / "libtree_sitter_zig.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+    _enable_zig(install, tmp_path, _spec())
+    assert commands.main(["languages", "fetch", "--accept-terms"]) == EXIT_PROCESSING_FAILURE
+    assert outside.read_bytes() == b"outside-content"
+    assert all(call[0] != ["zig"] for call in calls)
+    assert "文法の置き場の外を指しているため、取得を止めました" in capsys.readouterr().err

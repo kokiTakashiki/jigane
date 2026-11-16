@@ -30,7 +30,7 @@ define require_uv
 	echo "  x uv が見つかりません。$(UV_INSTALL_MESSAGE): $(UV_INSTALL_URL)" >&2; exit 1; }
 endef
 
-.PHONY: audit-dependencies changed-tests check check-commit-emails check-repo-settings docs-check flaky-hunt fmt generate help jigane lint preflight quick-check setup test
+.PHONY: audit-dependencies changed-tests check check-commit-emails check-repo-settings debug-errors debug-review-id docs-check flaky-hunt fmt generate help jigane lint preflight quick-check setup test
 
 # 引数を渡さず `make` とだけ打ったときは、使い方と作業の一覧を出す。
 .DEFAULT_GOAL := help
@@ -38,6 +38,8 @@ help:
 	@echo "使い方: make <target> [ARGS=\"...\"]"
 	@echo ""
 	@echo "  jigane               jigane の副コマンドを、呼び出した場所で走らせる"
+	@echo "  debug-errors         jigane が返す失敗の種類を一覧する（引数はそのまま jigane debug errors へ通す。--json で機械が読む形。出力は暫定）"
+	@echo "  debug-review-id      レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）"
 	@echo "  setup                依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）"
 	@echo "  preflight            作業ツリーが setup 済みかを、通信せずに確かめる（.venv と文法の置き場のファイルの有無だけ。setup は走らせない。無ければ一行の案内を出して止まる）"
 	@echo "  lint                 規則・整形・型（Linux・macOS と win32 の両方として読む）・Markdown・依存宣言・使われていないコード・層の向き・外への送り先・依存のライセンス・呼び出しの形（ast-grep）を検査する（直さない）"
@@ -58,12 +60,24 @@ jigane:
 	$(call require_uv)
 	@uv run --locked --directory "$(CURDIR)" --project "$(PROJECT_DIR)" jigane $(ARGS)
 
+# jigane が返す失敗の種類を一覧する（引数はそのまま jigane debug errors へ通す。--json で機械が読む形。出力は暫定）。
+debug-errors:
+	$(call require_uv)
+	@uv run --locked --directory "$(CURDIR)" --project "$(PROJECT_DIR)" jigane debug errors $(ARGS)
+
+# レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）。
+debug-review-id:
+	$(call require_uv)
+	@uv run --locked --directory "$(CURDIR)" --project "$(PROJECT_DIR)" jigane debug review-id $(ARGS)
+
 # 依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）。
 setup:
 	$(call require_uv)
 	uv sync --locked
+	uv run --locked python scripts/grammar_bundle_cache.py seed
 	uv run --locked python -m jigane.languages.fetch_main fetch
 	uv run --locked python scripts/fetch_example_grammars.py
+	uv run --locked python scripts/grammar_bundle_cache.py save
 	uv run --locked python scripts/gate_stamp.py install-hook
 
 # 作業ツリーが setup 済みかを、通信せずに確かめる（.venv と文法の置き場のファイルの有無だけ。setup は走らせない。無ければ一行の案内を出して止まる）。

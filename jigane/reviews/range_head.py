@@ -1,13 +1,14 @@
 """範囲のレビューが git を走らせる場所と、refresh が回を作る先端の選び方。"""
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, assert_never
 
 from jigane.git import process
-from jigane.git.command_line import GitSubcommand, build_git_command
+from jigane.git.command_line import GitSubcommand, build_git_invocation
+from jigane.git.invocation import git_invocation, run_invocation
 from jigane.git.revision import parse_commit_sha, resolve_commit_sha
 from jigane.storage.review_error import ReviewError
 
@@ -15,13 +16,13 @@ _RELATIVE_SUFFIX = re.compile(r"[~^].*$")
 _BRANCH_PREFIX = "refs/heads/"
 
 
-def run_git(root: Path, *arguments: str) -> str:
-    return process.run_command(["git", *arguments], cwd=root)
+def run_git(root: Path, subcommand: GitSubcommand, *arguments: str) -> str:
+    return run_invocation(git_invocation(subcommand.value, arguments, cwd=root))
 
 
-def git_succeeds(root: Path, *arguments: str) -> bool:
+def git_succeeds(root: Path, subcommand: GitSubcommand, *arguments: str) -> bool:
     try:
-        run_git(root, *arguments)
+        run_git(root, subcommand, *arguments)
     except process.CommandError as error:
         if error.missing_executable:
             raise
@@ -88,7 +89,9 @@ UNTRACKED: HeadTracking = None
 def _full_reference_name(root: Path, written: str) -> str:
     """先端の書き方から参照の完全な名前を引く。SHA と解けない書き方は空を返す。"""
     try:
-        output = run_git(root, "rev-parse", "--symbolic-full-name", "--end-of-options", written)
+        output = run_git(
+            root, GitSubcommand.REV_PARSE, "--symbolic-full-name", "--end-of-options", written
+        )
     except process.CommandError as error:
         if error.missing_executable:
             raise
@@ -116,7 +119,7 @@ def head_tracking_of(root: Path, range_text: str, head_sha: str) -> HeadTracking
             TrackedBranchKind.NAMED_BRANCH, full_name.removeprefix(_BRANCH_PREFIX)
         )
     try:
-        current = run_git(root, "symbolic-ref", "--quiet", "HEAD").strip()
+        current = run_git(root, GitSubcommand.SYMBOLIC_REF, "--quiet", "HEAD").strip()
     except process.CommandError as error:
         if error.missing_executable:
             raise
@@ -175,12 +178,16 @@ def select_git_place(working_directory: str, git_directory: str) -> GitPlace | G
     working = Path(working_directory)
     if not working_directory or not working.is_dir():
         unusable = GitPlaceUnusable.NO_WORKING_DIRECTORY
-    elif git_succeeds(working, "rev-parse", "--git-dir"):
+    elif git_succeeds(working, GitSubcommand.REV_PARSE, "--git-dir"):
         return GitPlace(working, GitPlaceKind.WORKING_DIRECTORY)
     else:
         unusable = GitPlaceUnusable.NOT_A_REPOSITORY
     common = Path(git_directory)
-    if git_directory and common.is_dir() and git_succeeds(common, "rev-parse", "--git-dir"):
+    if (
+        git_directory
+        and common.is_dir()
+        and git_succeeds(common, GitSubcommand.REV_PARSE, "--git-dir")
+    ):
         return GitPlace(common, GitPlaceKind.COMMON_DIRECTORY)
     return unusable
 
@@ -295,7 +302,7 @@ class GitProcessQueries:
     def is_ancestor(self, base: str, head: str) -> bool:
         # 保存物から読んだ SHA がオプションとして解釈されないよう、--end-of-options を置く
         return git_succeeds(
-            self.root, "merge-base", "--is-ancestor", "--end-of-options", base, head
+            self.root, GitSubcommand.MERGE_BASE, "--is-ancestor", "--end-of-options", base, head
         )
 
 
@@ -354,18 +361,22 @@ def resolve_range(root: Path, range_text: str) -> ResolvedRange:
     try:
         base = parse_commit_sha("base", base_sha)
         head = parse_commit_sha("head", head_sha)
-        merge_base = process.run_command(
-            build_git_command(GitSubcommand.MERGE_BASE, revisions=[base, head]), cwd=root
+        merge_base = run_invocation(
+            replace(
+                build_git_invocation(GitSubcommand.MERGE_BASE, revisions=[base, head]), cwd=root
+            )
         ).strip()
     except process.CommandError as error:
         raise ReviewError(f"共通の祖先がありません: {range_text}") from error
-    changed = process.run_command(
-        build_git_command(
-            GitSubcommand.DIFF,
-            options=["--name-only"],
-            revisions=[parse_commit_sha("merge-base", merge_base), head],
-        ),
-        cwd=root,
+    changed = run_invocation(
+        replace(
+            build_git_invocation(
+                GitSubcommand.DIFF,
+                options=["--name-only"],
+                revisions=[parse_commit_sha("merge-base", merge_base), head],
+            ),
+            cwd=root,
+        )
     )
     if not changed.strip():
         raise ReviewError(f"範囲に変更がありません: {range_text}")
@@ -381,7 +392,7 @@ class NewRangePlace:
 
 
 def new_range_place(root: Path, range_text: str, head_sha: str) -> NewRangePlace:
-    common = run_git(root, "rev-parse", "--git-common-dir").strip()
+    common = run_git(root, GitSubcommand.REV_PARSE, "--git-common-dir").strip()
     # git は作業ディレクトリからの相対で返すことがある。プロセスの現在地でなく root から解く
     git_directory = (root / common).resolve()
     return NewRangePlace(str(git_directory), head_tracking_of(root, range_text, head_sha))

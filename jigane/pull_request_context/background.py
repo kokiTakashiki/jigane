@@ -4,7 +4,6 @@ PR の本文が参照する文書、
 同じファイルに触れた過去の PR、変更したパスの所有者。
 """
 
-import copy
 import json
 import posixpath
 import re
@@ -23,10 +22,10 @@ from jigane.git.tree_files import is_inside_tree, read_tree_text
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context.fetching import PullRequestMetadata
 from jigane.storage.atomic_write import write_text_atomic
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 BACKGROUND_FILE = "background.json"
-# background.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
+# background.json の形の版。保存物の形を変えたら一つ上げる
 BACKGROUND_FORMAT = 3
 # 過去の PR の件数の上限。プロンプトの大きさを抑える
 PAST_PULL_REQUEST_LIMIT = 5
@@ -398,37 +397,9 @@ def dump_background(background: Background) -> dict[str, Any]:
     return {"format": BACKGROUND_FORMAT, **background.to_dict()}
 
 
-def _upgrade_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の background.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 版 1 のうち古いものは past_pull_requests に PR だけを持つ。種類の印が無いので PR として読む
-    legacy = upgraded.pop("past_pull_requests", [])
-    if "past_changes" not in upgraded:
-        upgraded["past_changes"] = [
-            {"kind": PastChangeKind.PULL_REQUEST.value, **item} for item in legacy
-        ]
-    # 所有者の一覧を持つ前の保存物は、所有者を集めていない。空の一覧と読む
-    upgraded.setdefault("owners", [])
-    # 読み口を持たないまま消えた鍵
-    upgraded.pop("github_material", None)
-    return upgraded
-
-
-def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の background.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 背景から issue を外した。版 2 までの保存物が持つ issues は読み口が無いので落とす
-    upgraded.pop("issues", None)
-    return upgraded
-
-
-# 保存された版から次の版への移し。parse_background が BACKGROUND_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2}
-
-
 def parse_background(raw: Mapping[str, Any]) -> Background:
-    """background.json を読む境の一か所。保存された版から今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(BACKGROUND_FILE, raw, current=BACKGROUND_FORMAT, upgrades=_UPGRADES)
+    """background.json を読む境の一か所。今の版以外は止める。"""
+    stored = require_current_version(BACKGROUND_FILE, raw, current=BACKGROUND_FORMAT)
     return Background.from_dict(dict(stored))
 
 

@@ -7,18 +7,15 @@ from pr_support import commit_all, git
 from jigane.commands.unparsed_files import review_unreadable_constructs
 from jigane.commands.unreadable_notice import occurrence_text, unreadable_text
 from jigane.flaky.checks import _swift_methods
+from jigane.flaky.unreadable_explanation import explanation_of
+from jigane.gates.construct_kind import ConstructKind
 from jigane.gates.tree_side import TreeSide
 from jigane.judgment_map.unreadable_constructs import (
-    ConstructKind,
     Occurrence,
     UnreadableConstructs,
+    _scan,
 )
-from jigane.judgment_map.unreadable_wording import (
-    ENTRY_IDS,
-    FIX_HINTS,
-    TITLES,
-    unreadable_entry,
-)
+from jigane.judgment_map.unreadable_wording import SYNTAX_ERROR_WORDING
 from jigane.languages import registry
 from jigane.languages.base import parse
 from jigane.languages.states import LanguageReady
@@ -68,7 +65,11 @@ def test_range_review_marks_the_base_side_and_shows_both_sides_of_the_same_path(
 def test_control_characters_in_the_path_are_stripped_in_the_notice() -> None:
     path = "src/a\x1b[31mb.swift"
     found = UnreadableConstructs(
-        (Occurrence(ConstructKind.SYNTAX_ERROR, path, 1, TreeSide.AFTER, ""),)
+        (
+            Occurrence(
+                ConstructKind.SYNTAX_ERROR, path, 1, TreeSide.AFTER, "", SYNTAX_ERROR_WORDING
+            ),
+        )
     )
     text = "\n".join(unreadable_text(found))
     assert "構文エラー（1 件）" in text
@@ -156,7 +157,7 @@ def test_range_review_marks_a_construct_in_the_base_tree_in_the_notice(
     review = create_range_review(root, "main..feature", "mine")
     found = review_unreadable_constructs(review)
     assert [(o.kind, o.side) for o in found.occurrences] == [
-        (ConstructKind.SWIFT_OPERATOR_FUNCTION, TreeSide.BEFORE)
+        (ConstructKind.of_language("swift", "operator_function"), TreeSide.BEFORE)
     ]
     assert "変更前 A.swift:1" in "\n".join(unreadable_text(found))
 
@@ -184,7 +185,7 @@ def test_operator_function_in_a_protocol_is_found(tmp_path: Path) -> None:
     registry.set_states(None)
     found = review_unreadable_constructs(create_feature_review(root, ["src"], name="p"))
     assert [(o.kind, o.line) for o in found.occurrences] == [
-        (ConstructKind.SWIFT_OPERATOR_FUNCTION, 2)
+        (ConstructKind.of_language("swift", "operator_function"), 2)
     ]
 
 
@@ -200,26 +201,42 @@ def test_initializer_name_is_the_name_field_and_is_not_reported() -> None:
     assert list(operator_function_nodes(root)) == []
 
 
-def test_every_construct_kind_has_a_title_a_fix_hint_and_an_entry_id() -> None:
-    assert set(FIX_HINTS) == set(ConstructKind)
-    assert set(TITLES) == set(ConstructKind)
-    assert set(ENTRY_IDS) == set(ConstructKind)
+def _swift_occurrences(code: str) -> tuple[Occurrence, ...]:
+    adapter = SwiftAdapter()
+    source = code.encode()
+    root = parse(adapter, source).root_node
+    return tuple(_scan(source, root, adapter, "a.swift", TreeSide.AFTER))
+
+
+_OPERATORS = (
+    "struct V {\n  static func + (l: V, r: V) -> V { l }\n"
+    "  static func - (l: V, r: V) -> V { l }\n}\n"
+)
+
+
+def test_every_construct_kind_has_wording_and_a_distinct_entry_id() -> None:
+    found = (
+        *_swift_occurrences(_OPERATORS),
+        Occurrence(ConstructKind.SYNTAX_ERROR, "a", 1, TreeSide.AFTER, "", SYNTAX_ERROR_WORDING),
+    )
+    kinds = {o.kind: o.wording for o in found}
+    assert len(kinds) == 2
+    for wording in kinds.values():
+        assert wording.title
+        assert wording.fix_hint
+    assert len({kind.entry_id for kind in kinds}) == len(kinds)
 
 
 def test_notice_gives_each_present_kind_its_fix_hint_once() -> None:
-    found = UnreadableConstructs(
-        (
-            Occurrence(ConstructKind.SWIFT_OPERATOR_FUNCTION, "a.swift", 1, TreeSide.AFTER, ""),
-            Occurrence(ConstructKind.SWIFT_OPERATOR_FUNCTION, "a.swift", 2, TreeSide.AFTER, ""),
-        )
-    )
+    found = UnreadableConstructs(_swift_occurrences(_OPERATORS))
+    assert len(found.occurrences) == 2
+    hint = found.occurrences[0].wording.fix_hint
     text = "\n".join(unreadable_text(found))
-    assert text.count(FIX_HINTS[ConstructKind.SWIFT_OPERATOR_FUNCTION]) == 1
-    assert FIX_HINTS[ConstructKind.SYNTAX_ERROR] not in text
+    assert text.count(hint) == 1
+    assert SYNTAX_ERROR_WORDING.fix_hint not in text
     assert "書き換えるか" not in text
 
 
-def test_warning_explanation_uses_the_fix_hint_of_its_kind() -> None:
-    for kind in ConstructKind:
-        entry = unreadable_entry("W1", Occurrence(kind, "a.swift", 1, TreeSide.AFTER, ""))
-        assert FIX_HINTS[kind] in str(entry.explanation)
+def test_warning_explanation_uses_the_fix_hint_of_its_wording() -> None:
+    for occurrence in _swift_occurrences(_OPERATORS):
+        assert occurrence.wording.fix_hint in explanation_of(occurrence.wording).text

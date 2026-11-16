@@ -24,16 +24,13 @@ import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
-from dev_launch import run_tool
+from dev_launch import UNTRACKED_FILES_ARGS, run_tool
 
 from jigane.git.process import CommandError
 
 DEFAULT_PUBLIC = Path("~/jigane-public").expanduser()
 BRANCH = "main"
 LISTED_LIMIT = 10
-# 追跡外で無視されていないファイルの一覧。同じ引数の組が jigane/git/tree_files.py にある。
-# 共有しないのは、jigane/ の起動の引数を check_egress が全要素が定数のリテラルに限るため
-UNTRACKED_ARGS = ("ls-files", "-z", "--others", "--exclude-standard")
 # 追跡下のファイルのうち、複製の .gitignore に当たるものの一覧
 TRACKED_IGNORED_ARGS = ("ls-files", "-z", "--cached", "--ignored", "--exclude-standard")
 
@@ -42,16 +39,16 @@ class PreconditionError(Exception):
     pass
 
 
-def git(public: Path, *args: str, stdin: str | None = None) -> str:
+def _git(public: Path, *args: str, stdin: str | None = None) -> str:
     return run_tool(["git", *args], cwd=public, stdin=stdin)
 
 
-def git_lines(public: Path, *args: str) -> list[str]:
-    output = git(public, *args)
-    return [line for line in output.split("\0" if "-z" in args else "\n") if line]
+def _git_lines(public: Path, *args: str, separator: str = "\n") -> list[str]:
+    output = _git(public, *args)
+    return [line for line in output.split(separator) if line]
 
 
-def read_version(root: Path) -> str:
+def _read_version(root: Path) -> str:
     try:
         document = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         return str(document["project"]["version"])
@@ -59,37 +56,42 @@ def read_version(root: Path) -> str:
         raise PreconditionError(f"{root / 'pyproject.toml'} から版を読めない: {error}") from error
 
 
-def check_tree(tree: Path, version: str | None) -> None:
+def _check_tree(tree: Path) -> str:
+    """書き出した木の形を確かめ、木の pyproject の版を返す。"""
     if not tree.is_dir():
         raise PreconditionError(f"木が無い: {tree}")
     if (tree / ".git").exists():
         raise PreconditionError(f"木に .git がある。書き出した木ではない: {tree}")
-    found = read_version(tree)
-    if version is not None and version != found:
-        raise PreconditionError(f"木の版 {found} が --version {version} と違う")
+    found = _read_version(tree)
     print(f"木の版: {found}", flush=True)
+    return found
 
 
-def check_public(public: Path) -> None:
+def _check_expected_version(found: str, expected: str | None) -> None:
+    if expected is not None and expected != found:
+        raise PreconditionError(f"木の版 {found} が --version {expected} と違う")
+
+
+def _check_public(public: Path) -> None:
     try:
-        top = git(public, "rev-parse", "--show-toplevel").strip()
+        top = _git(public, "rev-parse", "--show-toplevel").strip()
     except (CommandError, FileNotFoundError) as error:
         raise PreconditionError(f"複製が git の作業木ではない: {public}") from error
     if Path(top).resolve() != public.resolve():
         raise PreconditionError(f"複製の根が {top} で、{public} ではない")
-    branch = git(public, "branch", "--show-current").strip()
+    branch = _git(public, "branch", "--show-current").strip()
     if branch != BRANCH:
         raise PreconditionError(f"複製が {BRANCH} にいない（今は {branch or 'detached'}）")
-    changed = git_lines(public, "status", "--porcelain", "--untracked-files=no")
+    changed = _git_lines(public, "status", "--porcelain", "--untracked-files=no")
     if changed:
         raise PreconditionError("追跡下に未コミットの変更がある\n" + "\n".join(changed))
-    untracked = git_lines(public, *UNTRACKED_ARGS)
+    untracked = _git_lines(public, *UNTRACKED_FILES_ARGS, separator="\0")
     if untracked:
         raise PreconditionError(
             "追跡外で無視されていないファイルがある。消すか追跡するかを人間が決める\n"
             + "\n".join(untracked)
         )
-    tracked_ignored = git_lines(public, *TRACKED_IGNORED_ARGS)
+    tracked_ignored = _git_lines(public, *TRACKED_IGNORED_ARGS, separator="\0")
     if tracked_ignored:
         # 無視のディレクトリへ探索が入らず、下の追跡下のファイルが「木に無い」扱いで消えるため
         raise PreconditionError(
@@ -97,19 +99,19 @@ def check_public(public: Path) -> None:
             + "\n".join(tracked_ignored)
         )
     try:
-        git(public, "pull", "--ff-only", "origin", BRANCH)
+        _git(public, "pull", "--ff-only", "origin", BRANCH)
     except CommandError as error:
         message = f"git pull --ff-only origin {BRANCH} が通らない\n{error}"
         raise PreconditionError(message) from error
-    print(f"複製の版: {read_version(public)}", flush=True)
+    print(f"複製の版: {_read_version(public)}", flush=True)
 
 
-def ignored_among(public: Path, paths: Sequence[str]) -> set[str]:
+def _ignored_among(public: Path, paths: Sequence[str]) -> set[str]:
     """複製の .gitignore が無視する path の集合。ディレクトリは末尾に / を付けて渡す。"""
     if not paths:
         return set()
     try:
-        output = git(public, "check-ignore", "--stdin", "-z", stdin="\0".join(paths) + "\0")
+        output = _git(public, "check-ignore", "--stdin", "-z", stdin="\0".join(paths) + "\0")
     except CommandError as error:
         # check-ignore は、無視されるものが 1 つも無いときだけ終了コード 1 を返す
         if error.returncode == 1:
@@ -118,7 +120,7 @@ def ignored_among(public: Path, paths: Sequence[str]) -> set[str]:
     return {path for path in output.split("\0") if path}
 
 
-def tree_files(public: Path, tree: Path) -> list[str]:
+def _tree_files(public: Path, tree: Path) -> list[str]:
     """木のファイルのうち、複製の .gitignore が無視しないもの。
 
     書き出した木は .venv や dist を持つので、全部を数えず、無視されるディレクトリは入らずに切る。
@@ -133,7 +135,7 @@ def tree_files(public: Path, tree: Path) -> list[str]:
                 if relative == ".git":
                     continue
                 entries[relative] = entry.is_dir(follow_symlinks=False)
-        ignored = ignored_among(
+        ignored = _ignored_among(
             public, [f"{path}/" if is_dir else path for path, is_dir in entries.items()]
         )
         frontier = []
@@ -147,7 +149,7 @@ def tree_files(public: Path, tree: Path) -> list[str]:
     return sorted(found)
 
 
-def differs(source: Path, destination: Path) -> bool:
+def _differs(source: Path, destination: Path) -> bool:
     if source.is_symlink() or destination.is_symlink():
         return not (
             source.is_symlink()
@@ -158,7 +160,7 @@ def differs(source: Path, destination: Path) -> bool:
     return not (same_mode and filecmp.cmp(source, destination, shallow=False))
 
 
-def copy_file(source: Path, destination: Path) -> None:
+def _copy_file(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     # 書き込み先が別の種類（リンクとファイル）だと copy が壊れるので、先に外す
     if destination.is_symlink() or destination.exists():
@@ -167,7 +169,7 @@ def copy_file(source: Path, destination: Path) -> None:
     shutil.copy(source, destination, follow_symlinks=False)
 
 
-def remove_empty_parents(public: Path, relative: str) -> None:
+def _remove_empty_parents(public: Path, relative: str) -> None:
     for parent in Path(relative).parents:
         if parent == Path():
             break
@@ -178,19 +180,13 @@ def remove_empty_parents(public: Path, relative: str) -> None:
             break
 
 
-def sync(
-    tree: Path,
-    public: Path,
-    *,
-    version: str | None,
-) -> None:
-    check_tree(tree, version)
-    check_public(public)
-    tracked = set(git_lines(public, "ls-files", "-z"))
-    wanted = tree_files(public, tree)
+def _sync(tree: Path, public: Path) -> None:
+    _check_public(public)
+    tracked = set(_git_lines(public, "ls-files", "-z", separator="\0"))
+    wanted = _tree_files(public, tree)
     deleted = sorted(tracked - set(wanted))
     created = [path for path in wanted if path not in tracked]
-    updated = [path for path in wanted if path in tracked and differs(tree / path, public / path)]
+    updated = [path for path in wanted if path in tracked and _differs(tree / path, public / path)]
     print(f"消す（追跡下で木に無い）: {len(deleted)} 件", flush=True)
     for path in deleted[:LISTED_LIMIT]:
         print(f"  {path}", flush=True)
@@ -199,12 +195,12 @@ def sync(
     print(f"新規: {len(created)} 件、更新: {len(updated)} 件", flush=True)
     for path in deleted:
         (public / path).unlink()
-        remove_empty_parents(public, path)
+        _remove_empty_parents(public, path)
     for path in [*created, *updated]:
-        copy_file(tree / path, public / path)
-    status = git_lines(public, "status", "--porcelain")
+        _copy_file(tree / path, public / path)
+    status = _git_lines(public, "status", "--porcelain")
     print(f"git status --porcelain: {len(status)} 件", flush=True)
-    print(git(public, "diff", "--stat").rstrip(), flush=True)
+    print(_git(public, "diff", "--stat").rstrip(), flush=True)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -214,11 +210,9 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--version", help="木の pyproject の版がこれと一致することを求める")
     arguments = parser.parse_args(argv)
     try:
-        sync(
-            arguments.tree.expanduser().resolve(),
-            arguments.public.expanduser().resolve(),
-            version=arguments.version,
-        )
+        tree = arguments.tree.expanduser().resolve()
+        _check_expected_version(_check_tree(tree), arguments.version)
+        _sync(tree, arguments.public.expanduser().resolve())
     except PreconditionError as error:
         print(f"止めた: {error}", file=sys.stderr)
         return 1

@@ -3,7 +3,13 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.base import (
+    RegexComposedSite,
+    RegexDialect,
+    RegexLiteralSite,
+    RegexSites,
+    RegexUse,
+)
 from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
 from jigane.languages.swift_nodes import DECLARED_FUNCTION_NODES, STRING_LITERALS
@@ -17,17 +23,17 @@ class _NotConstantError(Exception):
     """文字列の定数に解けない式。"""
 
 
-def regex_scan(root: Node, path: str) -> RegexScan:
-    literals: list[RegexLiteral] = []
-    composed: list[RegexComposed] = []
+def regex_scan(root: Node, path: str) -> RegexSites:
+    literals: list[RegexLiteralSite] = []
+    composed: list[RegexComposedSite] = []
     for node in _walk(root):
         line = node.start_point[0] + 1
         if node.type == "regex_literal":
             literals.append(
-                RegexLiteral(
+                RegexLiteralSite(
                     pattern=_regex_body(text_of(node)),
                     dialect=RegexDialect.SWIFT,
-                    call="/.../",
+                    call_name="/.../",
                     use=RegexUse.COMPILE,
                     path=path,
                     line=line,
@@ -43,19 +49,21 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         try:
             pattern = _constant(argument)
         except _NotConstantError:
-            composed.append(RegexComposed(call=call, use=RegexUse.COMPILE, path=path, line=line))
+            composed.append(
+                RegexComposedSite(call_name=call, use=RegexUse.COMPILE, path=path, line=line)
+            )
         else:
             literals.append(
-                RegexLiteral(
+                RegexLiteralSite(
                     pattern=pattern,
                     dialect=RegexDialect.SWIFT,
-                    call=call,
+                    call_name=call,
                     use=RegexUse.COMPILE,
                     path=path,
                     line=line,
                 )
             )
-    return RegexScan(literals=tuple(literals), composed=tuple(composed))
+    return RegexSites(literal_sites=tuple(literals), composed_sites=tuple(composed))
 
 
 def _walk(root: Node) -> Iterator[Node]:

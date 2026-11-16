@@ -11,7 +11,7 @@ from static_findings_support import MESSAGE, sarif_file, sarif_request_for
 from jigane.commands.subcommands.refresh import refresh_review
 from jigane.design.review_documents import create_design_doc_review
 from jigane.reviews.lifecycle import DeclaredInputs, ReviewError, create_range_review
-from jigane.skills.macro import policy_sections
+from jigane.skills import policy_figures
 from jigane.static_analysis.intake import (
     NO_STATIC,
     STATIC_FINDINGS_FILE,
@@ -117,6 +117,15 @@ def test_unknown_stored_drop_reason_is_a_review_error() -> None:
         load_static_findings(raw)
 
 
+@pytest.mark.parametrize(("version", "message"), [(2, "新しいバージョン"), (0, "1 以上")])
+def test_static_findings_file_with_an_unreadable_version_is_a_review_error(
+    version: int, message: str
+) -> None:
+    raw = {"format": version, "analyzed_commit": "0" * 40, "files": [], "dropped": {}}
+    with pytest.raises(ReviewError, match=message):
+        load_static_findings(raw)
+
+
 def test_review_without_sarif_writes_no_file(repo: dict[str, str]) -> None:
     review = create_range_review(Path(repo["root"]), "main..feature", "mine")
     assert not (review.id.directory() / STATIC_FINDINGS_FILE).exists()
@@ -194,7 +203,7 @@ def test_finding_message_is_not_in_the_policy_group_materials(repo: dict[str, st
     review = create_range_review(
         root, "main..feature", "mine", DeclaredInputs(sarif=sarif_request_for(root, path))
     )
-    sections = policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     text = "\n".join(
         [
             *(str(value) for value in sections.figures.values()),

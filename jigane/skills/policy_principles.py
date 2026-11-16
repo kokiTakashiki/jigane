@@ -10,11 +10,13 @@ from jigane.groups.viewpoints import (
     Viewpoint,
     design_principles,
 )
+from jigane.markdown.fence import path_bullets
+from jigane.repository_docs.kinds import Launch
+from jigane.repository_docs.section import document_section
 from jigane.reviews.catalog import scope_files
 from jigane.skills import adversarial, macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.macro import PolicySections
-from jigane.skills.policy_figures import REGISTRY, FigureKey
+from jigane.skills.policy_figures import REGISTRY, FigureKey, PolicySections
 from jigane.skills.policy_principle_shapes import Shape, present_shapes
 
 PROMPT = "macro_principles"
@@ -67,8 +69,9 @@ def principle_prompt(
     sections は事前に組んだ節で、四本を続けて組むときは一度だけ作って渡す。
     """
     review = assembly.review
-    sections = macro.policy_sections(review) if sections is None else sections
-    # 技術選定の節と前の回の指摘の節は、図の起動と同じく資料の末尾に置く
+    sections = policy_figures.shared_policy_sections(assembly) if sections is None else sections
+    # 技術選定の節と前の回の指摘の節は、図の起動と同じく資料の末尾に置く。文書の節はその後ろ
+    documents = document_section(assembly.docs, Launch.POLICY_PRINCIPLE)
     materials = "\n\n".join(
         [
             *policy_figures.prompt_figure_texts(
@@ -76,22 +79,23 @@ def principle_prompt(
             ),
             sections.technology,
             f"### {macro.SECTION_HISTORY}\n\n{macro.history_text(assembly)}",
+            *([documents] if documents else []),
         ]
     )
     return adversarial.load_prompt(PROMPT).substitute(
         mode=review.mode,
-        target_files="\n".join(f"- {path}" for path in review.paths),
+        target_files=path_bullets(review.paths),
         declaration=macro.declaration_prompt_text(review),
         background=macro.background_prompt_text(review),
         materials=materials,
-        scope="\n".join(f"- {path}" for path in sorted(scope_files(review))),
+        scope=path_bullets(sorted(scope_files(review))),
         principles=principle_text(principle),
     )
 
 
 def principle_prompts(assembly: AssemblyInput) -> tuple[PrinciplePrompt, ...]:
     """問える図の形がある原則だけの、原則ごとのプロンプト。表の順（P1〜P4）で返す。"""
-    sections = macro.policy_sections(assembly.review)
+    sections = policy_figures.shared_policy_sections(assembly)
     shapes = present_shapes(assembly, sections.sequence)
     return tuple(
         PrinciplePrompt(

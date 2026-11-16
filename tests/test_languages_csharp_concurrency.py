@@ -76,7 +76,7 @@ def isolation(code: str, name: str, *others: str) -> Isolation:
 def steps(code: str, enclosing: Isolation | None = None) -> list[ConcurrencyStep]:
     source = f"class C {{\n async Task F() {{\n{code}\n}}\n}}\n".encode()
     root = parse(adapter, source).root_node
-    body = adapter.body_of(find(root, "F"))
+    body = adapter.body_node_of(find(root, "F"))
     assert body is not None
     return adapter.concurrency_steps(body, source, enclosing or NonisolatedDomain())
 
@@ -235,7 +235,7 @@ def method_steps(code: str, name: str, *others: str) -> list[ConcurrencyStep]:
     source = code.encode()
     root = parse(adapter, source).root_node
     method = find(root, name)
-    body = adapter.body_of(method)
+    body = adapter.body_node_of(method)
     assert body is not None
     enclosing = adapter.isolation_of(method, source, Context(code, *others))
     return adapter.concurrency_steps(body, source, enclosing)

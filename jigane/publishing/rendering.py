@@ -283,8 +283,7 @@ def build_context(review: Review) -> tuple[dict[str, Any], list[str]]:
     """テンプレートに流し込む値と、stderr に示す警告。同じ入力から同じ結果を返す。
 
     載せるのは利用者が下書きに入れた（picked）指摘だけである。捨てた候補から写した nit も、
-    保存した指摘なら下書きに入れたものが載る。写す前の古い記録の候補（D- の番号）は
-    保存した指摘に無く選べないので、ここには来ない。
+    下書きに入れたものが載る。
     """
     directory = review.id.directory()
     selection = selection_module.load_selection(directory)

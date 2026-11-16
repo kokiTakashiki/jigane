@@ -12,7 +12,7 @@ import re
 from tree_sitter import Node
 
 from jigane.languages import discriminators_core as core
-from jigane.languages.base import Branch, BranchArm, Return, Step
+from jigane.languages.base import FlowBranch, FlowBranchArm, FlowReturn, FlowStep
 from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
@@ -28,7 +28,7 @@ def _statements(node: Node) -> list[Node]:
     return list(node.named_children) if node.type == "block" else [node]
 
 
-def discriminator_steps(body_node: Node) -> list[Step]:
+def discriminator_steps(body_node: Node) -> list[FlowStep]:
     """本体の分岐と return を文書順に返す。"""
     if body_node.type == "arrow_expression_clause":
         # 式本体のメンバは、その式を暗黙の return と読む
@@ -37,29 +37,29 @@ def discriminator_steps(body_node: Node) -> list[Step]:
     return core.steps(_statements(body_node), _RULES)
 
 
-def _value_step(expression: Node | None) -> Step:
+def _value_step(expression: Node | None) -> FlowStep:
     if expression is not None and expression.type == "switch_expression":
         return _switch_expression(expression)
-    return Return(core.member_text(expression, _RULES))
+    return FlowReturn(core.member_text(expression, _RULES))
 
 
-def _return_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _return_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     expression = statement.named_children[0] if statement.named_children else None
     return [_value_step(expression)]
 
 
-def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     return [core.if_branch(statement, _RULES)]
 
 
-def _switch_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _switch_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     return [core.switch_branch(statement, _RULES)]
 
 
-def _block(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _block(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     # 文として単独で現れる `{ ... }` は、中の文をそのまま同じ並びに読む
     return core.steps(list(statement.named_children), _RULES)
@@ -70,13 +70,13 @@ def _condition_text(statement: Node) -> str:
     return _flat(text_of(condition)) if condition is not None else "?"
 
 
-def _then_steps(statement: Node, *, is_value: bool) -> list[Step]:
+def _then_steps(statement: Node, *, is_value: bool) -> list[FlowStep]:
     del is_value
     consequence = statement.child_by_field_name("consequence")
     return core.steps(_statements(consequence), _RULES) if consequence else []
 
 
-def _else_steps(statement: Node, *, is_value: bool) -> list[Step] | None:
+def _else_steps(statement: Node, *, is_value: bool) -> list[FlowStep] | None:
     del is_value
     alternative = statement.child_by_field_name("alternative")
     return None if alternative is None else core.steps(_statements(alternative), _RULES)
@@ -118,10 +118,10 @@ def _head_text(section: Node, heads: list[Node]) -> str:
     return _flat(required(section.text)[start:end].decode())
 
 
-def _switch_expression(expression: Node) -> Branch:
+def _switch_expression(expression: Node) -> FlowBranch:
     named = expression.named_children
     subject_text = _flat(text_of(named[0])) if named else ""
-    arms: list[BranchArm] = []
+    arms: list[FlowBranchArm] = []
     for arm in named:
         if arm.type != "switch_expression_arm":
             # 対象の式。腕ではない
@@ -131,12 +131,12 @@ def _switch_expression(expression: Node) -> Branch:
         # 腕の `=>` の左を呼び名にする。右が throw の式なら値なしの終わり
         value = children[-1]
         step = (
-            Return(None)
+            FlowReturn(None)
             if value.type == "throw_expression"
-            else Return(core.member_text(value, _RULES))
+            else FlowReturn(core.member_text(value, _RULES))
         )
-        arms.append(BranchArm(label.removesuffix("=>").strip(), (step,)))
-    return Branch(f"switch {subject_text}".strip(), tuple(arms), None)
+        arms.append(FlowBranchArm(label.removesuffix("=>").strip(), (step,)))
+    return FlowBranch(f"switch {subject_text}".strip(), tuple(arms), None)
 
 
 _RULES = core.Rules(

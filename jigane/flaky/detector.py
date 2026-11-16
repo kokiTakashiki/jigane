@@ -8,11 +8,11 @@ from pathlib import Path
 from tree_sitter import Language, Node, Query, QueryCursor
 
 from jigane.flaky.catalog import ANNOTATION_ID, Item, QuerySpec
-from jigane.flaky.checks import CHECKS, CONTEXT_CHECKS, Finding
+from jigane.flaky.checks import CHECKS, CONTEXT_CHECKS, Certainty, Finding
 from jigane.flaky.setup import FileContext, conftest_context, fixations_in
 from jigane.gates.line_scope import LineScope
 from jigane.git.tree_files import read_tree_bytes
-from jigane.judgment_map.allow_annotation import AllowedSpot, scan_allow_comments, split_rows
+from jigane.judgment_map.allow_annotation import scan_allow_comments, split_rows
 from jigane.languages import registry
 from jigane.languages.base import LanguageAdapter, grammar_target, parse
 from jigane.languages.grammars import get_language
@@ -27,8 +27,8 @@ class Detection:
     line: int
     # 検出した行の本文。前後の空白は除く
     text: str
-    # 静的に確かめきれない当たり。兆候の型に下げて警告にする
-    undetermined: bool = False
+    # UNDETERMINED は静的に確かめきれない当たりで、兆候の型に下げて警告にする
+    certainty: Certainty = Certainty.CONFIRMED
     # 検出の理由を一文で。理由を持たない検出では空
     reason: str = ""
 
@@ -99,7 +99,6 @@ def detect_source(
         return text_lines[line - 1].strip()[:EXCERPT_LIMIT]
 
     scan = scan_allow_comments(adapter, root, "flaky", {item.id for item in catalog})
-    allowed = scan.allowed
     found: list[Detection] = [
         AnnotationDetection(ANNOTATION_ID, path, line, excerpt(line)) for line in scan.malformed
     ]
@@ -110,7 +109,7 @@ def detect_source(
                 continue
             for node, finding in _hits(adapter, root, source, spec, context):
                 line = node.start_point.row + 1
-                if AllowedSpot(item.id, line) in allowed or (item.id, line) in seen:
+                if scan.permits(item.id, line) or (item.id, line) in seen:
                     continue
                 seen.add((item.id, line))
                 found.append(
@@ -119,7 +118,7 @@ def detect_source(
                         path,
                         line,
                         excerpt(line),
-                        finding.undetermined if finding else False,
+                        finding.certainty if finding else Certainty.CONFIRMED,
                         finding.reason if finding else "",
                         spec=spec,
                     )

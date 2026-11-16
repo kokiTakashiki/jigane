@@ -88,13 +88,13 @@ def test_properties() -> None:
 
 
 def test_body_of() -> None:
-    assert adapter.body_of(_member("Canvas", "draw").node) is not None
-    assert adapter.body_of(_member("Drawable", "draw").node) is None
-    assert adapter.body_of(_member("Canvas", "size").node) is None
-    doubled = adapter.body_of(_member("Canvas", "doubled").node)
+    assert adapter.body_node_of(_member("Canvas", "draw").node) is not None
+    assert adapter.body_node_of(_member("Drawable", "draw").node) is None
+    assert adapter.body_node_of(_member("Canvas", "size").node) is None
+    doubled = adapter.body_node_of(_member("Canvas", "doubled").node)
     assert doubled is not None
     assert doubled.type == "computed_property"
-    explicit = adapter.body_of(_member("Canvas", "explicit").node)
+    explicit = adapter.body_node_of(_member("Canvas", "explicit").node)
     assert explicit is not None
     assert explicit.type == "computed_getter"
 

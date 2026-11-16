@@ -6,7 +6,7 @@ from jigane.languages import concurrency_core as core
 from jigane.languages.base import (
     AwaitCall,
     BlockingWait,
-    Body,
+    ConcurrencyBody,
     ConcurrencyStep,
     EventLoopDomain,
     Isolation,
@@ -119,7 +119,7 @@ def _bound_primitives(root: Node) -> frozenset[str]:
 class _State:
     primitives: frozenset[str]
     # `async with asyncio.TaskGroup() as tg` の tg の名前と、その中で集めた枝
-    groups: dict[str, list[Body]]
+    groups: dict[str, list[ConcurrencyBody]]
 
 
 def _call(x: Extractor[_State], call: Node, *, awaited: bool) -> list[ConcurrencyStep]:
@@ -163,25 +163,27 @@ def _special(
     asyncio_like = receiver in _ASYNCIO_RECEIVERS
     groups = x.state.groups
     if name == "create_task" and receiver in groups:
-        body = Body(_EVENT_LOOP, tuple(_coroutine(x, arguments[0]) if arguments else ()))
+        body = ConcurrencyBody(
+            _EVENT_LOOP, tuple(_coroutine(x, arguments[0]) if arguments else ())
+        )
         groups[receiver].append(body)
         return []
     loop_like = receiver is not None and "loop" in receiver.lower()
     if name in _TASK_FACTORIES and (asyncio_like or loop_like) and arguments:
-        body = Body(_EVENT_LOOP, tuple(_coroutine(x, arguments[0])))
+        body = ConcurrencyBody(_EVENT_LOOP, tuple(_coroutine(x, arguments[0])))
         # 式文として呼ぶ形だけが戻り値を捨てる。代入、添字、引数、await の中は保持している。
         # 文の直下の呼び出しは、この文法では式文の節を挟まず block の子に付く
         parent = call.parent
         kept = parent is None or parent.type not in _STATEMENT_PARENTS
         return [UnstructuredTask(TaskKind.TASK, body, line, kept)]
     if name == "gather" and asyncio_like:
-        branches = tuple(Body(_EVENT_LOOP, tuple(_coroutine(x, a))) for a in arguments)
+        branches = tuple(ConcurrencyBody(_EVENT_LOOP, tuple(_coroutine(x, a))) for a in arguments)
         return [StructuredConcurrency(StructuredKind.JOIN_ALL, branches, line, "gather")]
     if name == "to_thread" and asyncio_like and arguments:
-        body = Body(_EXECUTOR, tuple(_function(x, arguments[0])))
+        body = ConcurrencyBody(_EXECUTOR, tuple(_function(x, arguments[0])))
         return [QueueDispatch(body, line, "to_thread")]
     if name == "run_in_executor" and len(arguments) >= _EXECUTOR_MIN_ARGUMENTS:
-        body = Body(_EXECUTOR, tuple(_function(x, arguments[1])))
+        body = ConcurrencyBody(_EXECUTOR, tuple(_function(x, arguments[1])))
         return [QueueDispatch(body, line, "run_in_executor")]
     return None
 

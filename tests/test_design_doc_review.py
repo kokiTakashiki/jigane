@@ -7,7 +7,12 @@ from pr_support import commit_all, git
 
 from jigane import commands
 from jigane.commands.subcommands.refresh import refresh_review
-from jigane.design.review_documents import create_design_doc_review
+from jigane.design.review_documents import (
+    create_design_doc_review,
+    read_document,
+    refresh_design_doc,
+)
+from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES, NotOpened, TreeFileState
 from jigane.reviews.catalog import list_reviews, load_review
 from jigane.reviews.lifecycle import (
     DesignDocOrigin,
@@ -172,3 +177,33 @@ def test_help_describes_the_purpose(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         commands.main(["new", "--help"])
     assert "設計書をレビューします" in capsys.readouterr().out
+
+
+def test_read_document_refuses_oversize_and_non_regular(tmp_path: Path) -> None:
+    (tmp_path / "big.md").write_bytes(b"a" * (MAX_REVIEW_FILE_BYTES + 1))
+    (tmp_path / "dir.md").mkdir()
+    (tmp_path / "ok.md").write_bytes(b"a\r\nb")
+    with pytest.raises(ReviewError, match="通常のファイルではありません"):
+        read_document(tmp_path, "dir.md", "設計書")
+    with pytest.raises(ReviewError, match="大きすぎます"):
+        read_document(tmp_path, "big.md", "設計書")
+    with pytest.raises(ReviewError, match="設計書がありません"):
+        read_document(tmp_path, "ghost.md", "設計書")
+    assert read_document(tmp_path, "ok.md").text == "a\nb"
+
+
+def test_read_document_reports_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "x.md").write_text("x")
+    monkeypatch.setattr(
+        "jigane.design.review_documents.read_tree",
+        lambda *_: NotOpened(TreeFileState.UNREADABLE, "Input/output error"),
+    )
+    with pytest.raises(ReviewError, match="読み取りに失敗しました：Input/output error"):
+        read_document(tmp_path, "x.md", "設計書")
+
+
+def test_refresh_stops_when_document_disappears(repo: Path) -> None:
+    review = create_design_doc_review(repo, "docs/shop-design.md")
+    (repo / "docs" / "shop-design.md").unlink()
+    with pytest.raises(ReviewError, match="設計書がありません"):
+        refresh_design_doc(review)

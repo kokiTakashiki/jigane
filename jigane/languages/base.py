@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 from tree_sitter import Node, Tree
 
-from jigane.languages.grammars import BuiltinGrammar, DeclaredGrammar, GrammarTarget, get_parser
+from jigane.languages.grammars import GrammarTarget, get_parser, target_of
 
 DeclarationKind = Literal["class", "function", "method", "variable"]
 
@@ -99,6 +99,8 @@ def split_declaration(node: Node, bounds: BodyBounds | None) -> DeclarationSpans
 TypeKind = Literal["class", "struct", "record", "interface", "enum", "delegate", "module"]
 # variable はモジュール直下の変数。名前の解決と呼び出しの数え方に加えず、クラス図のために集める
 MemberKind = Literal["method", "constructor", "field", "property", "parameter", "variable"]
+# 名前で値として引ける種類。メソッドとコンストラクタは値として読まない
+VALUE_KINDS: tuple[MemberKind, ...] = ("field", "property", "parameter")
 
 
 @dataclass(frozen=True)
@@ -155,7 +157,7 @@ class MemberDecl:
 
 
 @dataclass(frozen=True)
-class Argument:
+class CallArgument:
     """引数一つ。名前付き引数ならその名前（コロンを除く）。"""
 
     expression: Node = field(compare=False, repr=False)
@@ -164,7 +166,7 @@ class Argument:
 
 @dataclass(frozen=True)
 class CallSite:
-    """本体の中の呼び出し一つ。受け手は節点のまま渡し、種別への正規化は receiver_of が行う。"""
+    """本体の呼び出し一つ。受け手は節点のまま渡し、種別への正規化は receiver_kind_of が行う。"""
 
     # 呼び出しの式全体の節点
     node: Node
@@ -172,10 +174,10 @@ class CallSite:
     name: str
     # 受け手の式。受け手の無い呼び出しと生成では None
     receiver: Node | None
-    arguments: tuple[Argument, ...]
+    arguments: tuple[CallArgument, ...]
     is_creation: bool
     # 評価の順を決める、呼び出しの式の終わりのバイト位置
-    end: int
+    end_byte: int
     # 呼び出しの名前（無ければ式全体）の行。1 始まり
     line: int
 
@@ -194,7 +196,7 @@ class DeferredSite:
     calls: tuple[CallSite, ...] = ()
 
     @property
-    def end(self) -> int:
+    def end_byte(self) -> int:
         return self.node.end_byte
 
 
@@ -205,30 +207,30 @@ class CallParts:
     receiver: Node | None
     # 呼び出しの名前の原文。決まらなければ None
     name: str | None
-    arguments: tuple[Argument, ...]
+    arguments: tuple[CallArgument, ...]
     # 呼び出しの式全体の原文
     text: str
 
 
 @dataclass(frozen=True)
-class Self:
+class SelfReceiver:
     """this、self。"""
 
 
 @dataclass(frozen=True)
-class Super:
+class SuperReceiver:
     """base、super。"""
 
 
 @dataclass(frozen=True)
-class Name:
+class NameReceiver:
     """識別子。ジェネリクスの型引数は含まない。"""
 
     text: str
 
 
 @dataclass(frozen=True)
-class Member:
+class MemberReceiver:
     """メンバの参照 base.name。"""
 
     base: Node = field(compare=False, repr=False)
@@ -236,35 +238,44 @@ class Member:
 
 
 @dataclass(frozen=True)
-class Call:
+class CallReceiver:
     """呼び出しの式。値の型は呼び先の戻り値の型になる。"""
 
     parts: CallParts
 
 
 @dataclass(frozen=True)
-class Creation:
+class CreationReceiver:
     """生成の式。type_text は型を省いた生成では None。"""
 
     type_text: str | None
-    arguments: tuple[Argument, ...]
+    arguments: tuple[CallArgument, ...]
     # 生成の式全体の原文
     text: str
 
 
 @dataclass(frozen=True)
-class Paren:
+class ParenReceiver:
     """括弧で包んだ式。"""
 
     inner: Node = field(compare=False, repr=False)
 
 
 @dataclass(frozen=True)
-class Unknown:
+class UnknownReceiver:
     """受け手の手がかりにならない式。"""
 
 
-ReceiverKind = Self | Super | Name | Member | Call | Creation | Paren | Unknown
+ReceiverKind = (
+    SelfReceiver
+    | SuperReceiver
+    | NameReceiver
+    | MemberReceiver
+    | CallReceiver
+    | CreationReceiver
+    | ParenReceiver
+    | UnknownReceiver
+)
 
 
 @dataclass(frozen=True)
@@ -286,7 +297,7 @@ class Locals:
 
 
 @dataclass(frozen=True)
-class Return:
+class FlowReturn:
     """値を返して流れが終わる文、または流れを終わらせる文（raise など）。"""
 
     # 返す式がメンバ参照 a.b の形ならその原文。それ以外の式と、値を返さない終わりでは None
@@ -294,24 +305,24 @@ class Return:
 
 
 @dataclass(frozen=True)
-class BranchArm:
+class FlowBranchArm:
     # 腕に入る条件の呼び名。if の真は "yes"、match の腕は "case パターン"
     label: str
-    steps: tuple["Step", ...]
+    steps: tuple["FlowStep", ...]
 
 
 @dataclass(frozen=True)
-class Branch:
-    """条件分岐一つ。腕の中の Return と Branch だけを残し、他の文は落とす。"""
+class FlowBranch:
+    """条件分岐一つ。腕の中の FlowReturn と FlowBranch だけを残し、他の文は落とす。"""
 
     # 条件の原文。match では "match 主語"
     condition: str
-    arms: tuple[BranchArm, ...]
+    arms: tuple[FlowBranchArm, ...]
     # どの腕にも入らなかった流れが分岐の後へ抜けるときの、その辺の呼び名。抜けなければ None
     fallthrough_label: str | None
 
 
-Step = Return | Branch
+FlowStep = FlowReturn | FlowBranch
 
 
 @runtime_checkable
@@ -396,7 +407,7 @@ class SequenceAdapter(LanguageAdapter, Protocol):
         """
         ...
 
-    def body_of(self, member_node: Node, /) -> Node | None:
+    def body_node_of(self, member_node: Node, /) -> Node | None:
         """メンバの宣言の節点から、呼び出しを探す本体の節点を返す。本体が無ければ None。"""
         ...
 
@@ -407,7 +418,7 @@ class SequenceAdapter(LanguageAdapter, Protocol):
         """
         ...
 
-    def receiver_of(self, expression: Node, /) -> ReceiverKind:
+    def receiver_kind_of(self, expression: Node, /) -> ReceiverKind:
         """式を、言語に依らない受け手の種別に正規化する。"""
         ...
 
@@ -415,7 +426,9 @@ class SequenceAdapter(LanguageAdapter, Protocol):
         """本体の中の局所変数、局所の関数、ラムダの仮引数を返す。"""
         ...
 
-    def imported_names(self, root_node: Node, source: bytes, path: str, /) -> dict[str, str]:
+    def imported_name_origins(
+        self, root_node: Node, source: bytes, path: str, /
+    ) -> dict[str, str]:
         """ファイルの import が束縛する名前から、取り込んだ元の修飾名への表を返す。
 
         元はモジュールの修飾名か「モジュール.中の名前」。取り込みで名前を束縛しない言語は空の表を返す。
@@ -484,7 +497,7 @@ class Sharing(StrEnum):
 
 
 @dataclass(frozen=True)
-class Body:
+class ConcurrencyBody:
     """新しい実行文脈の本体。走る領域と、その中の手順の列を組にする。"""
 
     isolation: Isolation
@@ -543,7 +556,7 @@ class StructuredConcurrency:
     """構造化された並行。枝ごとに中の手順の列を持つ。"""
 
     kind: StructuredKind
-    branches: tuple[Body, ...]
+    branches: tuple[ConcurrencyBody, ...]
     line: int
     # par の見出しに出す、言語ごとの呼び名（`async let`、`gather`、`WhenAll` など）
     label: str
@@ -556,7 +569,7 @@ class UnstructuredTask:
     """構造化されない Task。"""
 
     kind: TaskKind
-    body: Body
+    body: ConcurrencyBody
     line: int
     # 戻り値を保持している（後で取り消せる）。既定は捨てている扱いで、
     # 保持を見分けない言語はそのまま
@@ -567,7 +580,7 @@ class UnstructuredTask:
 class QueueDispatch:
     """キューへの投げ込み。body.isolation は QueueDomain。label は矢印に書く投げ込みの名前。"""
 
-    body: Body
+    body: ConcurrencyBody
     line: int
     label: str = "async"
 
@@ -629,13 +642,14 @@ class IsolationContext(Protocol):
 
 
 @runtime_checkable
-class DiscriminatorReader(SequenceAdapter, Protocol):
+class DiscriminatorBranchExtractor(SequenceAdapter, Protocol):
     """判別の流れ図に関数の本体の分岐を渡せる言語アダプタ。"""
 
-    def discriminator_branches(self, body_node: Node, source: bytes, /) -> list[Step]:
+    def discriminator_flow_steps(self, body_node: Node, source: bytes, /) -> list[FlowStep]:
         """本体の分岐と return を、言語に依らない形で文書順に返す。
 
-        関数が列挙型の値を返すかの判定はせず、メンバ参照を返す return を Return.value に載せる。
+        関数が列挙型の値を返すかの判定はせず、
+        メンバ参照を返す return を FlowReturn.value に載せる。
         """
         ...
 
@@ -695,7 +709,7 @@ class ConcurrencyAdapter(SequenceAdapter, Protocol):
 
 
 @dataclass(frozen=True)
-class Import:
+class ImportedModule:
     """import の文一つが取り込むモジュール。"""
 
     # モジュールの名前の原文。Python の相対の import は先頭の "." の連なりを残す
@@ -705,27 +719,27 @@ class Import:
 
 
 @runtime_checkable
-class MarkupBindingAdapter(LanguageAdapter, Protocol):
+class MarkupEventHandlerExtractor(LanguageAdapter, Protocol):
     """対になるマークアップのファイルがメソッドを呼ぶ言語アダプタ（XAML のイベント結線）。"""
 
-    def markup_path(self, path: str, /) -> str | None:
+    def paired_markup_path(self, path: str, /) -> str | None:
         """ソースのパスに対になるマークアップのパス。対になるものが無い名前なら None。"""
         ...
 
-    def markup_handlers(self, markup: str, /) -> frozenset[str]:
+    def handler_names_in_markup(self, markup: str, /) -> frozenset[str]:
         """マークアップが呼ぶ名前の候補。メソッドかどうかはソース側と突き合わせて決める。"""
         ...
 
 
 @runtime_checkable
-class ImportAdapter(LanguageAdapter, Protocol):
+class ImportedModuleExtractor(LanguageAdapter, Protocol):
     """import の文からモジュールの名前を取り出せる言語アダプタ（技術選定の口）。"""
 
-    def imports(self, root_node: Node, source: bytes, /) -> list[Import]:
+    def imported_modules(self, root_node: Node, source: bytes, /) -> list[ImportedModule]:
         """import の文が取り込むモジュールを、文書順に返す。一つの文が複数を取り込めば全て返す。"""
         ...
 
-    def technology_of(self, module: str, /) -> str:
+    def technology_name_of(self, module: str, /) -> str:
         """モジュールの名前を、技術の単位に束ねた名前にする。相対の import には呼ばない。"""
         ...
 
@@ -735,34 +749,34 @@ class CommandArgument:
     """副コマンドの引数一つ。値の欄は、ソースの原文のまま取る。評価はしない。"""
 
     # 副コマンドの名前。最上位の parser の引数では空
-    command: str
+    subcommand_name: str
     # `--region`、`-r` のような名前の並び。位置引数では名前一つ
-    names: tuple[str, ...]
+    option_names: tuple[str, ...]
     positional: bool
     # `dest=` の原文。書かれていなければ None
-    dest: str | None
+    dest_text: str | None
     # `default=` の原文。書かれていなければ None
-    default: str | None
+    default_text: str | None
     # `required=` の原文。書かれていなければ None
     required_text: str | None
     # 必ず渡す引数か。`required=True` の引数と、nargs が `?`、`*` でない位置引数
     required: bool
     # `help=` の原文
-    help: str | None
-    action: str | None
-    type: str | None
-    choices: str | None
+    help_text: str | None
+    action_text: str | None
+    type_text: str | None
+    choices_text: str | None
     path: str
     # 1 始まり
     line: int
     # `add_argument_group`、`add_mutually_exclusive_group` の変数の名前。群に属さなければ None
-    group: str | None = None
+    group_variable_name: str | None = None
     # 群が排他か（`add_mutually_exclusive_group`）
-    exclusive: bool = False
+    group_exclusive: bool = False
 
 
 @runtime_checkable
-class CommandArgumentAdapter(LanguageAdapter, Protocol):
+class CommandArgumentExtractor(LanguageAdapter, Protocol):
     """副コマンドの引数を静的に読める言語アダプタ。"""
 
     def command_arguments(
@@ -782,11 +796,11 @@ class FileUsage(StrEnum):
 
 
 @dataclass(frozen=True)
-class FilePathPattern:
+class FilePathExpression:
     """ファイルの名前の組み立て一つ。式は原文のまま取り、評価しない。"""
 
     # 式を含む関数の修飾名。モジュール直下では空
-    function: str
+    function_qualified_name: str
     # 組み立ての原文（f 文字列、`Path(...)`、`/` の式）。変数を一段辿れたときは代入の右辺の原文
     expression: str
     usage: FileUsage
@@ -796,12 +810,12 @@ class FilePathPattern:
 
 
 @runtime_checkable
-class FilePathAdapter(LanguageAdapter, Protocol):
+class FilePathExpressionExtractor(LanguageAdapter, Protocol):
     """書き出す、または読むファイルの名前の組み立てを静的に読める言語アダプタ。"""
 
-    def file_path_patterns(
+    def file_path_expressions(
         self, root_node: Node, source: bytes, path: str, /
-    ) -> list[FilePathPattern]:
+    ) -> list[FilePathExpression]:
         """ファイルの名前の組み立てを文書順に返す。追えない形は返さない。"""
         ...
 
@@ -833,14 +847,14 @@ class StoreSide:
 
     role: StoreRole
     # 関数の修飾名（メソッドは `型.名前`）
-    function: str
+    function_qualified_name: str
     path: str
-    kind: StoreFormat
+    format: StoreFormat
     keys: frozenset[str]
     # 読む側が作る型の名前。書く側は空
-    types: frozenset[str]
+    created_type_names: frozenset[str]
     # 鍵の出どころの語彙の名前（列挙型、定数群）。ファイル名で束ねられない保存物を束ねる手がかり
-    labels: frozenset[str]
+    key_vocabulary_names: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -849,9 +863,9 @@ class StoreAccess:
 
     path: str
     # 関数が使う JSON、CSV、TSV のファイル名（定数を解いた文字列）
-    names: frozenset[str]
+    file_names: frozenset[str]
     # 関数が to_json と from_json の組を成す型のメソッドなら、その型の名前
-    pair_owner: str | None
+    pair_owner_type_name: str | None
     sides: tuple[StoreSide, ...]
 
     def __post_init__(self) -> None:
@@ -861,7 +875,7 @@ class StoreAccess:
 
 
 @runtime_checkable
-class StoreAccessReader(LanguageAdapter, Protocol):
+class StoreAccessExtractor(LanguageAdapter, Protocol):
     """保存物の書く側と読む側の鍵を、複数のファイルにまたがって静的に読める言語アダプタ。"""
 
     def store_accesses(self, sources: Mapping[str, str], /) -> list[StoreAccess]:
@@ -883,7 +897,7 @@ class PublicNameKind(StrEnum):
 
 
 @dataclass(frozen=True)
-class PublicName:
+class AddedPublicName:
     """変更で足した、または引数を足した公開の名前一つと、変更の後の木の中の呼ぶ側。"""
 
     name: str
@@ -895,7 +909,7 @@ class PublicName:
 
 
 @runtime_checkable
-class PublicNameReader(LanguageAdapter, Protocol):
+class AddedPublicNameFinder(LanguageAdapter, Protocol):
     """変更で足した公開の名前と、変更の後の木の中の呼ぶ側を読める言語アダプタ。"""
 
     def added_public_names(
@@ -904,7 +918,7 @@ class PublicNameReader(LanguageAdapter, Protocol):
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         """相対パスからソースへの対応（変更の前と後の木）を受け取り、足した公開の名前を返す。
 
         changed は変更の後の木で変えたファイルのパス。名前の定義はそこから拾い、
@@ -933,7 +947,7 @@ class RegexUse(StrEnum):
 
 
 @dataclass(frozen=True)
-class RegexLiteral:
+class RegexLiteralSite:
     """正規表現の書き場所一つ。正規表現は文字列の定数を解いた値で、言語の文字列の書き方は外してある。"""
 
     # 正規表現の本文。Python の raw 文字列や Swift の `#/.../#` の囲みは外し、
@@ -941,7 +955,7 @@ class RegexLiteral:
     pattern: str
     dialect: RegexDialect
     # 書き場所の呼び名（`re.sub`、`Pattern.compile`、`Regex`、`/.../`）。表示にだけ使う
-    call: str
+    call_name: str
     use: RegexUse
     path: str
     # 1 始まり
@@ -949,10 +963,10 @@ class RegexLiteral:
 
 
 @dataclass(frozen=True)
-class RegexComposed:
+class RegexComposedSite:
     """値が文字列の定数でない正規表現の書き場所。本文が分からないので数えない。"""
 
-    call: str
+    call_name: str
     use: RegexUse
     path: str
     # 1 始まり
@@ -960,22 +974,22 @@ class RegexComposed:
 
 
 @dataclass(frozen=True)
-class RegexScan:
+class RegexSites:
     """一つのファイルの正規表現の書き場所。どちらも文書順。"""
 
-    literals: tuple[RegexLiteral, ...]
-    composed: tuple[RegexComposed, ...]
+    literal_sites: tuple[RegexLiteralSite, ...]
+    composed_sites: tuple[RegexComposedSite, ...]
 
 
 @runtime_checkable
-class RegexAdapter(LanguageAdapter, Protocol):
+class RegexSiteExtractor(LanguageAdapter, Protocol):
     """正規表現の書き場所を静的に読める言語アダプタ。"""
 
-    def regex_literals(self, root_node: Node, source: bytes, path: str, /) -> RegexScan:
+    def regex_sites(self, root_node: Node, source: bytes, path: str, /) -> RegexSites:
         """正規表現を受け取る呼び出しと正規表現の値を文書順に拾う。
 
-        受け取る呼び出しの最初の引数が文字列の定数（定数どうしの連結を含む）なら literals に、
-        それ以外の式なら composed に入れる。正規表現と関わらない文字列は拾わない。
+        受け取る呼び出しの最初の引数が文字列の定数（定数どうしの連結を含む）なら literal_sites に、
+        それ以外の式なら composed_sites に入れる。正規表現と関わらない文字列は拾わない。
         """
         ...
 
@@ -992,7 +1006,7 @@ class DefinitionKind(StrEnum):
 
 
 @dataclass(frozen=True)
-class ValueSet:
+class StringLiteralSet:
     """値の組一つ。要素がすべて短い文字列のリテラルで、要素が三つ以上の並び。"""
 
     # 要素の文字列。順序と重複は落とす
@@ -1002,10 +1016,10 @@ class ValueSet:
     line: int
     # 代入の左辺、宣言の名前、列挙型の型の名前。
     # 関数の引数に直に書いた並びなど、名前の無い並びは None
-    name: str | None = None
+    binding_name: str | None = None
     # 名前に束ねた定義か、名前の無いリテラルか。読み取り役が構文木から決めたときだけ
     # NAMED か LITERAL にし、決めていなければ UNDETERMINED
-    kind: DefinitionKind = DefinitionKind.UNDETERMINED
+    definition_kind: DefinitionKind = DefinitionKind.UNDETERMINED
 
 
 class ComparisonKind(StrEnum):
@@ -1019,28 +1033,24 @@ class ComparisonKind(StrEnum):
 
 
 @dataclass(frozen=True)
-class StringComparison:
+class StringLiteralComparison:
     """値と文字列のリテラルのまま比べている箇所一つ。`in` の組は要素ごとに一つ返す。"""
 
     # 比べている文字列。接頭辞、接尾辞、正規表現のときは、その文字列そのもの
-    value: str
-    kind: ComparisonKind
+    literal_value: str
+    comparison_kind: ComparisonKind
     path: str
     # 1 始まり
     line: int
     # 比べている相手の式の原文（`mode`、`self.kind` など）。読み取れない言語と形では空
-    subject: str = ""
+    compared_expression: str = ""
 
 
 @runtime_checkable
-class ValueSetReader(LanguageAdapter, Protocol):
-    """値の組と、値の組の値と比べている箇所を静的に読める言語アダプタ。
+class StringLiteralSetExtractor(LanguageAdapter, Protocol):
+    """値の組を静的に読める言語アダプタ。"""
 
-    二つの読み取りは一つの口にまとめる。図は一つの口しか持てず、比べている箇所は
-    値の組と突き合わせて初めて意味を持つため、片方だけを持つ言語を作る理由が無い。
-    """
-
-    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+    def string_literal_sets(self, source: str, path: str, /) -> list[StringLiteralSet]:
         """一つのファイルの値の組を、文書順に返す。
 
         対象は tuple、set、frozenset、list のリテラルと、列挙型の値の並び。
@@ -1048,7 +1058,14 @@ class ValueSetReader(LanguageAdapter, Protocol):
         """
         ...
 
-    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+
+@runtime_checkable
+class StringLiteralComparisonExtractor(LanguageAdapter, Protocol):
+    """文字列のリテラルとの比較を静的に読める言語アダプタ。"""
+
+    def string_literal_comparisons(
+        self, source: str, path: str, /
+    ) -> list[StringLiteralComparison]:
         """一つのファイルの、文字列のリテラルとの比較を、文書順に返す。
 
         形は等値と不等値、`in`（名前の付いた組はそのファイルの中の定義を引く）、
@@ -1058,21 +1075,21 @@ class ValueSetReader(LanguageAdapter, Protocol):
 
 
 @dataclass(frozen=True)
-class TypeFields:
+class TypeFieldNames:
     """トップレベルの型一つの、宣言した項目の名前（宣言の順）。"""
 
-    name: str
+    type_name: str
     path: str
     # 1 始まり
     line: int
-    fields: tuple[str, ...]
+    field_names: tuple[str, ...]
 
 
 @runtime_checkable
-class TypeFieldReader(LanguageAdapter, Protocol):
+class TypeFieldNameExtractor(LanguageAdapter, Protocol):
     """型の宣言と、その項目の名前を静的に読める言語アダプタ。"""
 
-    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+    def type_field_names(self, text: str, path: str, /) -> list[TypeFieldNames]:
         """一つのファイルのトップレベルの型と項目の名前を、文書順に返す。
 
         項目のある型だけを返す。読めないファイルは空を返す。
@@ -1081,7 +1098,7 @@ class TypeFieldReader(LanguageAdapter, Protocol):
 
 
 @dataclass(frozen=True)
-class StringConstant:
+class TopLevelStringConstant:
     """ファイル直下で空でない文字列を代入している定数一つ。"""
 
     name: str
@@ -1091,11 +1108,46 @@ class StringConstant:
 
 
 @runtime_checkable
-class StringConstantReader(LanguageAdapter, Protocol):
+class TopLevelStringConstantExtractor(LanguageAdapter, Protocol):
     """ファイル直下の文字列定数を静的に読める言語アダプタ。"""
 
-    def string_constants(self, source: str, /) -> list[StringConstant]:
-        """一つのファイルの文字列定数を、文書順に返す。読めないファイルは空を返す。"""
+    def top_level_string_constants(self, source: str, /) -> list[TopLevelStringConstant]:
+        """一つのファイルの、ファイル直下で空でない文字列を代入した定数だけを、文書順に返す。
+
+        関数やクラスの中の代入と、空の文字列の代入は返さない。読めないファイルは空を返す。
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class UnsupportedSyntaxKind:
+    # 言語の中での種類の名前。綴りの規則は ConstructKind.of_language（gates）が持つ
+    name: str
+    # 見出し。「{見出し}です。」と文に入る名詞句
+    title: str
+    # 直し方。句点で終わる文
+    fix_hint: str
+
+
+@dataclass(frozen=True)
+class UnsupportedSyntax:
+    kind: UnsupportedSyntaxKind
+    # 1 始まり。サポートしない構文の先頭の行
+    line: int
+
+
+@runtime_checkable
+class UnsupportedSyntaxDetector(LanguageAdapter, Protocol):
+    """jigane がサポートしない構文を、木のルートから見つけられる言語アダプタ。
+
+    外部のプラグインの作者が実装する拡張点として公開するインターフェースで、
+    UnsupportedSyntax と UnsupportedSyntaxKind とともに、試験的な段（languages/api/capabilities）
+    から再公開する。実装しない言語は、サポートしない構文の申告が無いことを表す。
+    戻り値の誤りは、jigane が検出でアダプタの name を添えた ValueError にする。
+    """
+
+    def unsupported_syntax(self, root_node: Node, source: bytes, /) -> list[UnsupportedSyntax]:
+        """サポートしない構文ごとに一件を返す。順序は問わず、同じ行の二件は二件のまま数える。"""
         ...
 
 
@@ -1118,12 +1170,8 @@ def leading_components(module: str, count: int) -> str:
 
 
 def grammar_target(adapter: LanguageAdapter) -> GrammarTarget:
-    """文法の層へ渡す照合の対象。追加の言語の対象は、登録の層が包んだアダプタの属性に持つ。"""
-    attached = getattr(adapter, "grammar_target", None)
-    if isinstance(attached, BuiltinGrammar | DeclaredGrammar):
-        return attached
-    # 属性を持たないアダプタは組み込みで、組み込みの記録が照合の根拠になる
-    return BuiltinGrammar(adapter.grammar)
+    """文法の層へ渡す照合の対象。追加の言語の対象は、文法の層の表が持つ。"""
+    return target_of(adapter)
 
 
 def parse(adapter: LanguageAdapter, source: bytes) -> Tree:

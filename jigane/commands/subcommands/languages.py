@@ -14,6 +14,7 @@ from typing import ClassVar, assert_never
 from jigane.commands.consent import ConsentDeclinedError, ConsentUnavailableError, is_yes
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
+from jigane.commands.language_guidance import detail_with_guidance
 from jigane.commands.output import print_lines
 from jigane.commands.terms_consent import ACCEPT_TERMS_OPTION, require_terms_consent
 from jigane.git.process import CONSENT_PROMPT_END
@@ -23,6 +24,7 @@ from jigane.languages.enabled import (
     ENABLED_FILE,
     EnabledFileError,
     EnabledLanguage,
+    OlderRecordError,
     load_enabled,
     save_enabled,
 )
@@ -311,7 +313,7 @@ def _row_of(state: LanguageState, not_enabled_version: str | None) -> LanguageRo
                 distribution=None if state.distribution is None else clean(state.distribution),
                 version=None if state.version is None else clean(state.version),
                 reason_kind=str(state.reason_kind),
-                detail=clean(state.detail),
+                detail=clean(detail_with_guidance(state)),
             )
         case _ as unreachable:
             assert_never(unreachable)
@@ -453,6 +455,9 @@ def _verify(entry_point: EntryPoint) -> str | None:
 def _load_for_edit(path: Path) -> tuple[EnabledLanguage, ...]:
     try:
         return load_enabled(path)
+    except OlderRecordError as error:
+        # 文が消す手順まで示すので、直す手順は足さない
+        raise registry.LanguagePluginUnavailableError(str(error)) from error
     except EnabledFileError as error:
         raise registry.LanguagePluginUnavailableError(
             f"{error}\n{ENABLED_FILE} を直すか、消してからもう一度実行してください"

@@ -1,6 +1,6 @@
 """値の組の抽出（Python）。構文木（ast）だけから読み、実行も評価もしない。
 
-区別（`ValueSet.kind`）は、
+区別（`StringLiteralSet.definition_kind`）は、
 宣言の名前を取り出せた並びを名前に束ねた定義（NAMED）、
 名前が取れず、
 並びが代入（`=`、
@@ -18,7 +18,7 @@
 import ast
 from collections.abc import Iterator
 
-from jigane.languages.base import ValueSet
+from jigane.languages.base import StringLiteralSet
 from jigane.languages.python_ast import parse_python
 from jigane.languages.value_set_core import MAX_VALUE_LENGTH, MIN_VALUES, ordered_value_sets
 
@@ -128,7 +128,7 @@ def _found(tree: ast.Module) -> Iterator[tuple[frozenset[str], int, str | None, 
             yield values, node.lineno, node.name, False
 
 
-def value_sets(source: str, path: str) -> list[ValueSet]:
+def string_literal_sets(source: str, path: str) -> list[StringLiteralSet]:
     """ファイルの値の組を、定義の行の順に返す。構文として読めないファイルは空。"""
     tree = parse_python(source)
     if tree is None:

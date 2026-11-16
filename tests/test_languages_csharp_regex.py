@@ -1,6 +1,6 @@
 import pytest
 
-from jigane.languages.base import RegexAdapter, RegexDialect, RegexScan, RegexUse, parse
+from jigane.languages.base import RegexDialect, RegexSiteExtractor, RegexSites, RegexUse, parse
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.csharp_regex import _LOCALS
 from jigane.languages.regex_locals import local_value
@@ -8,18 +8,18 @@ from jigane.languages.regex_locals import local_value
 ADAPTER = CSharpAdapter()
 
 
-def scan(body: str) -> RegexScan:
+def scan(body: str) -> RegexSites:
     source = ("class A { void F() {\n" + body + "\n} }").encode()
     tree = parse(ADAPTER, source)
-    return ADAPTER.regex_literals(tree.root_node, source, "A.cs")
+    return ADAPTER.regex_sites(tree.root_node, source, "A.cs")
 
 
 def patterns(body: str) -> list[tuple[str, str]]:
-    return [(literal.call, literal.pattern) for literal in scan(body).literals]
+    return [(literal.call_name, literal.pattern) for literal in scan(body).literal_sites]
 
 
 def test_adapter_satisfies_regex_protocol() -> None:
-    assert isinstance(ADAPTER, RegexAdapter)
+    assert isinstance(ADAPTER, RegexSiteExtractor)
 
 
 def test_new_regex_and_qualified_name() -> None:
@@ -50,8 +50,8 @@ def test_static_method_pattern_is_second_argument() -> None:
 
 def test_static_method_composed_second_argument() -> None:
     result = scan('Regex.IsMatch(s, pat);\nRegex.IsMatch("a", pat + "b");')
-    assert result.literals == ()
-    assert [(c.call, c.line) for c in result.composed] == [
+    assert result.literal_sites == ()
+    assert [(c.call_name, c.line) for c in result.composed_sites] == [
         ("Regex.IsMatch", 2),
         ("Regex.IsMatch", 3),
     ]
@@ -64,8 +64,8 @@ def test_static_method_named_pattern() -> None:
 
 def test_static_method_with_one_argument_is_not_picked() -> None:
     result = scan('Regex.IsMatch("a+");')
-    assert result.literals == ()
-    assert result.composed == ()
+    assert result.literal_sites == ()
+    assert result.composed_sites == ()
 
 
 def test_generated_regex_attribute() -> None:
@@ -74,16 +74,16 @@ def test_generated_regex_attribute() -> None:
         b"private static partial Regex R(); }"
     )
     tree = parse(ADAPTER, source)
-    result = ADAPTER.regex_literals(tree.root_node, source, "A.cs")
-    assert [(r.call, r.pattern, r.dialect) for r in result.literals] == [
+    result = ADAPTER.regex_sites(tree.root_node, source, "A.cs")
+    assert [(r.call_name, r.pattern, r.dialect) for r in result.literal_sites] == [
         ("GeneratedRegex", "a|b", RegexDialect.DOTNET)
     ]
 
 
 def test_line_numbers_are_one_based() -> None:
     result = scan('var a = new Regex("x");')
-    assert result.literals[0].line == 2
-    assert result.literals[0].path == "A.cs"
+    assert result.literal_sites[0].line == 2
+    assert result.literal_sites[0].path == "A.cs"
 
 
 def test_constant_concatenation_is_literal() -> None:
@@ -95,8 +95,8 @@ def test_composed_sites() -> None:
         'var a = new Regex(name);\nRegex.IsMatch(s, $"a{x}");\nvar b = new Regex("a" + x);\n'
         'var c = new Regex(string.Format("{0}", x));'
     )
-    assert result.literals == ()
-    assert [(c.call, c.line) for c in result.composed] == [
+    assert result.literal_sites == ()
+    assert [(c.call_name, c.line) for c in result.composed_sites] == [
         ("Regex", 2),
         ("Regex.IsMatch", 3),
         ("Regex", 4),
@@ -106,8 +106,8 @@ def test_composed_sites() -> None:
 
 def test_document_order_across_kinds() -> None:
     result = scan('new Regex(a);\nnew Regex("b");\nnew Regex(c);')
-    assert [c.line for c in result.composed] == [2, 4]
-    assert [r.line for r in result.literals] == [3]
+    assert [c.line for c in result.composed_sites] == [2, 4]
+    assert [r.line for r in result.literal_sites] == [3]
 
 
 def test_not_picked() -> None:
@@ -121,8 +121,8 @@ def test_not_picked() -> None:
         'Console.WriteLine("a");'
     )
     result = scan(body)
-    assert result.literals == ()
-    assert result.composed == ()
+    assert result.literal_sites == ()
+    assert result.composed_sites == ()
 
 
 def test_verbatim_string() -> None:
@@ -146,7 +146,7 @@ def test_uses() -> None:
         'new Regex("ab"); Regex.IsMatch(s, "ab"); Regex.Match(s, "ab"); Regex.Matches(s, "ab");'
         ' Regex.Replace(s, "ab", "c"); Regex.Split(s, "ab"); new Regex(x);'
     )
-    assert [(r.call, r.use) for r in result.literals] == [
+    assert [(r.call_name, r.use) for r in result.literal_sites] == [
         ("Regex", RegexUse.COMPILE),
         ("Regex.IsMatch", RegexUse.MATCH),
         ("Regex.Match", RegexUse.MATCH),
@@ -154,24 +154,24 @@ def test_uses() -> None:
         ("Regex.Replace", RegexUse.REPLACE),
         ("Regex.Split", RegexUse.SPLIT),
     ]
-    assert [(r.call, r.use) for r in result.composed] == [("Regex", RegexUse.COMPILE)]
+    assert [(r.call_name, r.use) for r in result.composed_sites] == [("Regex", RegexUse.COMPILE)]
 
 
 def test_local_constant_is_followed_one_step() -> None:
     found = scan(
         'var p = @"a+" + "b";\nRegex.IsMatch(s, p);\nconst string q = "c";\nnew Regex(q);'
     )
-    assert [(x.call, x.pattern) for x in found.literals] == [
+    assert [(x.call_name, x.pattern) for x in found.literal_sites] == [
         ("Regex.IsMatch", "a+b"),
         ("Regex", "c"),
     ]
-    assert found.composed == ()
+    assert found.composed_sites == ()
 
 
 def test_local_constant_is_not_followed_across_two_steps() -> None:
     found = scan('var p = "a";\nvar q = p;\nRegex.IsMatch(s, q);')
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 @pytest.mark.parametrize(
@@ -189,16 +189,16 @@ def test_local_constant_is_not_followed_across_two_steps() -> None:
 )
 def test_local_constant_is_not_followed(body: str) -> None:
     found = scan(body)
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_parameter_is_not_followed() -> None:
     source = b"class A { void F(string p) { Regex.IsMatch(s, p); } }"
     tree = parse(ADAPTER, source)
-    found = ADAPTER.regex_literals(tree.root_node, source, "A.cs")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    found = ADAPTER.regex_sites(tree.root_node, source, "A.cs")
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_parenthesized_constant_is_literal() -> None:
@@ -207,47 +207,47 @@ def test_parenthesized_constant_is_literal() -> None:
 
 def test_non_plus_binary_expression_is_composed() -> None:
     result = scan('new Regex("a" - "b");\nnew Regex("a" == "b");')
-    assert result.literals == ()
-    assert [(c.call, c.line) for c in result.composed] == [("Regex", 2), ("Regex", 3)]
+    assert result.literal_sites == ()
+    assert [(c.call_name, c.line) for c in result.composed_sites] == [("Regex", 2), ("Regex", 3)]
 
 
 def test_other_attributes_are_not_picked() -> None:
     source = b'partial class A { [Obsolete("a+")] private static partial Regex R(); }'
     tree = parse(ADAPTER, source)
-    found = ADAPTER.regex_literals(tree.root_node, source, "A.cs")
-    assert found.literals == ()
-    assert found.composed == ()
+    found = ADAPTER.regex_sites(tree.root_node, source, "A.cs")
+    assert found.literal_sites == ()
+    assert found.composed_sites == ()
 
 
-def generated_regex(attribute: str) -> RegexScan:
+def generated_regex(attribute: str) -> RegexSites:
     source = f"partial class A {{ [{attribute}] private static partial Regex R(); }}".encode()
     tree = parse(ADAPTER, source)
-    return ADAPTER.regex_literals(tree.root_node, source, "A.cs")
+    return ADAPTER.regex_sites(tree.root_node, source, "A.cs")
 
 
 def test_generated_regex_without_arguments_is_not_picked() -> None:
     found = generated_regex("GeneratedRegex")
-    assert found.literals == ()
-    assert found.composed == ()
+    assert found.literal_sites == ()
+    assert found.composed_sites == ()
 
 
 def test_generated_regex_named_pattern_argument() -> None:
     found = generated_regex('GeneratedRegex(pattern: "a")')
-    assert [(x.call, x.pattern) for x in found.literals] == [("GeneratedRegex", "a")]
-    assert found.composed == ()
+    assert [(x.call_name, x.pattern) for x in found.literal_sites] == [("GeneratedRegex", "a")]
+    assert found.composed_sites == ()
 
 
 def test_generated_regex_named_property_argument_is_composed() -> None:
     found = generated_regex("GeneratedRegex(Options = RegexOptions.None)")
-    assert found.literals == ()
-    assert [x.call for x in found.composed] == ["GeneratedRegex"]
+    assert found.literal_sites == ()
+    assert [x.call_name for x in found.composed_sites] == ["GeneratedRegex"]
 
 
 @pytest.mark.parametrize("argument", ["ref p", "out var p", "p: ref q"])
 def test_ref_argument_is_composed(argument: str) -> None:
     result = scan(f"new Regex({argument});")
-    assert result.literals == ()
-    assert len(result.composed) == 1
+    assert result.literal_sites == ()
+    assert len(result.composed_sites) == 1
 
 
 def test_local_value_of_a_non_identifier_is_none() -> None:

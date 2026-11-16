@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 from fakes import NoSequenceAdapter
-from language_plugin_support import Installer, approved, legacy_record
+from language_plugin_support import Installer, approved, recorded
 
 from jigane import commands
 from jigane.languages import registry
 from jigane.languages.enabled import EnabledLanguage
+from jigane.languages.interface_keys import INTERFACE_KEYS
 from jigane.skills.language_support import support_of
 from jigane.skills.policy_figures import REGISTRY, LanguageAgnostic
 
@@ -38,8 +39,8 @@ def _write_enabled(tmp_path: Path, *pairs: tuple[str, str]) -> None:
 
 
 def _write_not_installed(tmp_path: Path, *pairs: tuple[str, str]) -> None:
-    """site に入っていない配布の、旧い形の承認を書く。"""
-    _write_records(tmp_path, [legacy_record(name, dist) for name, dist in pairs])
+    """site に入っていない配布の、中身が空の承認を書く。"""
+    _write_records(tmp_path, [recorded(name, dist) for name, dist in pairs])
 
 
 def _enable(argv: list[str], answer: str = "y", *, terminal: bool = True) -> int:
@@ -218,7 +219,9 @@ def test_disable_removes_the_pair(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert commands.main(["languages", "disable", "zig"]) == 0
     assert "外しました" in capsys.readouterr().out
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
-    assert saved == {"enabled": [{"name": "go", "distribution": "go-dist", "version": "1.0"}]}
+    assert saved == {
+        "enabled": [{"name": "go", "distribution": "go-dist", "version": "1.0", "files": {}}]
+    }
 
 
 def test_disable_of_an_absent_name_is_not_an_error(
@@ -283,7 +286,7 @@ def test_enable_after_an_upgrade_asks_again_and_replaces_the_old_version(
     install("zig")
     path = _languages_file(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    old = {"name": "zig", "distribution": "fakelang-zig-dist", "version": "0.9"}
+    old = {"name": "zig", "distribution": "fakelang-zig-dist", "version": "0.9", "files": {}}
     path.write_text(json.dumps({"enabled": [old]}), encoding="utf-8")
     # 版が違う承認は有効な承認に数えず、端末でなければ確認を得られず止まる
     assert _enable(["languages", "enable", "zig"], terminal=False) != 0
@@ -400,8 +403,8 @@ def test_disable_requires_distribution_when_several_are_enabled(
     assert commands.main(["languages", "disable", "zig", "--distribution", "First_Dist"]) == 0
     saved = json.loads(_languages_file(tmp_path).read_text(encoding="utf-8"))
     assert saved["enabled"] == [
-        {"name": "zig", "distribution": "second-dist", "version": "1.0"},
-        {"name": "go", "distribution": "go-dist", "version": "1.0"},
+        {"name": "zig", "distribution": "second-dist", "version": "1.0", "files": {}},
+        {"name": "go", "distribution": "go-dist", "version": "1.0", "files": {}},
     ]
 
 
@@ -482,45 +485,48 @@ def test_json_shape_of_unavailable_row_is_unchanged(
     assert row["suffixes"] == []
 
 
-_COMMON = {"SequenceAdapter", "ConcurrencyAdapter", "ImportAdapter", "RegexAdapter"}
+_COMMON = {
+    "sequence",
+    "concurrency",
+    "imported_modules",
+    "regex_sites",
+    "string_literal_sets",
+    "string_literal_comparisons",
+}
 _EXTRA = {
     "python": {
-        "CommandArgumentAdapter",
-        "DiscriminatorReader",
-        "FilePathAdapter",
-        "PublicNameReader",
-        "StoreAccessReader",
-        "TypeFieldReader",
+        "top_level_string_constants",
+        "command_arguments",
+        "discriminator_flow_steps",
+        "file_path_expressions",
+        "added_public_names",
+        "store_accesses",
+        "type_field_names",
     },
     "csharp": {
-        "DiscriminatorReader",
-        "FilePathAdapter",
-        "MarkupBindingAdapter",
-        "PublicNameReader",
-        "TypeFieldReader",
+        "discriminator_flow_steps",
+        "file_path_expressions",
+        "markup_event_handlers",
+        "added_public_names",
+        "type_field_names",
+        "unsupported_syntax",
     },
-    "java": {"DiscriminatorReader", "FilePathAdapter", "PublicNameReader", "TypeFieldReader"},
+    "java": {
+        "discriminator_flow_steps",
+        "file_path_expressions",
+        "added_public_names",
+        "type_field_names",
+    },
     "swift": {
-        "DiscriminatorReader",
-        "FilePathAdapter",
-        "PublicNameReader",
-        "StoreAccessReader",
-        "TypeFieldReader",
+        "discriminator_flow_steps",
+        "file_path_expressions",
+        "added_public_names",
+        "store_accesses",
+        "type_field_names",
+        "unsupported_syntax",
     },
 }
-_ALL_INTERFACES = {
-    "SequenceAdapter",
-    "ConcurrencyAdapter",
-    "DiscriminatorReader",
-    "ImportAdapter",
-    "MarkupBindingAdapter",
-    "CommandArgumentAdapter",
-    "FilePathAdapter",
-    "PublicNameReader",
-    "StoreAccessReader",
-    "RegexAdapter",
-    "TypeFieldReader",
-}
+_ALL_INTERFACES = set(INTERFACE_KEYS.values())
 
 
 def test_builtin_interfaces_match_the_implementation(
@@ -609,14 +615,50 @@ def test_enable_confirmation_shows_the_changed_files_when_only_the_content_diffe
     assert "承認のあと、配布の中身が変わっています（変わった: fakelang_zig.py）" in err
 
 
-def test_enable_confirmation_says_why_for_a_record_in_the_old_form(
+def _write_old_form(tmp_path: Path) -> Path:
+    path = _languages_file(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old = {"name": "zig", "distribution": "fakelang-zig-dist", "version": "1.0"}
+    path.write_text(json.dumps({"enabled": [old]}), encoding="utf-8")
+    return path
+
+
+def test_enable_stops_on_a_record_in_the_old_form_and_says_to_delete_the_file(
     install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     install("zig")
-    _write_records(tmp_path, [legacy_record("zig", "fakelang-zig-dist")])
+    path = _write_old_form(tmp_path)
+    capsys.readouterr()
+    assert _enable(["languages", "enable", "zig"]) != 0
+    err = capsys.readouterr().err
+    assert f"{path.resolve()} の「zig」は古い形式です。この languages.json を消してから" in err
+    assert "直すか、消して" not in err
+
+
+def test_deleting_the_old_form_file_lets_enable_pass(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install("zig")
+    path = _write_old_form(tmp_path)
+    path.unlink()
     capsys.readouterr()
     assert _enable(["languages", "enable", "zig"]) == 0
-    assert "旧い形の承認記録です（中身の照合ができません）" in capsys.readouterr().err
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert [entry["name"] for entry in saved["enabled"]] == ["zig"]
+
+
+@pytest.mark.parametrize("argv", [["templates"], ["languages", "list"]])
+def test_other_subcommands_stop_on_the_old_form_and_pass_after_deleting_the_file(
+    install: Installer, tmp_path: Path, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    install("zig")
+    path = _write_old_form(tmp_path)
+    capsys.readouterr()
+    assert commands.main(argv) != 0
+    err = capsys.readouterr().err
+    assert f"{path.resolve()} の「zig」は古い形式です。この languages.json を消してから" in err
+    path.unlink()
+    assert commands.main(argv) == 0
 
 
 def test_enable_confirmation_for_a_new_approval_shows_no_reason(
@@ -627,4 +669,3 @@ def test_enable_confirmation_for_a_new_approval_shows_no_reason(
     assert _enable(["languages", "enable", "zig"]) == 0
     err = capsys.readouterr().err
     assert "承認のあと" not in err
-    assert "旧い形" not in err

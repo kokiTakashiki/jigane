@@ -10,7 +10,7 @@ from jigane.reviews.catalog import (
     ARCHIVED_ONLY,
     TRASH_DIRECTORY,
     check_stored_id,
-    list_reviews,
+    list_review_summaries,
     parse_stored_id,
 )
 from jigane.reviews.review_formats import load_review_meta
@@ -41,7 +41,7 @@ def _stored_ids_named(name: str, repository: Repository | None = None) -> list[R
     repository を渡すと、その owner/repo の下だけを探す。渡さなければ全リポジトリを探す。
 
     置き場の全件は読まない。名前の合うディレクトリの review.json から id だけを読む。
-    読めない記録は候補にしない（壊れた記録の扱いは list_reviews と delete が持つ）。
+    読めない記録は候補にしない（壊れた記録の扱いは list_review_summaries と delete が持つ）。
     """
     home = data_home()
     found: list[ReviewId] = []
@@ -111,11 +111,11 @@ def resolve_review(text: str, working_directory: Path | None = None) -> CheckedR
         raise ReviewError(str(error)) from error
     # 短い識別子は、アーカイブしていないレビューを先に探す。無いときだけアーカイブ済みへ広げる。
     # 置き場の全件を読むのは、短い形と分かってからにする
-    known = [review.id for review in list_reviews()]
+    known = [review.id for review in list_review_summaries()]
     matches = _short_matches(known, repo, kind, key)
     if not matches:
         matches = _short_matches(
-            [review.id for review in list_reviews(ARCHIVED_ONLY)], repo, kind, key
+            [review.id for review in list_review_summaries(ARCHIVED_ONLY)], repo, kind, key
         )
     if not matches:
         raise ReviewError(f"レビューがありません: {text}")

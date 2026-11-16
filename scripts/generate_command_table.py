@@ -31,6 +31,7 @@ STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("指摘を選ぶ", ("pick", "unpick", "hold", "unhold", "object", "unobject")),
     ("書き出す", ("export-reply", "export-report", "templates")),
     ("導入", ("languages",)),
+    ("確かめる", ("debug",)),
 )
 
 

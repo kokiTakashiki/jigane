@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import MacroFailure, MacroFake, discovered, settings_for
+from fakes import STARTED_AT, MacroFailure, MacroFake, discovered, settings_for
 from keep_previous_support import extras, first_run
 from keep_previous_support import settings as keep_settings
+from review_fakes import current_form_findings
+from runs_support import write_runs_json
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -45,11 +47,13 @@ def invocation(role: str, **overrides: str | float) -> dict[str, Any]:
         "cache_read_input_tokens": 100,
         "cache_creation_input_tokens": 1000,
         "cost_usd": 0.5,
+        "cost_source": "measured",
         "duration_ms": 2000,
         "num_turns": 3,
         "is_error": False,
         "terminal_reason": None,
         "permission_denials": 0,
+        "started_at": "2026-11-01T00:00:00+00:00",
         **overrides,
     }
 
@@ -79,8 +83,10 @@ def write_fixture(review: Review) -> None:
             ]
         },
     }
-    (directory / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
-    (directory / "findings.json").write_text(json.dumps(findings), encoding="utf-8")
+    write_runs_json(directory, runs)
+    (directory / "findings.json").write_text(
+        json.dumps(current_form_findings(findings)), encoding="utf-8"
+    )
 
 
 def usage_json(review: Review, capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
@@ -129,7 +135,7 @@ def test_usage_writes_a_diagram_run_as_a_diagram_row_in_csv(
 ) -> None:
     review = create_feature_review(project, ["src"], "p")
     runs = {"macro": {"model": "m", "shape": "diagram", "invocations": [invocation("diagram")]}}
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     assert main(["usage", str(review.id), "--csv"]) == EXIT_OK
     rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
     assert [(r["group"], r["role"]) for r in rows] == [("方針", "図"), ("方針", "合計")]
@@ -143,7 +149,7 @@ def test_usage_reads_past_single_and_full_runs(
     runs = {
         "macro": {"model": "m", "shape": "full", "invocations": [invocation(r) for r in roles]}
     }
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     rows = usage_json(review, capsys)
     assert {r["role"] for r in rows if r["role"] != "合計"} == {
         "一回の形（廃止）",
@@ -516,19 +522,19 @@ def test_shared_usage_fields_match_the_columns_the_writer_defines() -> None:
 
 
 def test_invocation_model_is_recorded_and_read_back() -> None:
-    row = claude.parse_record({}, 0.5, "haiku").as_row()
+    row = claude.parse_record({}, 0.5, started_at=STARTED_AT, model="haiku").as_row()
     assert row["model"] == "haiku"
     assert claude.StoredInvocationRecord.from_row(row).model == "haiku"
-    assert claude.failure_record(None, 0.5, "haiku").model == "haiku"
+    assert claude.failure_record(None, 0.5, started_at=STARTED_AT, model="haiku").model == "haiku"
 
 
 def test_invocation_without_model_reads_as_none_and_writes_no_key() -> None:
-    old_row = claude.parse_record({}, 0.5, "haiku").as_row()
+    old_row = claude.parse_record({}, 0.5, started_at=STARTED_AT, model="haiku").as_row()
     del old_row["model"]
     old = claude.StoredInvocationRecord.from_row(old_row)
     assert old.model is None
     assert "model" not in old.as_row()
-    assert "model" not in claude.parse_record({}, 0.5).as_row()
+    assert "model" not in claude.parse_record({}, 0.5, started_at=STARTED_AT).as_row()
 
 
 def test_usage_rows_show_the_model_of_each_invocation(
@@ -545,7 +551,7 @@ def test_usage_rows_show_the_model_of_each_invocation(
             ],
         }
     }
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     rows = usage_json(review, capsys)
     assert [(row["model"], row["calls"]) for row in rows[:-1]] == [("sonnet", 1), ("haiku", 2)]
     assert rows[-1]["model"] == "sonnet, haiku"
@@ -561,7 +567,7 @@ def test_usage_splits_one_role_by_model_and_keeps_old_records_on_the_run_model(
             "invocations": [invocation("judge"), invocation("judge", model="haiku")],
         }
     }
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     rows = usage_json(review, capsys)
     assert [(row["model"], row["calls"]) for row in rows] == [
         ("haiku", 1),

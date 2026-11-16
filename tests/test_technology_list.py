@@ -9,7 +9,7 @@ from review_fakes import make_review
 
 from jigane.commands.subcommands import technology_list as technology_command
 from jigane.git.tree_files import walk_tree_files
-from jigane.languages.base import Import, ImportAdapter, parse
+from jigane.languages.base import ImportedModule, ImportedModuleExtractor, parse
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.java import JavaAdapter
 from jigane.languages.python import PythonAdapter
@@ -21,9 +21,9 @@ from jigane.technology_list.build import build_model
 from jigane.technology_list.tables import platform_coverage as _platform_coverage
 
 
-def _imports(adapter: ImportAdapter, text: str) -> list[Import]:
+def _imports(adapter: ImportedModuleExtractor, text: str) -> list[ImportedModule]:
     source = text.encode()
-    return adapter.imports(parse(adapter, source).root_node, source)
+    return adapter.imported_modules(parse(adapter, source).root_node, source)
 
 
 def test_swift_imports() -> None:
@@ -31,8 +31,12 @@ def test_swift_imports() -> None:
         SwiftAdapter(),
         "import Foundation\n@testable import MyApp\nimport struct Foo.Bar\n",
     )
-    assert found == [Import("Foundation", 1), Import("MyApp", 2), Import("Foo.Bar", 3)]
-    assert SwiftAdapter().technology_of("Foo.Bar") == "Foo"
+    assert found == [
+        ImportedModule("Foundation", 1),
+        ImportedModule("MyApp", 2),
+        ImportedModule("Foo.Bar", 3),
+    ]
+    assert SwiftAdapter().technology_name_of("Foo.Bar") == "Foo"
 
 
 def test_csharp_imports() -> None:
@@ -42,15 +46,15 @@ def test_csharp_imports() -> None:
         "global using A.B.C;\nnamespace X { using Q.R.S; }\n",
     )
     assert found == [
-        Import("System", 1),
-        Import("System.Math", 2),
-        Import("System.Text.StringBuilder", 3),
-        Import("A.B.C", 4),
-        Import("Q.R.S", 5),
+        ImportedModule("System", 1),
+        ImportedModule("System.Math", 2),
+        ImportedModule("System.Text.StringBuilder", 3),
+        ImportedModule("A.B.C", 4),
+        ImportedModule("Q.R.S", 5),
     ]
     adapter = CSharpAdapter()
-    assert adapter.technology_of("System.Text.StringBuilder") == "System.Text"
-    assert adapter.technology_of("System") == "System"
+    assert adapter.technology_name_of("System.Text.StringBuilder") == "System.Text"
+    assert adapter.technology_name_of("System") == "System"
 
 
 def test_python_imports() -> None:
@@ -59,21 +63,25 @@ def test_python_imports() -> None:
         "import a.b\nimport c.d as e, f\nfrom g.h import i\nfrom . import j\nfrom ..k import m\n",
     )
     assert found == [
-        Import("a.b", 1),
-        Import("c.d", 2),
-        Import("f", 2),
-        Import("g.h", 3),
-        Import(".", 4),
-        Import("..k", 5),
+        ImportedModule("a.b", 1),
+        ImportedModule("c.d", 2),
+        ImportedModule("f", 2),
+        ImportedModule("g.h", 3),
+        ImportedModule(".", 4),
+        ImportedModule("..k", 5),
     ]
-    assert PythonAdapter().technology_of("g.h") == "g"
+    assert PythonAdapter().technology_name_of("g.h") == "g"
 
 
 def test_java_imports() -> None:
     found = _imports(JavaAdapter(), "import a.b.C;\nimport static a.b.D.m;\nimport x.y.*;\n")
-    assert found == [Import("a.b.C", 1), Import("a.b.D.m", 2), Import("x.y", 3)]
-    assert JavaAdapter().technology_of("a.b.D.m") == "a.b"
-    assert JavaAdapter().technology_of("a") == "a"
+    assert found == [
+        ImportedModule("a.b.C", 1),
+        ImportedModule("a.b.D.m", 2),
+        ImportedModule("x.y", 3),
+    ]
+    assert JavaAdapter().technology_name_of("a.b.D.m") == "a.b"
+    assert JavaAdapter().technology_name_of("a") == "a"
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -284,6 +292,40 @@ def _deps(tmp_path: Path, files: dict[str, str]) -> list[manifests.Dependency]:
 
 def _find(deps: list[manifests.Dependency], name: str) -> manifests.Dependency:
     return next(d for d in deps if d.name == name)
+
+
+def _nested_package_json(depth: int) -> str:
+    # 全体の入れ子が depth 段になるよう、dependencies の外に深い配列を置く。
+    inner = "[" * (depth - 1) + "]" * (depth - 1)
+    return '{"dependencies": {"left-pad": "1.0.0"}, "extra": ' + inner + "}"
+
+
+def test_package_json_over_nesting_limit_is_skipped(tmp_path: Path) -> None:
+    text = _nested_package_json(manifests._MAX_JSON_NESTING + 1)
+    assert _deps(tmp_path, {"package.json": text}) == []
+
+
+def test_package_json_at_nesting_limit_is_read(tmp_path: Path) -> None:
+    text = _nested_package_json(manifests._MAX_JSON_NESTING)
+    deps = _deps(tmp_path, {"package.json": text})
+    assert _find(deps, "left-pad").version == "1.0.0"
+
+
+def test_package_json_is_read_through_bounded_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def exploding_loads(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(json, "loads", exploding_loads)
+    text = '{"dependencies": {"left-pad": "1.0.0"}}'
+    assert _deps(tmp_path, {"package.json": text}) == []
+
+
+def test_pyproject_toml_nested_past_the_recursion_limit_is_skipped(tmp_path: Path) -> None:
+    # tomllib は深い配列で RecursionError を出す（3.12〜3.14 のどれでも 5000 段で起きる）
+    text = "a = " + "[" * 5000 + "]" * 5000 + '\n[project]\ndependencies = ["requests>=2"]\n'
+    assert _deps(tmp_path, {"pyproject.toml": text}) == []
 
 
 def test_read_swift_manifest(tmp_path: Path) -> None:

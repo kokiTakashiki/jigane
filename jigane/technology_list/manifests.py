@@ -6,7 +6,6 @@
 配備の下限は、変更したファイルに効くマニフェストだけを対象にする。
 """
 
-import json
 import re
 import tomllib
 from collections.abc import Callable, Iterable, Sequence
@@ -18,6 +17,7 @@ from typing import Any
 from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.technology_list.changes import UNCHANGED, change_of
 from jigane.text.distribution_names import normalize_distribution
+from jigane.text.json_input import loads_bounded
 
 PACKAGE = "package"
 PRODUCT = "product"
@@ -41,6 +41,8 @@ class Dependency:
     kind: str = PACKAGE
 
 
+# package.json の正しい形は数段で収まる。PR の作者が決める入れ子で再帰を使い切らせない上限。
+_MAX_JSON_NESTING = 200
 _SWIFT_PLATFORM = re.compile(
     r'\.(iOS|macOS|tvOS|watchOS|visionOS|macCatalyst)\s*\(\s*(?:\.v([0-9_]+)|"([^"]+)")'
 )
@@ -130,8 +132,8 @@ def _csharp(text: str, path: str) -> list[Dependency]:
 def _toml(text: str) -> dict[str, Any]:
     try:
         return tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        # 壊れた宣言は読めないので、宣言も下限も無いものとして扱う
+    except (tomllib.TOMLDecodeError, RecursionError):
+        # 壊れた宣言と、tomllib が再帰を使い切る深い入れ子は、宣言も下限も無いものとして扱う
         return {}
 
 
@@ -159,8 +161,9 @@ def _python(text: str, path: str) -> list[Dependency]:
 
 def _javascript(text: str, path: str) -> list[Dependency]:
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        data = loads_bounded(text, _MAX_JSON_NESTING)
+    except ValueError:
+        # 構文の誤りも深すぎる入れ子も、読めない package.json として飛ばす。
         return []
     if not isinstance(data, dict):
         return []

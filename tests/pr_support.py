@@ -17,6 +17,13 @@ def isolated_git_environment() -> dict[str, str]:
         GIT_CONFIG_GLOBAL=os.devnull,
         GIT_CONFIG_NOSYSTEM="1",
         GIT_TERMINAL_PROMPT="0",
+        # commit の後に切り離して走る自動の maintenance を止める。走ると .git/objects を
+        # 詰め直し、試験が木を写すか消す最中にディレクトリが消える
+        GIT_CONFIG_COUNT="2",
+        GIT_CONFIG_KEY_0="maintenance.auto",
+        GIT_CONFIG_VALUE_0="false",
+        GIT_CONFIG_KEY_1="gc.auto",
+        GIT_CONFIG_VALUE_1="0",
     )
     return environment
 

@@ -44,7 +44,7 @@ class CodableFields:
         return frozenset(next(iter(definitions))) if len(definitions) == 1 else frozenset()
 
     def collect(self, root: Node, path: str) -> None:
-        by_line = {(t.name, t.line): t.fields for t in type_fields_of(root, path)}
+        by_line = {(t.type_name, t.line): t.field_names for t in type_fields_of(root, path)}
         for node in root.children:
             name = type_name(node) if node.type in TYPE_NODES else None
             if name is None or not _is_codable(node):

@@ -1,0 +1,15 @@
+id: no-bare-next-generator
+valid:
+  - required(next((c for c in children if c.type == ":"), None))
+  - next((x for x in items), default)
+  - next(iterator)
+  - items.next(x for x in items)
+invalid:
+  - next(c for c in children if c.type == ":")
+  - |
+    def f(items):
+        return next(
+            item
+            for item in items
+            if item
+        )

@@ -16,6 +16,6 @@
 
 読むサブパッケージ：なし
 
-読まれるサブパッケージ：`commands`、`design`、`findings`、`llm_runs`、`policy_materials`、`publishing`、`reviews`、`skills`
+読まれるサブパッケージ：`commands`、`design`、`findings`、`llm_runs`、`policy_materials`、`publishing`、`repository_docs`、`reviews`、`skills`
 
 <!-- END GENERATED: dependencies -->

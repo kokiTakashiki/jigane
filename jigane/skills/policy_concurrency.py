@@ -18,8 +18,8 @@ from jigane.languages.base import (
     ActorDomain,
     AwaitCall,
     BlockingWait,
-    Body,
     ConcurrencyAdapter,
+    ConcurrencyBody,
     ConcurrencyStep,
     ContinueOn,
     EventLoopDomain,
@@ -202,7 +202,9 @@ class _Drawing:
             return f"{self.alias(current)}->>{self.alias(current)}: {name}"
         return None
 
-    def enter(self, body: Body, current: Isolation, label: str, depth: int) -> list[str]:
+    def enter(
+        self, body: ConcurrencyBody, current: Isolation, label: str, depth: int
+    ) -> list[str]:
         """直前の領域と本体の領域が違うときだけ、本体へ渡る矢印。"""
         if body.isolation == current:
             return []
@@ -336,7 +338,7 @@ def _mermaid(drawing: _Drawing, home: Isolation, body: list[str]) -> str:
 
 def _function_panel(adapter: ConcurrencyAdapter, index: Index, member: Member) -> Panel | None:
     declaration = member.declaration
-    body = adapter.body_of(member.node)
+    body = adapter.body_node_of(member.node)
     if declaration is None or body is None:
         return None
     source = index.trees[member.path].root_node.text or b""

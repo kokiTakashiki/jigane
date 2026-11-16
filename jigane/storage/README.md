@@ -6,13 +6,15 @@
 
 | モジュール | 役割 |
 | --- | --- |
-| `store` | データホスト（根は新しく作るときだけ 0700 にし、既にある根の権限は変えません）とレビューの識別子を持ちます |
-| `locking` | OS のファイルロックと、レビューのディレクトリの状態を排他にする `review_lock` を持ちます |
-| `atomic_write` | 一時のファイルへ書いてから置き換える原子的な書き込みを持ちます |
+| `store` | データホスト（根は新しく作るときだけ 0700 にします。既にある根の権限は変えず、所有者が違うか group か other に書き込み権限があれば止めます）とレビューの識別子を持ちます |
+| `locking` | OS のファイルロックと、レビューのディレクトリの状態を排他にする `review_lock` を持ちます。錠のファイルは symlink を辿らずに開き（symlink なら `StoredFileSymlinkError`）、`O_NOFOLLOW` の無い Windows は `os.lstat` で前後を検査しますが、検査と `os.open` の間の差し替えは Windows では塞げません |
+| `atomic_write` | 推測できない名前の一時のファイル（権限 0600）へ書いてから置き換える原子的な書き込みを持ちます。保存先が symlink なら `StoredFileSymlinkError` で止めます |
+| `symlink_guard` | symlink（Windows ではリパースポイントも）かを辿らずに判定する `is_link_like` と、その例外 `StoredFileSymlinkError` を持ちます。`locking`、`atomic_write`、`real_directory` が同じ判定と例外を使います |
 | `review_creation` | レビューの作成の受け付け、仮の置き場の据え付け、保存の宛先を持ちます |
 | `review_access` | 既にあるレビューの保存したファイルの読みと、状態を排他で書く `locked_review` を持ちます |
 | `store_format` | 保存物の版の判別と、古い版から現行の版への上げ方を持ちます |
 | `store_suffixes` | 保存物のファイルの拡張子の一覧を持ちます。設計書の読み取りとコードの読み取りが同じ一覧を引きます |
+| `real_directory` | 置き場のディレクトリが通常のディレクトリであることを確かめる `require_real_directory` を持ちます。symlink は `StoredFileSymlinkError`、ファイルなどは `NotARealDirectoryError` で止めます |
 | `review_error` | 保存物の読み書きの失敗を表す例外を持ちます |
 
 ## 他のモジュールとの関係
@@ -21,6 +23,6 @@
 
 読むサブパッケージ：なし
 
-読まれるサブパッケージ：`commands`、`design`、`findings`、`flaky`、`judgment_map`、`languages`、`publishing`、`pull_request_context`、`reviews`、`skills`、`static_analysis`
+読まれるサブパッケージ：`commands`、`design`、`findings`、`flaky`、`judgment_map`、`languages`、`publishing`、`pull_request_context`、`repository_docs`、`reviews`、`skills`、`static_analysis`
 
 <!-- END GENERATED: dependencies -->

@@ -5,7 +5,7 @@ from pathlib import Path
 from jigane.figures.models import TableFigure
 from jigane.git.tree_files import read_tree_bytes
 from jigane.languages import registry
-from jigane.languages.base import FilePathAdapter, FilePathPattern, FileUsage, parse
+from jigane.languages.base import FilePathExpression, FilePathExpressionExtractor, FileUsage, parse
 from jigane.reviews.lifecycle import Review
 from jigane.skills import policy_tables
 
@@ -26,25 +26,25 @@ _USAGE_NAMES = {FileUsage.WRITE: "書く", FileUsage.READ: "読む", FileUsage.U
 type _Key = tuple[str, str, str]
 
 
-def _patterns_of(root: Path, path: str) -> list[FilePathPattern]:
+def _patterns_of(root: Path, path: str) -> list[FilePathExpression]:
     # テストの一時ファイルの読み書きは、保存物の名前の契約ではないので載せない
     if registry.is_test_path(path, registry.adapters()):
         return []
     adapter = registry.adapter_for(path)
     data = read_tree_bytes(root, path)
-    if not isinstance(adapter, FilePathAdapter) or data is None:
+    if not isinstance(adapter, FilePathExpressionExtractor) or data is None:
         return []
-    return adapter.file_path_patterns(parse(adapter, data).root_node, data, path)
+    return adapter.file_path_expressions(parse(adapter, data).root_node, data, path)
 
 
-def _key(pattern: FilePathPattern) -> _Key:
-    return (pattern.path, pattern.function, pattern.expression)
+def _key(pattern: FilePathExpression) -> _Key:
+    return (pattern.path, pattern.function_qualified_name, pattern.expression)
 
 
-def _row(pattern: FilePathPattern, mark: str) -> tuple[str, ...]:
+def _row(pattern: FilePathExpression, mark: str) -> tuple[str, ...]:
     return (
         mark + pattern.path,
-        pattern.function or "（モジュール）",
+        pattern.function_qualified_name or "（モジュール）",
         _USAGE_NAMES[pattern.usage],
         pattern.expression,
     )

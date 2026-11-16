@@ -30,8 +30,8 @@ from jigane.markdown.cells import markdown_table
 from jigane.policy_materials.declarations import ScopedDeclaration, region_declarations
 from jigane.policy_materials.moved_declarations import PlacedDeclaration, find_moved
 from jigane.preconditions.required import required
-from jigane.reviews.lifecycle import Review, ReviewError
-from jigane.reviews.stored_pairs import load_pairs
+from jigane.reviews.lifecycle import Review
+from jigane.reviews.stored_pairs import PairsNotSavedError, load_pairs
 
 _FIRST_PRINTABLE_CODE = 32  # 空白。これより小さい文字は制御文字
 _DELETE_CODE = 127
@@ -97,12 +97,15 @@ class _Tally:
 
 
 def _load_pairs(review: Review) -> list[FilePair] | None:
-    """ファイルの対の記録。ファイルのレビューと、記録の無い古いレビューは None。"""
+    """ファイルの対の記録。ファイルのレビューと、pairs.json を保存する前のレビューは None。
+
+    古い版、新しすぎる版、壊れた版は読めない保存物なので、例外のまま伝える。
+    """
     if not review.is_diff:
         return None
     try:
         return load_pairs(review.id)
-    except ReviewError:
+    except PairsNotSavedError:
         return None
 
 

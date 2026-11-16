@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from fakes import MacroFake, discovered
+from listing_support import listing_warnings
 from pr_support import git
 from review_fakes import EXTRA_WARNING, build_content, save_review_of_kind
 
@@ -22,6 +23,7 @@ from jigane.reviews import lifecycle as review_module
 from jigane.reviews import resolution as resolution_module
 from jigane.reviews.catalog import (
     TRASH_DIRECTORY,
+    list_review_summaries,
     list_reviews,
     load_review,
     load_review_at,
@@ -43,7 +45,9 @@ from jigane.storage.store import (
     check_new_review_id,
     check_review_id,
     data_home,
+    review_name_of_directory,
 )
+from jigane.storage.store_format import OlderFormatError
 
 PUBLIC_SOURCE = "def build_widget():\n    return 1\n"
 
@@ -170,7 +174,7 @@ def test_name_only_identifier_does_not_load_every_review(
     def forbidden(*_: object) -> None:
         raise AssertionError("名前だけの入力で置き場の全件を読んだ")
 
-    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
+    monkeypatch.setattr(resolution_module, "list_review_summaries", forbidden)
     monkeypatch.setattr(catalog_module, "load_review_at", forbidden)
     with pytest.raises(ReviewError, match="候補: local/shop:payment"):
         resolve_review("payment")
@@ -239,7 +243,7 @@ def test_name_only_identifier_reads_neither_every_review_nor_review_contents(
     def forbidden(*_: object) -> None:
         raise AssertionError("名前だけの入力でレビューの中身か全件を読んだ")
 
-    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
+    monkeypatch.setattr(resolution_module, "list_review_summaries", forbidden)
     monkeypatch.setattr(catalog_module, "load_review_at", forbidden)
     monkeypatch.setattr(catalog_module, "load_review", forbidden)
     assert resolve_review("payment") == review.id
@@ -489,9 +493,9 @@ def test_resolve_full_identifier_does_not_list_reviews(
     created = create_feature_review(project, ["src"], "payment")
 
     def forbidden() -> None:
-        raise AssertionError("list_reviews は呼ばない")
+        raise AssertionError("list_review_summaries は呼ばない")
 
-    monkeypatch.setattr(resolution_module, "list_reviews", forbidden)
+    monkeypatch.setattr(resolution_module, "list_review_summaries", forbidden)
     assert resolve_review(str(created.id)) == created.id
     with pytest.raises(ReviewError):
         resolve_review("local/shop:missing")
@@ -599,7 +603,9 @@ def test_legacy_digits_only_feature_record_does_not_break_list_or_resolve(
         load_review(check_review_id(pull_request_id))
 
 
-def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(project: Path) -> None:
+def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     kept = create_feature_review(project, ["src"], "kept")
     moved = create_feature_review(project, ["src"], "moved")
     # 識別子は範囲（@moved）を名乗るが、保存先はファイルのレビューのディレクトリ名（印が無い）
@@ -607,9 +613,9 @@ def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(project: P
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     meta["id"] = f"{moved.id.owner}/{moved.id.repo}@moved"
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
-    with pytest.warns(UserWarning, match="保存した出所が食い違います"):
-        listed = list_reviews()
+    listed = list_reviews()
     assert [review.id for review in listed] == [kept.id]
+    assert any("保存した出所が食い違います" in text for text in listing_warnings(caplog))
 
 
 @pytest.mark.parametrize(
@@ -623,7 +629,7 @@ def test_list_skips_a_record_whose_directory_kind_differs_from_its_id(project: P
     ids=["broken-json", "bad-id", "missing-field", "bad-field-type"],
 )
 def test_load_review_at_raises_only_review_error_and_list_skips(
-    project: Path, damage: Callable[[dict[str, Any]], str]
+    project: Path, damage: Callable[[dict[str, Any]], str], caplog: pytest.LogCaptureFixture
 ) -> None:
     kept = create_feature_review(project, ["src"], "kept")
     broken = create_feature_review(project, ["src"], "broken")
@@ -632,9 +638,71 @@ def test_load_review_at_raises_only_review_error_and_list_skips(
     meta_path.write_text(damage(meta), encoding="utf-8")
     with pytest.raises(ReviewError):
         load_review_at(broken.id.directory())
-    with pytest.warns(UserWarning, match="一覧から除きました"):
-        listed = list_reviews()
+    listed = list_reviews()
     assert [review.id for review in listed] == [kept.id]
+    assert any("一覧から除きました" in text for text in listing_warnings(caplog))
+
+
+def test_list_warning_names_an_older_review_by_the_identifier_delete_takes(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    kept = create_feature_review(project, ["src"], "kept")
+    old = create_feature_review(project, ["src"], "old")
+    meta_path = old.id.directory() / REVIEW_FILE
+    stored = json.loads(meta_path.read_text(encoding="utf-8"))
+    stored["format"] = 4
+    meta_path.write_text(json.dumps(stored), encoding="utf-8")
+    for listing in (list_reviews, list_review_summaries):
+        caplog.clear()
+        listed = listing()
+        assert [item.id for item in listed] == [kept.id]
+        [message] = listing_warnings(caplog)
+        assert message.startswith(f"一覧から除きました: {old.id}: ")
+        assert "jigane new" in message
+        # 警告の識別子は、そのまま delete の引数として同じレビューに解決される
+        assert resolve_review(str(old.id), None).directory() == old.id.directory()
+
+
+def test_collapse_skipped_warnings_reports_older_reviews_as_one_warning(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    kept = create_feature_review(project, ["src"], "kept")
+    older = [create_feature_review(project, ["src"], f"older{number}") for number in range(5)]
+    for review in older:
+        meta_path = review.id.directory() / REVIEW_FILE
+        stored = json.loads(meta_path.read_text(encoding="utf-8"))
+        stored["format"] = 4
+        meta_path.write_text(json.dumps(stored), encoding="utf-8")
+    with catalog_module.collapse_skipped_warnings():
+        listed = list_review_summaries()
+        assert listing_warnings(caplog) == []
+    assert [item.id for item in listed] == [kept.id]
+    [message] = listing_warnings(caplog)
+    assert "5 件" in message
+    assert "ほか 2 件" in message
+    assert "jigane new" in message
+    # 抜けた後は 1 件ずつの警告に戻る
+    caplog.clear()
+    list_review_summaries()
+    assert len(listing_warnings(caplog)) == len(older)
+
+
+@pytest.mark.parametrize(
+    ("kind", "key"),
+    [
+        (ReviewKind.PULL_REQUEST, "12"),
+        (ReviewKind.RANGE, "topic"),
+        (ReviewKind.FEATURE, "payment"),
+        (ReviewKind.DESIGN_DOC, "spec"),
+    ],
+)
+def test_list_warning_identifier_is_rebuilt_from_the_directory_for_every_kind(
+    kind: ReviewKind, key: str
+) -> None:
+    review_id = check_new_review_id(ReviewId("octo", "shop", key, kind))
+    name = review_name_of_directory(review_id.directory())
+    assert name == str(review_id)
+    assert check_review_id(ReviewId.parse(name)).directory() == review_id.directory()
 
 
 def test_load_review_at_reads_a_review_from_its_directory(project: Path) -> None:
@@ -718,18 +786,18 @@ def test_intent_declaration_warnings_are_stored_in_the_declaration(project: Path
     assert load_review(created.id).declaration == created.declaration
 
 
-def test_old_record_without_content_warnings_reads_warnings_as_content(project: Path) -> None:
+@pytest.mark.parametrize("version", [None, 1, 4])
+def test_old_review_json_stops_with_the_rebuild_hint(project: Path, version: int | None) -> None:
     created = create_feature_review(project, ["src"], "payment")
     path = created.id.directory() / "review.json"
     stored = json.loads(path.read_text(encoding="utf-8"))
-    # 版を持たない古い記録の形にする
-    del stored["format"]
-    stored.pop("content_warnings")
-    stored["warnings"] = ["古い記録の警告"]
+    if version is None:
+        del stored["format"]
+    else:
+        stored["format"] = version
     path.write_text(json.dumps(stored), encoding="utf-8")
-    loaded = load_review(created.id)
-    assert loaded.content_warnings == ["古い記録の警告"]
-    assert loaded.warnings == ["古い記録の警告"]
+    with pytest.raises(OlderFormatError, match="jigane new"):
+        load_review(created.id)
 
 
 def test_missing_declaration_warning_is_a_declaration_warning(project: Path) -> None:

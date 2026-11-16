@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from jigane.flaky.catalog import load_catalog
+from jigane.flaky.checks import Certainty
 from jigane.flaky.detector import Detection, detect
 from jigane.flaky.gates import gate_kind
 from jigane.gates.entry import GateKind
@@ -35,7 +36,7 @@ def _time(tmp_path: Path, paths: list[str]) -> list[Detection]:
 def test_autouse_freeze_in_conftest_makes_warning(tmp_path: Path) -> None:
     _materialize(tmp_path, "setup-fixed")
     (found,) = _time(tmp_path, ["tests/test_a.py"])
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert gate_kind(found, BY_ID) is GateKind.WARNING
     assert "tests/conftest.py:7" in found.reason
 
@@ -43,7 +44,7 @@ def test_autouse_freeze_in_conftest_makes_warning(tmp_path: Path) -> None:
 def test_conftest_without_autouse_freeze_stays_violation(tmp_path: Path) -> None:
     _materialize(tmp_path, "setup-unfixed")
     (found,) = _time(tmp_path, ["tests/test_a.py"])
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
     assert gate_kind(found, BY_ID) is GateKind.VIOLATION
     assert found.reason == ""
 
@@ -53,7 +54,7 @@ def test_parent_conftest_applies(tmp_path: Path) -> None:
     (tmp_path / "tests" / "conftest.py").write_text(AUTOUSE_FREEZE, encoding="utf-8")
     (tmp_path / "tests" / "unit" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tmp_path, ["tests/unit/test_a.py"])
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert "tests/conftest.py:7" in found.reason
 
 
@@ -71,7 +72,7 @@ def test_sibling_conftest_does_not_apply(tmp_path: Path) -> None:
     (tmp_path / "tests" / "a" / "conftest.py").write_text(AUTOUSE_FREEZE, encoding="utf-8")
     (tmp_path / "tests" / "b" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tmp_path, ["tests/b/test_a.py"])
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 def test_autouse_fixture_in_test_file_itself_applies(tmp_path: Path) -> None:
@@ -80,7 +81,7 @@ def test_autouse_fixture_in_test_file_itself_applies(tmp_path: Path) -> None:
         AUTOUSE_FREEZE + "\n\n" + TEST_BODY, encoding="utf-8"
     )
     found = _time(tmp_path, ["tests/test_a.py"])
-    assert [d.undetermined for d in found] == [True]
+    assert [d.certainty for d in found] == [Certainty.UNDETERMINED]
     assert "tests/test_a.py:7" in found[0].reason
 
 
@@ -94,7 +95,7 @@ def test_time_machine_travel_is_recognized(tmp_path: Path) -> None:
     (tmp_path / "tests" / "conftest.py").write_text(conftest, encoding="utf-8")
     (tmp_path / "tests" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tmp_path, ["tests/test_a.py"])
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
 
 
 def test_word_only_in_conftest_is_not_recognized(tmp_path: Path) -> None:
@@ -107,7 +108,7 @@ def test_word_only_in_conftest_is_not_recognized(tmp_path: Path) -> None:
     (tmp_path / "tests" / "conftest.py").write_text(conftest, encoding="utf-8")
     (tmp_path / "tests" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tmp_path, ["tests/test_a.py"])
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 def test_symlinked_conftest_is_not_read(tmp_path: Path) -> None:
@@ -119,7 +120,7 @@ def test_symlinked_conftest_is_not_read(tmp_path: Path) -> None:
     (tree / "tests" / "conftest.py").symlink_to(outside)
     (tree / "tests" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tree, ["tests/test_a.py"])
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 @pytest.mark.parametrize(
@@ -140,7 +141,7 @@ def test_unparsable_autouse_fixture_does_not_fix_the_clock(tmp_path: Path, broke
     )
     (tmp_path / "tests" / "test_a.py").write_text(TEST_BODY, encoding="utf-8")
     (found,) = _time(tmp_path, ["tests/test_a.py"])
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 def test_existing_time_fixtures_are_unchanged(tmp_path: Path) -> None:
@@ -153,7 +154,7 @@ def test_existing_time_fixtures_are_unchanged(tmp_path: Path) -> None:
     )
     found = _time(tmp_path, ["tests/test_bad.py", "tests/test_good.py"])
     assert {d.path for d in found} == {"tests/test_bad.py"}
-    assert not any(d.undetermined for d in found)
+    assert not any(d.certainty is Certainty.UNDETERMINED for d in found)
 
 
 RANDOM_BODY = "import random\n\n\ndef test_a():\n    assert random.randint(1, 3)\n"
@@ -181,7 +182,7 @@ def _patch_conftest(target: str) -> str:
 
 def test_autouse_random_seed_in_conftest_makes_warning(tmp_path: Path) -> None:
     (found,) = _found(tmp_path, "FLK-RANDOM", AUTOUSE_SEED, RANDOM_BODY)
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert gate_kind(found, BY_ID) is GateKind.WARNING
     assert "tests/conftest.py:7" in found.reason
     assert "種" in found.reason
@@ -189,7 +190,7 @@ def test_autouse_random_seed_in_conftest_makes_warning(tmp_path: Path) -> None:
 
 def test_random_without_any_seed_stays_violation(tmp_path: Path) -> None:
     (found,) = _found(tmp_path, "FLK-RANDOM", None, RANDOM_BODY)
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
     assert found.reason == ""
 
 
@@ -203,26 +204,26 @@ def test_seed_in_test_function_is_not_detected(tmp_path: Path) -> None:
 def test_seed_in_non_autouse_fixture_of_conftest_is_not_recognized(tmp_path: Path) -> None:
     conftest = AUTOUSE_SEED.replace("autouse=True", "autouse=False")
     (found,) = _found(tmp_path, "FLK-RANDOM", conftest, RANDOM_BODY)
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 def test_autouse_seed_in_test_file_itself_is_warning(tmp_path: Path) -> None:
     (found,) = _found(tmp_path, "FLK-RANDOM", None, AUTOUSE_SEED + "\n\n" + RANDOM_BODY)
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert "tests/test_a.py:7" in found.reason
 
 
 @pytest.mark.parametrize("target", ["datetime", "'time.time'", "mod.datetime", "mod.time"])
 def test_monkeypatch_of_time_target_is_recognized(tmp_path: Path, target: str) -> None:
     (found,) = _found(tmp_path, "FLK-TIME", _patch_conftest(target), TEST_BODY)
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert "時刻" in found.reason
 
 
 @pytest.mark.parametrize("target", ["random", "'random.random'"])
 def test_monkeypatch_of_random_target_is_seed_fixation(tmp_path: Path, target: str) -> None:
     (found,) = _found(tmp_path, "FLK-RANDOM", _patch_conftest(target), RANDOM_BODY)
-    assert found.undetermined
+    assert found.certainty is Certainty.UNDETERMINED
     assert "種" in found.reason
 
 
@@ -231,12 +232,12 @@ def test_monkeypatch_of_random_target_is_seed_fixation(tmp_path: Path, target: s
 )
 def test_monkeypatch_of_unknown_target_is_not_recognized(tmp_path: Path, target: str) -> None:
     (found,) = _found(tmp_path, "FLK-TIME", _patch_conftest(target), TEST_BODY)
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 def test_monkeypatch_time_target_does_not_fix_seed(tmp_path: Path) -> None:
     (found,) = _found(tmp_path, "FLK-RANDOM", _patch_conftest("datetime"), RANDOM_BODY)
-    assert not found.undetermined
+    assert found.certainty is Certainty.CONFIRMED
 
 
 @pytest.mark.parametrize(
@@ -304,4 +305,4 @@ def test_existing_random_fixtures_are_unchanged(tmp_path: Path) -> None:
     found = detect(tmp_path, ["tests/test_bad.py", "tests/test_good.py"], CATALOG, AllLines())
     random_found = [d for d in found if d.item_id == "FLK-RANDOM"]
     assert {d.path for d in random_found} == {"tests/test_bad.py"}
-    assert not any(d.undetermined for d in random_found)
+    assert not any(d.certainty is Certainty.UNDETERMINED for d in random_found)

@@ -26,9 +26,10 @@ import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from dev_launch import run_tool
+from dev_launch import UNTRACKED_FILES_ARGS, run_tool
 
-from jigane.git.process import CommandError, run_command
+from jigane.git import process
+from jigane.git.process import CommandError
 
 _TOP_LEVEL_TEST_PARTS = 2  # tests とファイル名
 WHOLE_TREE_MARK = "whole_tree"
@@ -42,7 +43,7 @@ GitRunner = Callable[[list[str]], str]
 
 def git_runner(root: Path) -> GitRunner:
     def run(args: list[str]) -> str:
-        return run_command(["git", *args], cwd=root)
+        return process.run_command(["git", *args], cwd=root)
 
     return run
 
@@ -61,7 +62,7 @@ def changed_files(git: GitRunner) -> set[str]:
     base = find_base(git)
     # 削除は --diff-filter=d で除く。消えたファイルに対応する試験は選べない
     tracked = git(["diff", "--name-only", "--diff-filter=d", "-z", base]).split("\0")
-    untracked = git(["ls-files", "-z", "--others", "--exclude-standard"]).split("\0")
+    untracked = git([*UNTRACKED_FILES_ARGS]).split("\0")
     return {name for name in (*tracked, *untracked) if name}
 
 

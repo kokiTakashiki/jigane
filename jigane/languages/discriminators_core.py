@@ -2,8 +2,9 @@
 
 言語ごとの部品（`swift_discriminators`、`java_discriminators`、`csharp_discriminators`）は、
 文の節点の種類の見分け方、条件や case の原文の取り方、式としての if と switch だけを持つ。
-ここは、文の並びを Return と Branch に振り分ける骨格、if の連なりと switch の Branch の組み立て、
-throw を値なしの Return にする扱い、return の値の絞り込みを持つ。
+ここは、文の並びを FlowReturn と FlowBranch に振り分ける骨格、
+if の連なりと switch の FlowBranch の組み立て、
+throw を値なしの FlowReturn にする扱い、return の値の絞り込みを持つ。
 言語ごとの差し込みは `Rules` にまとめ、関数は入力の節点と `Rules` を引数で受ける。
 """
 
@@ -14,28 +15,30 @@ from typing import Protocol
 
 from tree_sitter import Node
 
-from jigane.languages.base import Branch, BranchArm, Return, Step
+from jigane.languages.base import FlowBranch, FlowBranchArm, FlowReturn, FlowStep
 from jigane.preconditions.required import required
 
 
 class StatementReader(Protocol):
-    """文、その後ろの文の並び、式が値を返す位置か、を受けて Step の並びを返す。"""
+    """文、その後ろの文の並び、式が値を返す位置か、を受けて FlowStep の並びを返す。"""
 
-    def __call__(self, statement: Node, rest: list[Node], /, *, is_value: bool) -> list[Step]: ...
+    def __call__(
+        self, statement: Node, rest: list[Node], /, *, is_value: bool
+    ) -> list[FlowStep]: ...
 
 
 class ValueReader(Protocol):
-    """式の文と、式が値を返す位置か、を受けて暗黙の Return を返す。読まない文は None。"""
+    """式の文と、式が値を返す位置か、を受けて暗黙の FlowReturn を返す。読まない文は None。"""
 
-    def __call__(self, statement: Node, /, *, is_value: bool) -> Step | None: ...
+    def __call__(self, statement: Node, /, *, is_value: bool) -> FlowStep | None: ...
 
 
 class ThenSteps(Protocol):
-    def __call__(self, statement: Node, /, *, is_value: bool) -> list[Step]: ...
+    def __call__(self, statement: Node, /, *, is_value: bool) -> list[FlowStep]: ...
 
 
 class ElseSteps(Protocol):
-    def __call__(self, statement: Node, /, *, is_value: bool) -> list[Step] | None: ...
+    def __call__(self, statement: Node, /, *, is_value: bool) -> list[FlowStep] | None: ...
 
 
 @dataclass(frozen=True)
@@ -55,12 +58,12 @@ class Rules:
     # return の値に残す節点の種類と、原文が合うべき正規表現。渡さなければ原文の形は絞らない
     member_nodes: frozenset[str]
     member_pattern: re.Pattern[str] | None
-    # 文の節点の種類から、その文を Step の並びにする関数への対応
+    # 文の節点の種類から、その文を FlowStep の並びにする関数への対応
     statement_readers: Mapping[str, StatementReader]
-    # throw の文か。真なら値なしの Return にする
+    # throw の文か。真なら値なしの FlowReturn にする
     is_throw: Callable[[Node], bool]
     condition_text: Callable[[Node], str]
-    # if の真の腕と、else の腕の Step。else が無ければ None
+    # if の真の腕と、else の腕の FlowStep。else が無ければ None
     then_steps: ThenSteps
     else_steps: ElseSteps
     switch_subject: Callable[[Node], str]
@@ -71,7 +74,7 @@ class Rules:
     bundles_fallthrough: bool
     # 読んだ後に後ろの文を読まない文の種類。後ろの文はその文の読み手が受け持つ
     ends_sequence: frozenset[str] = field(default_factory=frozenset)
-    # 読み手の無い文を、値を返す位置で暗黙の Return として読む関数
+    # 読み手の無い文を、値を返す位置で暗黙の FlowReturn として読む関数
     value_reader: ValueReader | None = None
 
 
@@ -90,13 +93,16 @@ def joined_case_label(labels: Sequence[str]) -> str:
     return "default" if list(labels) == ["default"] else "case " + ", ".join(labels)
 
 
-def steps(statements: list[Node], rules: Rules, *, is_value: bool = False) -> list[Step]:
-    """文の並びから Return と Branch だけを残す。is_value は式が値を返す位置であることを示す。"""
-    result: list[Step] = []
+def steps(statements: list[Node], rules: Rules, *, is_value: bool = False) -> list[FlowStep]:
+    """文の並びから FlowReturn と FlowBranch だけを残す。
+
+    is_value は式が値を返す位置であることを示す。
+    """
+    result: list[FlowStep] = []
     for index, statement in enumerate(statements):
         reader = rules.statement_readers.get(statement.type)
         if rules.is_throw(statement):
-            result.append(Return(None))
+            result.append(FlowReturn(None))
         elif reader is not None:
             result.extend(reader(statement, statements[index + 1 :], is_value=is_value))
             if statement.type in rules.ends_sequence:
@@ -112,25 +118,25 @@ def steps(statements: list[Node], rules: Rules, *, is_value: bool = False) -> li
     return result
 
 
-def if_branch(statement: Node, rules: Rules, *, is_value: bool = False) -> Branch:
+def if_branch(statement: Node, rules: Rules, *, is_value: bool = False) -> FlowBranch:
     """偽の腕に else if の連なりを入れ子にして入れる。else が無ければ fallthrough の no。"""
     text = rules.condition_text(statement)
-    arms = [BranchArm("yes", tuple(rules.then_steps(statement, is_value=is_value)))]
+    arms = [FlowBranchArm("yes", tuple(rules.then_steps(statement, is_value=is_value)))]
     otherwise = rules.else_steps(statement, is_value=is_value)
     if otherwise is None:
-        return Branch(text, tuple(arms), "no")
-    arms.append(BranchArm("no", tuple(otherwise)))
-    return Branch(text, tuple(arms), None)
+        return FlowBranch(text, tuple(arms), "no")
+    arms.append(FlowBranchArm("no", tuple(otherwise)))
+    return FlowBranch(text, tuple(arms), None)
 
 
-def switch_branch(statement: Node, rules: Rules, *, is_value: bool = False) -> Branch:
-    arms: list[BranchArm] = []
+def switch_branch(statement: Node, rules: Rules, *, is_value: bool = False) -> FlowBranch:
+    arms: list[FlowBranchArm] = []
     labels: list[str] = []
     for clause in rules.switch_clauses(statement):
         labels.append(clause.label)
         if rules.bundles_fallthrough and clause.falls_through:
             continue
         body = tuple(steps(list(clause.nodes), rules, is_value=is_value))
-        arms.append(BranchArm(rules.arm_name(labels), body))
+        arms.append(FlowBranchArm(rules.arm_name(labels), body))
         labels = []
-    return Branch(f"switch {rules.switch_subject(statement)}".strip(), tuple(arms), None)
+    return FlowBranch(f"switch {rules.switch_subject(statement)}".strip(), tuple(arms), None)

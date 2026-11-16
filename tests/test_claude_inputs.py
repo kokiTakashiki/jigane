@@ -5,7 +5,28 @@ import re
 from pathlib import Path
 from string import Template
 
-from jigane.llm_runs.claude_inputs import HEADING_INPUTS, PLACEHOLDER_INPUTS, ClaudeInput
+from jigane.llm_runs.claude_inputs import (
+    HEADING_INPUTS,
+    LABEL_INPUTS,
+    LABEL_MATERIALS,
+    LABEL_PREFIX_INPUTS,
+    PLACEHOLDER_INPUTS,
+    ClaudeInput,
+)
+from jigane.sequence.review_diagrams import NO_CALL_ENTRIES_NOTE, UNRELATED_CALL_ENTRIES_NOTE
+from jigane.text import prompt_labels
+from jigane.text.prompt_labels import (
+    ALTERNATIVES_LABEL,
+    CANDIDATES_LABEL,
+    CHALLENGES_LABEL,
+    DEFENSES_LABEL,
+    EXCERPTS_LABEL,
+    NO_CALL_ENTRIES_LABEL,
+    QUESTIONS_LABEL,
+    UNRELATED_CALL_ENTRIES_LABEL,
+    Match,
+    PromptLabel,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIRECTORY = REPOSITORY_ROOT / "jigane" / "skills" / "prompts"
@@ -86,3 +107,37 @@ def test_every_mapped_placeholder_exists_in_a_prompt() -> None:
     used = set().union(*_placeholders_by_prompt().values())
     unused = sorted(set(PLACEHOLDER_INPUTS) - used)
     assert not unused, unused
+
+
+def test_every_defined_label_has_materials_and_the_tables_are_derived_from_them() -> None:
+    defined = [v for v in vars(prompt_labels).values() if isinstance(v, PromptLabel)]
+    assert set(defined) == set(LABEL_MATERIALS)
+    assert len({label.text for label in defined}) == len(defined)
+    assert set(LABEL_INPUTS) & set(LABEL_PREFIX_INPUTS) == set()
+    assert set(LABEL_INPUTS) | set(LABEL_PREFIX_INPUTS) == {label.text for label in defined}
+    for label, items in LABEL_MATERIALS.items():
+        table = LABEL_PREFIX_INPUTS if label.match is Match.PREFIX else LABEL_INPUTS
+        assert table[label.text] == items
+
+
+def test_exact_labels_written_in_a_template_appear_there_as_whole_lines() -> None:
+    lines = {
+        line
+        for path in PROMPT_DIRECTORY.glob("*.md")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    }
+    template_labels = (
+        QUESTIONS_LABEL,
+        CANDIDATES_LABEL,
+        CHALLENGES_LABEL,
+        ALTERNATIVES_LABEL,
+        DEFENSES_LABEL,
+        EXCERPTS_LABEL,
+    )
+    for label in template_labels:
+        assert label.text in lines, label.text
+
+
+def test_assembled_notes_start_from_the_label_definitions() -> None:
+    assert NO_CALL_ENTRIES_NOTE.startswith(NO_CALL_ENTRIES_LABEL.text)
+    assert UNRELATED_CALL_ENTRIES_NOTE.startswith(UNRELATED_CALL_ENTRIES_LABEL.text)

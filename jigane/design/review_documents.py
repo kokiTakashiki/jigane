@@ -14,6 +14,13 @@ from jigane.design.parse import parse_design
 from jigane.design.recommend import recommend
 from jigane.design.section_map import build_section_map
 from jigane.git.repository import identify
+from jigane.git.tree_files import (
+    MAX_REVIEW_FILE_BYTES,
+    Content,
+    TooLarge,
+    TreeFileState,
+    read_tree,
+)
 from jigane.judgment_map.declaration import Declaration, intent_declaration
 from jigane.reviews.attachments import AttachmentContent, DriftedRole, VersionDrift
 from jigane.reviews.lifecycle import (
@@ -66,9 +73,31 @@ class ReadDocument:
         return normalize_newlines(self.data.decode("utf-8"))
 
 
-def read_document(path: Path) -> ReadDocument:
-    """設計書と付属の文書を読む唯一の口。版は元のバイト列、本文は LF にそろえた文字列。"""
-    return ReadDocument(path.read_bytes())
+_UNREADABLE_REASONS = {
+    TreeFileState.REFUSED: "シンボリックリンクか、木の外を指しています",
+    TreeFileState.NOT_REGULAR: "通常のファイルではありません",
+    TreeFileState.UNREADABLE: "読み取りに失敗しました",
+}
+
+
+def read_document(root: Path, relative: str, label: str = "文書") -> ReadDocument:
+    """設計書と付属の文書を読む唯一の口。版は元のバイト列、本文は LF にそろえた文字列。
+
+    リンクは辿らず、MAX_REVIEW_FILE_BYTES を超える文書は読まない。読めないときは ReviewError。
+    """
+    outcome = read_tree(root, relative, MAX_REVIEW_FILE_BYTES)
+    if isinstance(outcome, Content):
+        return ReadDocument(outcome.data)
+    if isinstance(outcome, TooLarge):
+        raise ReviewError(
+            f"{label}が大きすぎます（上限 {MAX_REVIEW_FILE_BYTES} バイト）: {relative}"
+        )
+    if outcome.state is TreeFileState.MISSING:
+        raise ReviewError(f"{label}がありません: {relative}")
+    raise ReviewError(
+        f"{label}を読めません（{_UNREADABLE_REASONS[outcome.state]}"
+        f"{'：' + outcome.detail if outcome.detail else ''}）: {relative}"
+    )
 
 
 def _relative_path(root: Path, base: Path, path: str, label: str) -> str:
@@ -100,10 +129,9 @@ def attachment_candidates(root: Path, document_path: str) -> list[str]:
 
 
 def _attached(root: Path, paths: tuple[str, ...]) -> tuple[AttachedDocument, ...]:
-    for path in paths:
-        if not (root / path).is_file():
-            raise ReviewError(f"付属の文書がありません: {path}")
-    return tuple(AttachedDocument(path, read_document(root / path).version) for path in paths)
+    return tuple(
+        AttachedDocument(path, read_document(root, path, "付属の文書").version) for path in paths
+    )
 
 
 def read_attachments(review: Review) -> tuple[AttachmentContent, ...]:
@@ -115,9 +143,7 @@ def read_attachments(review: Review) -> tuple[AttachmentContent, ...]:
     root = Path(review.repository_root)
     contents: list[AttachmentContent] = []
     for item in origin.attachments:
-        if not (root / item.path).is_file():
-            raise ReviewError(f"付属の文書がありません: {item.path}")
-        read = read_document(root / item.path)
+        read = read_document(root, item.path, "付属の文書")
         contents.append(AttachmentContent(item.path, read.text, read.version != item.version))
     return tuple(contents)
 
@@ -163,7 +189,7 @@ def _build_content(
     declaration: Declaration,
     attachment_paths: tuple[str, ...] = (),
 ) -> DesignDocContent:
-    document = read_document(root / document_path)
+    document = read_document(root, document_path, "設計書")
     try:
         code_version = resolve_commit(root, "HEAD")
     except ReviewError as error:
@@ -215,10 +241,10 @@ def create_design_doc_review(
     repository = identify(working_directory)
     root = repository.root
     document_path = _relative_path(root, working_directory, document, "設計書")
-    if not (root / document_path).is_file():
-        raise ReviewError(f"設計書がありません: {document}")
+    # 存在の確認を兼ねる
+    document_text = read_document(root, document_path, "設計書").text
     if select is None:
-        text = read_document(root / document_path).text
+        text = document_text
         selection = tuple(_recommended_paths(root, text))
     else:
         selection = tuple(
@@ -254,8 +280,6 @@ def refresh_design_doc(
     if not isinstance(origin, DesignDocOrigin):
         raise ReviewError(f"設計書の出所でない記録を設計書として refresh できません: {review.id}")
     root = Path(review.repository_root)
-    if not (root / origin.document_path).is_file():
-        raise ReviewError(f"設計書がありません: {origin.document_path}")
     return refresh_from_content(
         review,
         lambda: _build_content(

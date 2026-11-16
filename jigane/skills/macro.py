@@ -1,7 +1,7 @@
 """方針のスキル（群の名前は macro）。道具を渡さない起動で、図と表だけから外形を問う。"""
 
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -11,7 +11,6 @@ from typing import Any, assert_never
 from pydantic import ValidationError
 
 from jigane.design.review_documents import read_attachments, read_document, version_drifts
-from jigane.figures.models import SequenceFigure
 from jigane.findings.discard import (
     KEY_FROM_CONCERN,
     Considered,
@@ -41,7 +40,7 @@ from jigane.llm_runs.launch_failure import (
     RunRecordKind,
 )
 from jigane.llm_runs.prompt_stamp import PromptStamp
-from jigane.policy_materials import changed_files
+from jigane.markdown.fence import fence, one_line, path_bullets
 from jigane.policy_materials.design_doc import design_materials
 from jigane.policy_materials.missing import MissingMaterial, missing_texts
 from jigane.pull_request_context.background import (
@@ -51,7 +50,7 @@ from jigane.pull_request_context.background import (
     PastPullRequest,
     has_owners,
 )
-from jigane.pull_request_context.bots import read_bot_comments
+from jigane.pull_request_context.bots import StoredBotJudgment, read_bot_comments
 from jigane.reviews.attachments import drift_notice
 from jigane.reviews.catalog import scope_files
 from jigane.reviews.lifecycle import (
@@ -60,10 +59,8 @@ from jigane.reviews.lifecycle import (
     PullRequestOrigin,
     RangeOrigin,
     Review,
-    ReviewError,
 )
 from jigane.reviews.stored_pairs import load_pairs
-from jigane.sequence import review_diagrams
 from jigane.skills import (
     adversarial,
     discovery_errors,
@@ -75,8 +72,6 @@ from jigane.skills import (
     policy_figures,
     policy_keep,
     policy_record,
-    policy_repeats,
-    policy_tree,
     shared_rules,
 )
 from jigane.skills import scope as scope_marks
@@ -99,7 +94,6 @@ from jigane.skills.policy_launch import (
     Stopped,
     stored_index,
 )
-from jigane.technology_list import materials as technology_materials
 from jigane.text.document_files import DOCUMENT_ONLY_NOTICE, all_documents
 
 GROUP = MACRO
@@ -133,6 +127,7 @@ FEATURE_CHANGES_TEXT = "変更前は空。対象のファイルを作業ディ�
 DIFF_CHANGES_INTRO = (
     "変更前は merge-base、変更後は作業ディレクトリのツリー。差分に無い文脈は"
     "作業ディレクトリから読むこと。`---` は変更前、`+++` は変更後の見出し。"
+    "差分はバッククォートの柵で囲んである。"
 )
 
 
@@ -151,17 +146,18 @@ def _heading(text: str) -> str:
 
 
 def declaration_prompt_text(review: Review) -> str:
-    """発見役のプロンプトに入れる宣言。抜粋は本文を埋め込まず、位置と見出しだけを挙げる。"""
+    """発見役のプロンプトに入れる宣言。文の宣言は柵で囲む。抜粋は本文を埋め込まず、位置と見出しだけを挙げる。"""
     declaration = review.declaration
     if declaration.intent is not None:
         # 本文の見出しは、プロンプトの節の見出し（###）より下の階層から始める
-        return demote_headings(declaration.intent, DECLARATION_TOP_LEVEL)
+        return fence(demote_headings(declaration.intent, DECLARATION_TOP_LEVEL))
     if not declaration.excerpts:
         return NO_DECLARATION_TEXT
     # 抜粋の本文はレビュアーが作業ディレクトリから読めるため、
     # 同じ内容をプロンプトで重ねて送らない
     entries = "\n".join(
-        f"- {excerpt.path}:{excerpt.start_line}-{excerpt.end_line} {_heading(excerpt.text)}"
+        f"- {one_line(excerpt.path)}:{excerpt.start_line}-{excerpt.end_line} "
+        f"{one_line(_heading(excerpt.text))}"
         for excerpt in declaration.excerpts
     )
     return (
@@ -170,13 +166,21 @@ def declaration_prompt_text(review: Review) -> str:
     )
 
 
-def bot_findings(review: Review) -> str | None:
-    """bot_comments.json から作る、レビューボットの指摘の一覧。無ければ None。"""
+def bot_findings(review: Review) -> tuple[StoredBotJudgment, ...] | None:
+    """bot_comments.json から読む、レビューボットの指摘。値は加工せずに返す。無ければ None。"""
     stored = read_bot_comments(review.id.directory())
     if stored is None or not stored.judgments:
         return None
+    return stored.judgments
+
+
+def bot_findings_section(review: Review) -> str | None:
+    """bot_findings をプロンプトの一覧にする。本文は柵で囲み、他の値は一行にする。"""
+    judgments = bot_findings(review)
+    if judgments is None:
+        return None
     entries: list[str] = []
-    for item in stored.judgments:
+    for item in judgments:
         comment = item.judgment.comment
         first = comment.original_start_line or comment.original_line
         lines = (
@@ -184,9 +188,9 @@ def bot_findings(review: Review) -> str | None:
         )
         keys = "、".join(item.region_keys) or "なし"
         entries.append(
-            f"- id {comment.id}（{comment.user}）{comment.path}:{lines}"
-            f"（付いた時点の行）\n  関わる判断の箇所: {keys}\n"
-            f"  本文: {comment.body}"
+            f"- id {comment.id}（{one_line(comment.user)}）{one_line(comment.path)}:{lines}"
+            f"（付いた時点の行）\n  関わる判断の箇所: {one_line(keys)}\n"
+            f"  本文:\n{fence(comment.body)}"
         )
     return "\n".join(entries)
 
@@ -200,7 +204,7 @@ def changes_prompt_text(review: Review) -> str:
 
 
 def diff_changes_text(diff: str) -> str:
-    return f"### 変更\n\n{DIFF_CHANGES_INTRO}\n\n{diff}"
+    return f"### 変更\n\n{DIFF_CHANGES_INTRO}\n\n{fence(diff)}"
 
 
 def verifier_changes_text(review: Review) -> str:
@@ -214,7 +218,7 @@ def verifier_changes_text(review: Review) -> str:
     text = diff_changes_text(kept)
     if not removed:
         return text
-    listing = "\n".join(f"- {path}" for path in removed)
+    listing = path_bullets(removed)
     return f"{text}\n### 丸ごと削除したファイル（本文は省いた）\n\n{listing}\n"
 
 
@@ -233,7 +237,7 @@ def background_prompt_text(review: Review) -> str:
         return f"### 背景\n\n{NO_BACKGROUND_TEXT}"
     parts: list[str] = []
     if background.documents:
-        entries = "\n".join(f"- {path}" for path in background.documents)
+        entries = path_bullets(background.documents)
         parts.append(
             "#### PR の本文が参照する文書\n\n"
             "本文はプロンプトに埋め込まない。次のパスを、作業ディレクトリから "
@@ -242,70 +246,30 @@ def background_prompt_text(review: Review) -> str:
     past_pull_requests = [c for c in background.past_changes if isinstance(c, PastPullRequest)]
     if past_pull_requests:
         entries = "\n".join(
-            f"- #{pr.number} {pr.title}（{', '.join(pr.files)}）" for pr in past_pull_requests
+            f"- #{pr.number} {one_line(pr.title)}（{one_line(', '.join(pr.files))}）"
+            for pr in past_pull_requests
         )
         parts.append("#### 同じファイルに触れた過去の PR\n\n" + entries)
     past_commits = [c for c in background.past_changes if isinstance(c, PastCommit)]
     if past_commits:
         entries = "\n".join(
-            f"- {commit.sha[:COMMIT_ABBREVIATION_LENGTH]} {commit.title}"
-            f"（{', '.join(commit.files)}）"
+            f"- {commit.sha[:COMMIT_ABBREVIATION_LENGTH]} {one_line(commit.title)}"
+            f"（{one_line(', '.join(commit.files))}）"
             for commit in past_commits
         )
         parts.append("#### 同じファイルに触れた過去のコミット\n\n" + entries)
     if has_owners(background):
         entries = "\n".join(
-            f"- {item.path}: {', '.join(item.owners) or OWNERLESS_TEXT}"
+            f"- {one_line(item.path)}: {one_line(', '.join(item.owners)) or OWNERLESS_TEXT}"
             for item in background.owners
         )
         parts.append("#### 変更したパスの所有者（CODEOWNERS）\n\n" + entries)
     return "### 背景\n\n" + "\n\n".join(parts)
 
 
-SECTION_REPEATS = "同じ形の箇所"
-
-
-@dataclass(frozen=True)
-class PolicySections:
-    """方針のプロンプトに載せる、事前に組んだ節。
-
-    図の節は `PrebuiltSection` で引く。同じ形の箇所と技術選定は置き場を持たず、図の後ろに続く。
-    """
-
-    figures: Mapping[changed_files.PrebuiltSection, str]
-    # 原則の起動の条件が、シーケンス図に流れがあるかを節の文でなく構造から読む
-    sequence: SequenceFigure
-    repeats: str
-    technology: str
-
-    @property
-    def figures_missing(self) -> bool:
-        """描ける図が一つも無いか。他の図はどれも変更したファイルから作るので、ツリー図の節で決まる。"""
-        return changed_files.tree_section_is_empty(
-            self.figures[changed_files.PrebuiltSection.TREE]
-        )
-
-
-def policy_sections(review: Review) -> PolicySections:
-    """方針のプロンプトの節を組む。重いので一回の実行で一度だけ作る。
-
-    外形だけに絞る。インターフェースは名前と位置、同じ形の箇所は短い塊だけ行の本文あり、技術選定は変化のあった技術だけ。
-    """
-    trees = policy_tree.trees_of(review)
-    sequence = review_diagrams.sequence_figure(review)
-    prebuilt = changed_files.materials_sections(review, sequence, folded=True)
-    return PolicySections(
-        figures=prebuilt,
-        sequence=sequence,
-        repeats=f"### {SECTION_REPEATS}\n\n"
-        + policy_repeats.repeats_text(
-            review, trees.after, line_limit=policy_repeats.POLICY_LINE_LIMIT
-        ),
-        technology=technology_materials.short_section_text(review),
-    )
-
-
-def missing_material(review: Review, sections: PolicySections) -> tuple[MissingMaterial, ...]:
+def missing_material(
+    review: Review, sections: policy_figures.PolicySections
+) -> tuple[MissingMaterial, ...]:
     """資料が空のとき、何が無かったかの種類。資料があれば空の組。
 
     図がすべて空で、宣言も空のときだけ空とする。背景や前の回の指摘は数えない。
@@ -321,7 +285,9 @@ def history_text(assembly: AssemblyInput) -> str:
     return history.history_text(assembly, GROUP)
 
 
-def diagram_materials_text(assembly: AssemblyInput, sections: PolicySections) -> str:
+def diagram_materials_text(
+    assembly: AssemblyInput, sections: policy_figures.PolicySections
+) -> str:
     """図だけの形の資料。
 
     図の節は `policy_figures.REGISTRY` の置き場と順で並ぶ。その後ろに、同じ形の箇所、技術選定、
@@ -342,19 +308,19 @@ stamp_template = macro_shared.stamp_template
 
 def build_diagram_prompt(
     assembly: AssemblyInput,
-    sections: PolicySections | None = None,
+    sections: policy_figures.PolicySections | None = None,
 ) -> str:
     """図だけの形のプロンプト。コードの本文を含めず、道具の使い方も書かない。"""
     review = assembly.review
-    sections = policy_sections(review) if sections is None else sections
+    sections = policy_figures.shared_policy_sections(assembly) if sections is None else sections
     return adversarial.load_prompt(DIAGRAM_PROMPT).substitute(
         mode=review.mode,
-        target_files="\n".join(f"- {path}" for path in review.paths),
+        target_files=path_bullets(review.paths),
         declaration=declaration_prompt_text(review),
         background=background_prompt_text(review),
         materials=diagram_materials_text(assembly, sections),
-        scope="\n".join(f"- {path}" for path in sorted(scope_files(review))),
-        bot_findings=bot_findings(review) or NO_BOT_FINDINGS_TEXT,
+        scope=path_bullets(sorted(scope_files(review))),
+        bot_findings=bot_findings_section(review) or NO_BOT_FINDINGS_TEXT,
         **shared_rules.values_for(DIAGRAM_PROMPT),
         **prompt_parts(),
     )
@@ -576,7 +542,7 @@ DESIGN_ESTIMATE_NOTE = (
 
 def diagram_plan(assembly: AssemblyInput) -> MacroPlan:
     review = assembly.review
-    sections = policy_sections(review)
+    sections = policy_figures.shared_policy_sections(assembly)
     return MacroPlan(
         build_prompt=lambda: build_diagram_prompt(assembly, sections),
         stamp=stamp_diagram_prompt,
@@ -593,10 +559,7 @@ def design_plan(assembly: AssemblyInput, origin: DesignDocOrigin) -> MacroPlan:
     """設計書の本文は出所のパスから作業ディレクトリで読む。保存した版と違えば、refresh を促す。"""
     review = assembly.review
     root = Path(review.repository_root)
-    document = root / origin.document_path
-    if not document.is_file():
-        raise ReviewError(f"設計書がありません: {origin.document_path}")
-    read = read_document(document)
+    read = read_document(root, origin.document_path, "設計書")
     attached = read_attachments(review)
     drifts = version_drifts(review, read, attached)
     materials = design_materials(

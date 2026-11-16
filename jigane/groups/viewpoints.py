@@ -30,7 +30,6 @@ class Viewpoint:
     group: GroupId | None
     kind: ViewpointKind
     number: str
-    legacy_number: str
     name: str
     question: str
     design_question: str
@@ -51,7 +50,6 @@ def load_viewpoints(path: Path = VIEWPOINT_FILE) -> tuple[Viewpoint, ...]:
             group=GroupId(row["group"]) if row["group"] else None,
             kind=ViewpointKind(row["kind"]),
             number=row["number"],
-            legacy_number=row["legacy_number"],
             name=row["name"],
             question=row["question"],
             design_question=row["design_question"],
@@ -60,7 +58,6 @@ def load_viewpoints(path: Path = VIEWPOINT_FILE) -> tuple[Viewpoint, ...]:
     )
     _unique([viewpoint.uuid for viewpoint in viewpoints], "uuid")
     _unique([viewpoint.number for viewpoint in viewpoints], "number")
-    _unique([viewpoint.legacy_number for viewpoint in viewpoints], "legacy_number")
     return viewpoints
 
 
@@ -95,13 +92,6 @@ def by_uuid(identifier: uuid.UUID) -> Viewpoint:
         if viewpoint.uuid == identifier:
             return viewpoint
     raise KeyError(identifier)
-
-
-def by_legacy_number(number: str) -> Viewpoint:
-    for viewpoint in VIEWPOINTS:
-        if viewpoint.legacy_number == number:
-            return viewpoint
-    raise KeyError(number)
 
 
 def design_principles() -> tuple[Viewpoint, ...]:

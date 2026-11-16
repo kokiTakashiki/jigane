@@ -3,7 +3,7 @@ from collections.abc import Collection, Mapping
 import pytest
 from tree_sitter import Node
 
-from jigane.languages.base import PublicName, PublicNameKind, PublicNameReader, parse
+from jigane.languages.base import AddedPublicName, AddedPublicNameFinder, PublicNameKind, parse
 from jigane.languages.java import JavaAdapter
 from jigane.languages.java_public_names import added_public_names_of
 
@@ -12,7 +12,7 @@ _ADAPTER = JavaAdapter()
 
 def _added(
     before: Mapping[str, str], after: Mapping[str, str], changed: Collection[str]
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     return added_public_names_of(
         lambda source: parse(_ADAPTER, source.encode()).root_node, before, after, changed
     )
@@ -20,17 +20,17 @@ def _added(
 
 def _names(
     before: dict[str, str], after: dict[str, str], changed: set[str] | None = None
-) -> dict[str, PublicName]:
+) -> dict[str, AddedPublicName]:
     found = _added(before, after, set(after) if changed is None else changed)
     return {n.name: n for n in found}
 
 
-def _one(source: str) -> dict[str, PublicName]:
+def _one(source: str) -> dict[str, AddedPublicName]:
     return _names({}, {"A.java": source})
 
 
 def test_java_adapter_is_a_public_name_reader() -> None:
-    assert isinstance(_ADAPTER, PublicNameReader)
+    assert isinstance(_ADAPTER, AddedPublicNameFinder)
 
 
 def test_each_definition_kind_is_added() -> None:

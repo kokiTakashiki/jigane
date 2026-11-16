@@ -1,6 +1,8 @@
 """値の組の表の材料。追跡されたファイルから値の組を集め、珍しい値で絞り、重なる組をまとめる。
 
-組の拾い方は言語アダプタの `ValueSetReader` が持つ。ここは言語に依らない集計だけを持つ。
+組の拾い方は言語アダプタの `StringLiteralSetExtractor` と
+`StringLiteralComparisonExtractor` が持つ。
+ここは言語に依らない集計だけを持つ。
 """
 
 import re
@@ -15,8 +17,9 @@ from jigane.languages import registry
 from jigane.languages.base import (
     ComparisonKind,
     DefinitionKind,
-    StringComparison,
-    ValueSetReader,
+    StringLiteralComparison,
+    StringLiteralComparisonExtractor,
+    StringLiteralSetExtractor,
 )
 from jigane.text.document_files import is_document_path
 
@@ -68,7 +71,7 @@ class ValueSetRow:
     # 値を一定以上含むファイル。files はこれを種類ごとに数えたもの
     containing_paths: frozenset[str]
     # 組の値と文字列のまま比べている箇所。同じ箇所（パス、行、形）は一つにまとめる
-    comparisons: tuple[StringComparison, ...]
+    comparisons: tuple[StringLiteralComparison, ...]
     # 定義の無い値の組（`if` の連鎖などで同じ式を同じ値と比べるだけの組）では、比べている式の原文。
     # このとき definitions は空で、場所は comparisons の最初の要素。定義のある組は空
     subject: str = ""
@@ -81,6 +84,7 @@ class _Group:
 
 
 WORD_PATTERN = re.compile(r"[\w-]+")
+_PLAIN_WORD_PATTERN = re.compile(r"\w+")
 
 
 def kind_of(path: str) -> FileKind:
@@ -101,11 +105,21 @@ def _files_containing(values: set[str], texts: Mapping[str, str]) -> dict[str, s
     phrase_patterns = {
         phrase: re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)") for phrase in phrases
     }
+    # 語を一つも含まない phrase の語のリストは空で、包含の判定は常に真になるので先落としされない
+    phrase_words = {phrase: _PLAIN_WORD_PATTERN.findall(phrase) for phrase in phrases}
     for path, text in texts.items():
         for word in set(WORD_PATTERN.findall(text)):
             if word in found:
                 found[word].add(path)
+        if not phrases:
+            continue
+        plain_words = set(_PLAIN_WORD_PATTERN.findall(text))
         for phrase in phrases:
+            # (?<!\w)phrase(?!\w) で当たるとき、phrase の中の \w+ の連なりは、
+            # 内側では非語の文字に、両端では前後の境界の条件に挟まれるので、
+            # 本文でも語として切り出される（plain_words に必ず入る）。
+            if not plain_words.issuperset(phrase_words[phrase]):
+                continue
             # 部分文字列の検索で先に落とし、含む見込みのあるファイルだけ正規表現で確かめる
             if phrase in text and phrase_patterns[phrase].search(text):
                 found[phrase].add(path)
@@ -145,41 +159,45 @@ def _counts(paths: frozenset[str]) -> FileCounts:
     return FileCounts(kinds[FileKind.CODE], kinds[FileKind.TEST], kinds[FileKind.DOCUMENT])
 
 
-def _compares_to(group: _Group, comparison: StringComparison) -> bool:
+def _compares_to(group: _Group, comparison: StringLiteralComparison) -> bool:
     """比べている文字列が組の値に当たるか。接頭辞と接尾辞は、組の値のいずれかに掛かれば当たる。"""
-    match comparison.kind:
+    match comparison.comparison_kind:
         case ComparisonKind.PREFIX:
-            return any(value.startswith(comparison.value) for value in group.values)
+            return any(value.startswith(comparison.literal_value) for value in group.values)
         case ComparisonKind.SUFFIX:
-            return any(value.endswith(comparison.value) for value in group.values)
+            return any(value.endswith(comparison.literal_value) for value in group.values)
         case ComparisonKind.EQUALS | ComparisonKind.MEMBERSHIP | ComparisonKind.REGEX:
             # 正規表現は、パターンの文字列を一つの値として扱う
-            return comparison.value in group.values
+            return comparison.literal_value in group.values
 
 
 def _matching_comparisons(
-    group: _Group, comparisons: list[StringComparison]
-) -> tuple[StringComparison, ...]:
-    found: dict[tuple[str, int, ComparisonKind], StringComparison] = {}
+    group: _Group, comparisons: list[StringLiteralComparison]
+) -> tuple[StringLiteralComparison, ...]:
+    found: dict[tuple[str, int, ComparisonKind], StringLiteralComparison] = {}
     for comparison in comparisons:
         if _compares_to(group, comparison):
             # `in` の組は要素ごとに返るので、同じ箇所と形は先に当たった一つだけを残す
-            found.setdefault((comparison.path, comparison.line, comparison.kind), comparison)
-    return tuple(sorted(found.values(), key=lambda c: (c.path, c.line, c.kind)))
+            found.setdefault(
+                (comparison.path, comparison.line, comparison.comparison_kind), comparison
+            )
+    return tuple(sorted(found.values(), key=lambda c: (c.path, c.line, c.comparison_kind)))
 
 
 def _compared_only_candidates(
-    comparisons: list[StringComparison],
-) -> dict[tuple[str, str], list[StringComparison]]:
+    comparisons: list[StringLiteralComparison],
+) -> dict[tuple[str, str], list[StringLiteralComparison]]:
     """同じファイルの同じ式との等値の比べを、式ごとに束ねる。異なる値が足りない束は落とす。"""
-    bundles: dict[tuple[str, str], list[StringComparison]] = {}
+    bundles: dict[tuple[str, str], list[StringLiteralComparison]] = {}
     for comparison in comparisons:
-        if comparison.kind == ComparisonKind.EQUALS and comparison.subject:
-            bundles.setdefault((comparison.path, comparison.subject), []).append(comparison)
+        if comparison.comparison_kind == ComparisonKind.EQUALS and comparison.compared_expression:
+            bundles.setdefault((comparison.path, comparison.compared_expression), []).append(
+                comparison
+            )
     return {
         key: found
         for key, found in bundles.items()
-        if len({c.value for c in found}) >= MIN_RARE_VALUES
+        if len({c.literal_value for c in found}) >= MIN_RARE_VALUES
     }
 
 
@@ -193,20 +211,28 @@ def build_value_set_rows(
     all_texts = sources if texts is None else texts
     groups: list[_Group] = []
     candidates: list[tuple[ValueSetLocation, frozenset[str]]] = []
-    comparisons: list[StringComparison] = []
+    comparisons: list[StringLiteralComparison] = []
     for path, text in sorted(sources.items()):
         adapter = registry.adapter_for(path)
-        if not isinstance(adapter, ValueSetReader):
-            # 組の拾い方を持たない言語のファイルは、値を数える側にだけ使う
+        if not (
+            isinstance(adapter, StringLiteralSetExtractor)
+            and isinstance(adapter, StringLiteralComparisonExtractor)
+        ):
+            # 組と比べの拾い方の両方を持たない言語のファイルは、値を数える側にだけ使う
             continue
         candidates += [
-            (ValueSetLocation(found.path, found.line, found.name, found.kind), found.values)
-            for found in adapter.value_sets(text, path)
+            (
+                ValueSetLocation(
+                    found.path, found.line, found.binding_name, found.definition_kind
+                ),
+                found.values,
+            )
+            for found in adapter.string_literal_sets(text, path)
         ]
-        comparisons += adapter.string_comparisons(text, path)
+        comparisons += adapter.string_literal_comparisons(text, path)
     bundles = _compared_only_candidates(comparisons)
     every_value = set().union(*(values for _, values in candidates))
-    every_value |= {c.value for found in bundles.values() for c in found}
+    every_value |= {c.literal_value for found in bundles.values() for c in found}
     containing = _files_containing(every_value, all_texts)
     ceiling = max(len(all_texts) * RARE_VALUE_RATIO, MIN_RARE_CEILING)
     for location, values in candidates:
@@ -219,11 +245,13 @@ def build_value_set_rows(
         # 定義のある組の値に当たる比べは、その組の行が持つので、ここでは数えない
         undefined = [c for c in found if not any(_compares_to(g, c) for g in defined_groups)]
         # 珍しさの規則は、定義のある組と同じに当てる
-        rare = {c.value for c in undefined if len(containing[c.value]) < ceiling}
+        rare = {c.literal_value for c in undefined if len(containing[c.literal_value]) < ceiling}
         if len(rare) >= MIN_RARE_VALUES:
             group = _Group([], rare)
             paths = _containing_paths(group, containing)
-            kept = tuple(sorted((c for c in undefined if c.value in rare), key=lambda c: c.line))
+            kept = tuple(
+                sorted((c for c in undefined if c.literal_value in rare), key=lambda c: c.line)
+            )
             rows.append(ValueSetRow((), tuple(sorted(rare)), _counts(paths), paths, kept, subject))
     for group in defined_groups:
         paths = _containing_paths(group, containing)

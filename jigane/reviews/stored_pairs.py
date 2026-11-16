@@ -7,11 +7,15 @@ from jigane.storage.review_error import ReviewError
 from jigane.storage.store import CheckedReviewId
 
 
+class PairsNotSavedError(ReviewError):
+    """pairs.json が無いときの失敗。古い版のエラーとは型で見分ける。"""
+
+
 def load_pairs(review_id: CheckedReviewId) -> list[FilePair]:
     """差分のレビューの、変更したファイルの対。"""
     text = read_stored_text(review_id, PAIRS_FILE)
     if text is None:
-        raise ReviewError(
+        raise PairsNotSavedError(
             "ファイルの対が保存されていない古いレビューです。"
             f"refresh で作り直してください: {review_id}"
         )

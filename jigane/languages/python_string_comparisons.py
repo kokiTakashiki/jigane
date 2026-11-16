@@ -3,7 +3,7 @@
 import ast
 from collections.abc import Iterator
 
-from jigane.languages.base import ComparisonKind, StringComparison
+from jigane.languages.base import ComparisonKind, StringLiteralComparison
 from jigane.languages.python_ast import read_python
 
 _SEQUENCE_NODES = (ast.Tuple, ast.Set, ast.List)
@@ -98,9 +98,9 @@ def _call(node: ast.Call) -> Iterator[tuple[str, ComparisonKind, str]]:
         )
 
 
-def _walk_comparisons(tree: ast.Module, path: str) -> list[StringComparison]:
+def _walk_comparisons(tree: ast.Module, path: str) -> list[StringLiteralComparison]:
     named = _named_sequences(tree)
-    found: list[StringComparison] = []
+    found: list[StringLiteralComparison] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Compare):
             pairs = _compare(node, named)
@@ -109,13 +109,13 @@ def _walk_comparisons(tree: ast.Module, path: str) -> list[StringComparison]:
         else:
             continue
         found += [
-            StringComparison(value, kind, path, node.lineno, subject)
+            StringLiteralComparison(value, kind, path, node.lineno, subject)
             for value, kind, subject in pairs
         ]
     return sorted(found, key=lambda comparison: comparison.line)
 
 
-def string_comparisons(source: str, path: str) -> list[StringComparison]:
+def string_literal_comparisons(source: str, path: str) -> list[StringLiteralComparison]:
     """ファイルの文字列との比較を、行の順に返す。構文として読めないファイルは空。"""
     found = read_python(source, lambda tree: _walk_comparisons(tree, path))
     if found is None:

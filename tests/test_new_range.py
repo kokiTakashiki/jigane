@@ -7,7 +7,7 @@ import pytest
 from fakes import MacroFake, discovered, run_command_stub
 from gates_support import write_gates_file
 from pr_support import commit_all, git, remove_tree
-from review_fakes import EXTRA_WARNING
+from review_fakes import EXTRA_WARNING, current_form_findings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
@@ -22,7 +22,6 @@ from jigane.judgment_map.declaration import (
     EMPTY_COMMITS_WARNING,
     commits_declaration,
 )
-from jigane.pull_request_context.background import parse_background
 from jigane.reviews import lifecycle as review_module
 from jigane.reviews.catalog import list_reviews, load_review
 from jigane.reviews.lifecycle import (
@@ -210,11 +209,6 @@ def test_range_review_is_readable(
     assert capsys.readouterr().out
 
 
-def test_background_reads_record_with_removed_github_material_key() -> None:
-    background = parse_background({"issues": [], "documents": [], "github_material": False})
-    assert background.documents == ()
-
-
 def test_range_review_stores_the_working_directory_root(repo: dict[str, str]) -> None:
     review = create_range_review(Path(repo["root"]), "main..feature", "mine")
     assert isinstance(review.origin, RangeOrigin)
@@ -293,6 +287,24 @@ def test_new_range_cli_fails_on_an_unresolvable_range(
     assert main(["new", "range", "main..nope"]) == EXIT_PROCESSING_FAILURE
     assert capsys.readouterr().err
     assert list_reviews() == []
+
+
+def test_new_range_cli_stops_on_a_broken_config(
+    repo: dict[str, str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = Path(repo["root"])
+    git(root, "checkout", "main")
+    (root / ".jigane.toml").write_text("exclude = [\n", encoding="utf-8")
+    commit_all(root, "broken config")
+    git(root, "checkout", "-b", "broken")
+    (root / "extra.py").write_text("x = 1\n", encoding="utf-8")
+    commit_all(root, "extra")
+    monkeypatch.chdir(root)
+    assert main(["new", "range", "main..broken", "--name", "mine"]) == EXIT_PROCESSING_FAILURE
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert ".jigane.toml を読めませんでした" in err
+    assert "直してから" in err
 
 
 def test_refresh_without_change_is_not_updated(repo: dict[str, str]) -> None:
@@ -706,7 +718,9 @@ def _pick_one_finding(review: Review) -> None:
         },
         "themes": [],
     }
-    (review.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (review.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     assert main(["pick", str(review.id), "F1"]) == EXIT_OK
 
 
@@ -743,6 +757,7 @@ def test_reply_lists_the_gate_violations(
         "confidence": "direct",
         "origin": "o",
         "legitimate": "",
+        "detector_note": "",
     }
     gates = {"violations": [violation], "warnings": []}
     write_gates_file(review.id.directory(), gates)
@@ -769,7 +784,7 @@ def test_reply_shows_the_strength_of_a_regex_tag(
         "severity": "nit",
         "source": "regex",
     }
-    gates = {"format": 2, "violations": [violation], "warnings": []}
+    gates = {"violations": [violation], "warnings": []}
     write_gates_file(review.id.directory(), gates)
     capsys.readouterr()
     assert main(["export-reply", str(review.id), "--template", "reply"]) == EXIT_OK
@@ -922,5 +937,14 @@ def test_range_merge_base_and_diff_put_shas_after_end_of_options(
     resolve_range(Path(), "base..head")
     assert seen[2:] == [
         ["git", "merge-base", "--end-of-options", base, head],
-        ["git", "diff", "--name-only", "--end-of-options", ancestor, head],
+        [
+            "git",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "--end-of-options",
+            ancestor,
+            head,
+        ],
     ]

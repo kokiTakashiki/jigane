@@ -13,8 +13,14 @@ from jigane.figures.models import MermaidFigure, Panel
 from jigane.git.tree_files import walk_tree_files
 from jigane.judgment_map.classification import Segment
 from jigane.languages import registry
-from jigane.languages.base import Branch, DiscriminatorReader, Return, Span, Step
-from jigane.languages.base import Member as MemberRef
+from jigane.languages.base import (
+    DiscriminatorBranchExtractor,
+    FlowBranch,
+    FlowReturn,
+    FlowStep,
+    MemberReceiver,
+    Span,
+)
 from jigane.policy_materials import er
 from jigane.policy_materials.type_deltas import _changed_types, _flat
 from jigane.preconditions.required import required
@@ -48,7 +54,7 @@ def _reader_labels() -> str:
     return "、".join(
         registry.label_for(adapter.name)
         for adapter in registry.adapters()
-        if isinstance(adapter, DiscriminatorReader)
+        if isinstance(adapter, DiscriminatorBranchExtractor)
     )
 
 
@@ -76,7 +82,7 @@ class _Flow:
     def link(self, pending: Pending, target: str) -> None:
         self.edges.extend((origin, target, label) for origin, label in pending)
 
-    def enum_value(self, step: Return) -> str | None:
+    def enum_value(self, step: FlowReturn) -> str | None:
         if step.value is None:
             return None
         parts = step.value.split(".")
@@ -84,9 +90,9 @@ class _Flow:
             step.value if len(parts) >= _QUALIFIED_MIN_PARTS and parts[-2] in self.enums else None
         )
 
-    def walk(self, steps: Iterable[Step], pending: Pending) -> Pending:
+    def walk(self, steps: Iterable[FlowStep], pending: Pending) -> Pending:
         for step in steps:
-            if isinstance(step, Return):
+            if isinstance(step, FlowReturn):
                 value = self.enum_value(step)
                 if value is not None:
                     self.link(pending, self.new("leaf", f"return {value}"))
@@ -95,7 +101,7 @@ class _Flow:
             pending = self.walk_branch(step, pending)
         return pending
 
-    def walk_branch(self, branch: Branch, pending: Pending) -> Pending:
+    def walk_branch(self, branch: FlowBranch, pending: Pending) -> Pending:
         decision = self.new("decision", branch.condition)
         self.link(pending, decision)
         exits: Pending = []
@@ -156,11 +162,11 @@ def _touches(member: Member, path: str, span: Span, name: str) -> bool:
     return first <= span.end_line and span.start_line <= last
 
 
-def discriminator_steps(index: Index, member: Member, body: Node) -> list[Step] | None:
+def discriminator_steps(index: Index, member: Member, body: Node) -> list[FlowStep] | None:
     """関数の本体の分岐と return。分岐の読み取りを持たない言語の関数なら None。"""
-    if not isinstance(index.adapter, DiscriminatorReader):
+    if not isinstance(index.adapter, DiscriminatorBranchExtractor):
         return None
-    return index.adapter.discriminator_branches(
+    return index.adapter.discriminator_flow_steps(
         body, required(index.trees[member.path].root_node.text)
     )
 
@@ -223,7 +229,7 @@ def discriminator_diagram(review: Review) -> MermaidFigure | None:
     skipped = 0
     blocks: list[Panel] = []
     for index, member in callables:
-        body = index.adapter.body_of(member.node)
+        body = index.adapter.body_node_of(member.node)
         if body is None:
             continue
         if discriminator_steps(index, member, body) is None:
@@ -247,7 +253,7 @@ def _attribute_reads(
     index: Index, member: Member, field_name: str, owner: TypeInfo
 ) -> tuple[int, int]:
     """(owner の項目を読む参照の数, 受け手の型を確かめられない参照の数)。"""
-    body = index.adapter.body_of(member.node)
+    body = index.adapter.body_node_of(member.node)
     if body is None:
         return 0, 0
     typer = receiver_typer(index, member)
@@ -258,9 +264,9 @@ def _attribute_reads(
         stack.extend(node.children)
         if node.type not in _ATTRIBUTE_NODES:
             continue
-        kind = index.adapter.receiver_of(node)
+        kind = index.adapter.receiver_kind_of(node)
         if (
-            not isinstance(kind, MemberRef)
+            not isinstance(kind, MemberReceiver)
             or index.adapter.simple_type_name(kind.name) != field_name
         ):
             continue

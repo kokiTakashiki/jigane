@@ -111,7 +111,23 @@ flowchart LR
 - Windows では、Claude Code の公式のインストーラで入れた claude.exe があること。npm で入れた claude.cmd は cmd.exe を通って起動され、JSON の引数を安全に渡せないため、jigane は起動しません。手順は <https://code.claude.com/docs/en/setup#install-on-native-windows> にあります
 - git が使えること
 - PR のレビュー（PR の URL を取る）を使うなら、GitHub CLI（gh）にログイン済みであること。呼ぶコマンドは「[jigane が呼ぶ gh のコマンド](docs/data-destinations.md#jigane-が呼ぶ-gh-のコマンド)」の節に挙げます
-- セキュリティのスキルで MCP サーバを使うなら（任意です）、データの置き場（既定は `~/.local/share/jigane`）の `mcp.json` に、使う MCP サーバの起動の設定を利用者が書くこと。MCP を使わない既定の実行には、`mcp.json` は要りません
+- セキュリティのスキルで MCP サーバを使うなら（任意です）、データの置き場（根の決め方は「[データの置き場](docs/commands.md#データの置き場)」の節）の `mcp.json` に、使う MCP サーバの起動の設定を利用者が書くこと。MCP を使わない既定の実行には、`mcp.json` は要りません
+
+### 更新
+
+新しいバージョンの jigane が作ったファイルは、古いバージョンでは読み込めません。そのときは jigane が止まり、更新を案内します。入れた方法に合わせて、次のコマンドで更新してください。
+
+`uv tool install jigane` で入れた場合：
+
+```bash
+uv tool upgrade jigane
+```
+
+`pipx install jigane` で入れた場合：
+
+```bash
+pipx upgrade jigane
+```
 
 ## 対応する言語
 
@@ -173,7 +189,7 @@ flowchart LR
 | 解析する | `flaky` | いいえ | テストの flaky の検査だけを走らせます（レビューは作りません） |
 | 指摘を選ぶ | `pick` | いいえ | 指摘（F、B の番号）を最終的な指摘に加えます |
 | 指摘を選ぶ | `unpick` | いいえ | 指摘（F、B の番号）を最終的な指摘から外します |
-| 指摘を選ぶ | `hold` | いいえ | 指摘（F、B の番号）を保留にします |
+| 指摘を選ぶ | `hold` | いいえ | 指摘（F、B の番号）を保留にします。--reason で理由を残せます（任意） |
 | 指摘を選ぶ | `unhold` | いいえ | 指摘（F、B の番号）を保留から外します |
 | 指摘を選ぶ | `object` | いいえ | 指摘への異議を記録します |
 | 指摘を選ぶ | `unobject` | いいえ | 指摘への異議を取り下げます |
@@ -181,6 +197,7 @@ flowchart LR
 | 書き出す | `export-report` | いいえ | 最終的な指摘からレポートを書き出します |
 | 書き出す | `templates` | いいえ | 返信とレポートのテンプレートを一覧します |
 | 導入 | `languages` | いいえ | 言語を一覧し、追加の言語を有効にし、外し、文法を取得します |
+| 確かめる | `debug` | いいえ | jigane の内部を確かめます。出力は暫定で、jigane の版で変わることがあります |
 
 <!-- END GENERATED: command-table -->
 
@@ -189,6 +206,7 @@ flowchart LR
 - [想定する使い方](docs/usage.md)：PR のレビューと設計書のレビューの詳しい流れと図
 - [方針、実装、セキュリティのレビュー](docs/reviews.md)：三つのレビューの内容
 - [コマンドの使い方](docs/commands.md)：各副コマンドの呼び方と引数
+- [リポジトリの文書を渡す](docs/commands.md#リポジトリの文書を渡す)：`repository-docs.toml` で開発方針とセキュリティ指針の文書をレビューへ渡す設定
 - [起動の回数と費用](docs/cost.md)：`jigane run` の起動の回数と費用。大きな差分ではシャードが 4 個から最大 8 個に増え、4 個に達した差分が 8 個でもプロンプト約 230 KB × 8（約 1.84 MB）に収まらないときは、起動せず見送って案内します
 - [静的検査の結果（SARIF）を取り込む](docs/sarif.md)：SARIF の取り込みの手順と条件
 - [セキュリティの群の MCP の使い分け](docs/security-mcp.md)：MCP の使い分け

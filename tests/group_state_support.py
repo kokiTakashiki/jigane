@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from review_fakes import group_result
+from runs_support import with_record_kind
 
 from jigane.findings.records import RUNS_FILE, ThemeUpdate, merge_group
 from jigane.groups.definitions import GroupId
 from jigane.reviews.lifecycle import Review
-from jigane.skills.pipeline import write_json
+from jigane.skills.pipeline import RUNS_FORMAT, write_json
 
 # 実行が成功した記録の最小の形。invocations は 1 回の起動（14 秒、0.02 USD）
 SUCCESSFUL_RUN: dict[str, Any] = {
@@ -26,6 +27,7 @@ SUCCESSFUL_RUN: dict[str, Any] = {
             "role": "discovery",
             "split_index": 0,
             "cost_usd": 0.02,
+            "cost_source": "measured",
             "input_tokens": 1,
             "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 0,
@@ -35,6 +37,7 @@ SUCCESSFUL_RUN: dict[str, Any] = {
             "is_error": False,
             "terminal_reason": None,
             "permission_denials": 0,
+            "started_at": "2026-11-01T00:00:00+00:00",
         }
     ],
     "discovered": 0,
@@ -48,13 +51,9 @@ SUCCESSFUL_RUN: dict[str, Any] = {
 
 
 def rewrite_raw_findings(directory: Path, edit: Callable[[dict[str, Any]], None]) -> None:
-    """findings.json を型を通さず直接書き換える。旧形式や壊れた値を置くテストの入口。
-
-    版を外すので、書き換えた結果は版 1 として読まれる。
-    """
+    """findings.json を型を通さず直接書き換える。壊れた値を置くテストの入口。版は保つ。"""
     path = directory / "findings.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
-    del raw["format"]
     edit(raw)
     path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -70,6 +69,6 @@ def seed_group(
     update = ThemeUpdate((), 0) if group == GroupId.MICRO else None
     merge_group(directory, group, group_result(findings, update), None)
     path = directory / RUNS_FILE
-    runs = json.loads(path.read_text("utf-8")) if path.is_file() else {}
-    runs[group] = {**SUCCESSFUL_RUN, **run_state}
+    runs = json.loads(path.read_text("utf-8")) if path.is_file() else {"format": RUNS_FORMAT}
+    runs[group] = with_record_kind(group, {**SUCCESSFUL_RUN, **run_state})
     write_json(path, runs)

@@ -1,22 +1,22 @@
 import pytest
 
-from jigane.languages.base import RegexAdapter, RegexDialect, RegexScan, RegexUse, parse
+from jigane.languages.base import RegexDialect, RegexSiteExtractor, RegexSites, RegexUse, parse
 from jigane.languages.python import PythonAdapter
 
 adapter = PythonAdapter()
 
 
-def scan(code: str) -> RegexScan:
+def scan(code: str) -> RegexSites:
     source = code.encode()
-    return adapter.regex_literals(parse(adapter, source).root_node, source, "a.py")
+    return adapter.regex_sites(parse(adapter, source).root_node, source, "a.py")
 
 
 def patterns(code: str) -> list[tuple[str, str]]:
-    return [(found.call, found.pattern) for found in scan(code).literals]
+    return [(found.call_name, found.pattern) for found in scan(code).literal_sites]
 
 
 def test_adapter_satisfies_the_protocol() -> None:
-    assert isinstance(adapter, RegexAdapter)
+    assert isinstance(adapter, RegexSiteExtractor)
 
 
 @pytest.mark.parametrize(
@@ -32,7 +32,7 @@ def test_pattern_keyword_is_picked() -> None:
 
 
 def test_dialect_path_and_line() -> None:
-    found = scan("import re\n\nre.compile('a')\n").literals[0]
+    found = scan("import re\n\nre.compile('a')\n").literal_sites[0]
     assert found.dialect is RegexDialect.PYTHON
     assert found.path == "a.py"
     assert found.line == 3
@@ -61,7 +61,7 @@ def test_unrelated_calls_are_ignored() -> None:
         "sub('a', '', s)\n"
     )
     assert patterns(code) == []
-    assert scan(code).composed == ()
+    assert scan(code).composed_sites == ()
 
 
 def test_from_import_of_other_module_is_ignored() -> None:
@@ -108,8 +108,8 @@ def test_composed_patterns() -> None:
         "re.sub('a' f'{x}', '', s)\n"
     )
     found = scan(code)
-    assert found.literals == ()
-    assert [(c.call, c.line) for c in found.composed] == [
+    assert found.literal_sites == ()
+    assert [(c.call_name, c.line) for c in found.composed_sites] == [
         ("re.compile", 2),
         ("re.compile", 3),
         ("re.search", 4),
@@ -120,8 +120,8 @@ def test_composed_patterns() -> None:
 
 def test_literals_and_composed_are_separate() -> None:
     found = scan("import re\nre.compile('a')\nre.compile(x)\n")
-    assert [lit.pattern for lit in found.literals] == ["a"]
-    assert [c.line for c in found.composed] == [3]
+    assert [lit.pattern for lit in found.literal_sites] == ["a"]
+    assert [c.line for c in found.composed_sites] == [3]
 
 
 def test_uses() -> None:
@@ -132,7 +132,7 @@ def test_uses() -> None:
         "re.split('a', s)\nre.sub(x, 'b', s)\n"
     )
     result = scan(code)
-    assert [(r.call, r.use) for r in result.literals] == [
+    assert [(r.call_name, r.use) for r in result.literal_sites] == [
         ("re.compile", RegexUse.COMPILE),
         ("re.match", RegexUse.MATCH),
         ("re.search", RegexUse.MATCH),
@@ -143,14 +143,14 @@ def test_uses() -> None:
         ("re.subn", RegexUse.REPLACE),
         ("re.split", RegexUse.SPLIT),
     ]
-    assert [(r.call, r.use) for r in result.composed] == [("re.sub", RegexUse.REPLACE)]
+    assert [(r.call_name, r.use) for r in result.composed_sites] == [("re.sub", RegexUse.REPLACE)]
 
 
 def test_local_constant_is_followed_one_step() -> None:
     code = 'import re\n\ndef f(s):\n    p = "a+" "b"\n    return re.match(p, s)\n'
     found = scan(code)
-    assert [(x.call, x.pattern) for x in found.literals] == [("re.match", "a+b")]
-    assert found.composed == ()
+    assert [(x.call_name, x.pattern) for x in found.literal_sites] == [("re.match", "a+b")]
+    assert found.composed_sites == ()
 
 
 @pytest.mark.parametrize(
@@ -168,21 +168,21 @@ def test_local_constant_is_followed_one_step() -> None:
 )
 def test_local_constant_is_not_followed(body: str) -> None:
     found = scan(f"import re\n\ndef f(s):\n{body}")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_parameter_is_not_followed() -> None:
     found = scan("import re\n\ndef f(p):\n    return re.match(p, 'x')\n")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_f_string_without_interpolation_is_composed() -> None:
     # literal_eval が f 文字列を受け付けないため、補間が無くても定数にならない
     found = scan("import re\nre.compile(f'a+')\n")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_comment_between_adjacent_strings_is_skipped() -> None:

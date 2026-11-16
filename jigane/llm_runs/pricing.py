@@ -3,6 +3,8 @@
 import math
 from dataclasses import dataclass
 
+from jigane.preconditions.required import required
+
 
 def estimate_input_tokens(text_bytes: int) -> int:
     # 日本語、英語、コードが混じるため係数 3 は仮置きである。後の段で実測して直す。
@@ -86,10 +88,15 @@ def tier_prices(model: str, prompt_tokens: int) -> tuple[PriceTier, bool]:
             max(tier.output for tier in every),
         )
         return highest, True
-    tier = next(
-        item
-        for item in prices.tiers
-        if item.up_to_prompt_tokens is None or prompt_tokens <= item.up_to_prompt_tokens
+    tier = required(
+        next(
+            (
+                item
+                for item in prices.tiers
+                if item.up_to_prompt_tokens is None or prompt_tokens <= item.up_to_prompt_tokens
+            ),
+            None,
+        )
     )
     return tier, False
 

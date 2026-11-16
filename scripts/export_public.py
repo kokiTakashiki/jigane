@@ -27,9 +27,8 @@ import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-import tomlkit
 from dev_launch import run_tool
-from generate_entrypoints import OMIT_FROM_PUBLIC_COPY
+from private_tasks import PRIVATE_TASKS, drop_private_tasks
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from workflow_rules import EXCLUDE_LIST, PUBLIC_COPY_KINDS, read_entries, violations
@@ -43,9 +42,15 @@ PULL_REQUEST_LIMIT_KEY = "open-pull-requests-limit"
 Runner = Callable[..., str]
 SKIPPED_DIRECTORIES = {".venv", "dist", ".git"}
 ENTRYPOINTS_PATH = Path("entrypoints.toml")
-# 写しの作業から外す行の目印。開発のゲートの設定で、写しは .git が無く、
-# 利用者の git config にも書かせないため
-PRIVATE_COMMAND_MARKER = "claude.gateCommand"
+# 利用者の git の設定（名前、署名）に左右されないよう、commit の設定をその場で渡す
+GIT_IDENTITY = (
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.com",
+    "-c",
+    "commit.gpgsign=false",
+)
 
 
 class StageError(Exception):
@@ -119,47 +124,22 @@ def silence_version_updates(tree: Path) -> int:
     return len(written)
 
 
-def drop_private_tasks(text: str) -> tuple[str, list[str]]:
-    """entrypoints.toml の文面から、OMIT_FROM_PUBLIC_COPY が真の [[task]] を外す。
-
-    外した作業の名前も返す。
-
-    残す作業の commands からも、PRIVATE_COMMAND_MARKER を含む開発用の行を外す。
-    """
-    document = tomlkit.parse(text)
-    # [[task]] が無い文書は空の列として扱い、外すものが無いまま返す
-    tasks = document.get("task") or []
-    dropped: list[str] = []
-    # 後ろから外し、これから見る要素の添字を動かさない
-    for index in reversed(range(len(tasks))):
-        name = tasks[index].get("name")
-        if tasks[index].get(OMIT_FROM_PUBLIC_COPY) is True:
-            dropped.insert(0, name)
-            del tasks[index]
-            continue
-        commands = tasks[index].get("commands")
-        # commands を持たない作業は外す行が無いので、そのまま残す
-        if commands is None:
-            continue
-        for position in reversed(range(len(commands))):
-            if PRIVATE_COMMAND_MARKER in commands[position]:
-                del commands[position]
-    return tomlkit.dumps(document), dropped
-
-
-def regenerate_entrypoints(tree: Path, run: Runner, env: dict[str, str]) -> list[str]:
-    """写しの entrypoints.toml から非公開の作業を外し、Makefile と justfile を作り直す。"""
+def drop_private_entrypoints(tree: Path) -> list[str]:
+    """写しの entrypoints.toml から非公開の作業を外し、外した作業の名前を返す。"""
     path = tree / ENTRYPOINTS_PATH
     if not path.exists():
         raise StageError("入口", f"写しに {ENTRYPOINTS_PATH} が無い")
-    text, dropped = drop_private_tasks(path.read_text(encoding="utf-8"))
-    if not dropped:
-        raise StageError(
-            "入口", f"{OMIT_FROM_PUBLIC_COPY} の作業が無く、非公開の作業を外せなかった"
-        )
-    path.write_text(text, encoding="utf-8")
+    result = drop_private_tasks(path.read_text(encoding="utf-8"))
+    missing = sorted(set(PRIVATE_TASKS) - set(result.names))
+    if missing:
+        raise StageError("入口", f"外すはずの非公開の作業が写しに無い: {', '.join(missing)}")
+    path.write_text(result.text, encoding="utf-8")
+    return result.names
+
+
+def regenerate_entrypoints(tree: Path, run: Runner, env: dict[str, str]) -> None:
+    """写しの Makefile と justfile を、外した後の entrypoints.toml から作り直す。"""
     command_stage(run, "入口", [sys.executable, "scripts/generate_entrypoints.py"], tree, env)
-    return dropped
 
 
 def reference_words(excluded: Sequence[str], private_names: Sequence[str]) -> list[str]:
@@ -226,6 +206,11 @@ def command_stage(run: Runner, stage: str, args: list[str], cwd: Path, env: dict
         raise StageError(stage, f"{' '.join(args)}\n{error.stdout}\n{error}") from error
 
 
+def _venv_commands_directory(venv: Path) -> Path:
+    """仮想環境の実行ファイルの置き場。Windows だけ Scripts になる。"""
+    return venv / ("Scripts" if is_windows() else "bin")
+
+
 def wheel_environment_stage(run: Runner, wheel: Path, work: Path, env: dict[str, str]) -> None:
     """wheel だけを入れた新しい環境で、PyPI から入れた利用者が最初に打つ三つを走らせる。
 
@@ -234,8 +219,7 @@ def wheel_environment_stage(run: Runner, wheel: Path, work: Path, env: dict[str,
     """
     stage = "wheel だけの環境の検査"
     venv = work / "wheel-env"
-    # 仮想環境の実行ファイルの置き場は、Windows だけ Scripts になる
-    commands = venv / ("Scripts" if is_windows() else "bin")
+    commands = _venv_commands_directory(venv)
     command_stage(run, stage, ["uv", "venv", str(venv)], work, env)
     command_stage(
         run,
@@ -256,19 +240,7 @@ def wheel_environment_stage(run: Runner, wheel: Path, work: Path, env: dict[str,
     for args in (
         ["git", "init", "-b", "main"],
         ["git", "add", "."],
-        # 利用者の git の設定（名前、署名）に左右されないよう、commit の設定をその場で渡す
-        [
-            "git",
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-m",
-            "init",
-        ],
+        ["git", *GIT_IDENTITY, "commit", "-m", "init"],
     ):
         command_stage(run, stage, args, repository, user_env)
     command_stage(
@@ -298,20 +270,15 @@ def check_in_temporary_repository(run: Runner, tree: Path, env: dict[str, str]) 
     残した写しを公開の木として確かめる段は、.git の無いことを求める。
     make check の最後の段は、未コミットの変更があると印を書かず落ちるので、コミットまで行う。
     """
-    # 利用者の git の設定（名前、署名）に左右されないよう、commit の設定をその場で渡す
-    identity = [
-        "-c",
-        "user.name=t",
-        "-c",
-        "user.email=t@example.com",
-        "-c",
-        "commit.gpgsign=false",
-    ]
     try:
         for args in (
             ["git", "init", "-b", "main"],
+            # commit の後に git が切り離して走らせる自動の maintenance を止める。
+            # 走ると .git/objects に錠を作り消すので、finally の remove_tree と競合する
+            ["git", "config", "maintenance.auto", "false"],
+            ["git", "config", "gc.auto", "0"],
             ["git", "add", "-A"],
-            ["git", *identity, "commit", "-q", "-m", "export"],
+            ["git", *GIT_IDENTITY, "commit", "-q", "-m", "export"],
         ):
             command_stage(run, "make check", args, tree, env)
         command_stage(run, "make check", ["make", "check"], tree, env)
@@ -346,7 +313,8 @@ def export(
         detail = "写しのワークフローに self-hosted が残っている\n" + "\n".join(self_hosted)
         raise StageError("self-hosted の検査", detail)
     report("self-hosted の検査: 済")
-    dropped = regenerate_entrypoints(tree, run, {**os.environ})
+    dropped = drop_private_entrypoints(tree)
+    regenerate_entrypoints(tree, run, {**os.environ})
     report(f"入口: 非公開の作業 {len(dropped)} 件を外して作り直した")
     home = work / "home"
     home.mkdir()

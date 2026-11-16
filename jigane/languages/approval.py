@@ -34,14 +34,8 @@ class ApprovedContent:
     files: tuple[FileDigest, ...]
 
 
-@dataclass(frozen=True)
-class LegacyApproval:
-    """中身を記録する前の形の承認。読めるが、承認としては使わない。"""
-
-
-Approval = ApprovedContent | LegacyApproval
 # 承認の記録を（正規化した配布名, 版）ごとにまとめたもの。同じ組の承認は複数ありうる
-ApprovalsByPair = dict[tuple[str, str], set[Approval]]
+ApprovalsByPair = dict[tuple[str, str], set[ApprovedContent]]
 
 
 def _scan_record(dist: metadata.Distribution) -> tuple[dict[str, str], list[tuple[str, OSError]]]:
@@ -86,7 +80,6 @@ def read_content(dist: metadata.Distribution) -> ApprovedContent:
 
 # 理由に並べるパスの上限。RECORD は外の配布が決めるので、全部は並べない
 _MAX_LISTED_PATHS = 5
-_LEGACY_APPROVAL_REASON = "旧い形の承認記録です（中身の照合ができません）"
 
 
 @dataclass(frozen=True)
@@ -132,28 +125,24 @@ def _describe_content_change(change: _ContentChange) -> str:
 
 
 def reapproval_reason(
-    approvals: Iterable[Approval], actual: dict[str, str], absent: Iterable[str] = ()
+    approvals: Iterable[ApprovedContent], actual: dict[str, str], absent: Iterable[str] = ()
 ) -> str:
     """承認し直しを求める理由の文。呼ぶ側は、approvals のどれも今の中身と一致しないと確かめてある。
 
-    中身つきの承認が複数あれば、差の最も少ないものと比べる。
+    承認が複数あれば、差の最も少ないものと比べる。
     """
-    recorded = [approval for approval in approvals if isinstance(approval, ApprovedContent)]
-    if not recorded:
-        return _LEGACY_APPROVAL_REASON
     absent = tuple(absent)
     closest = min(
-        (_content_change(approved, actual, absent) for approved in recorded),
+        (_content_change(approved, actual, absent) for approved in approvals),
         key=lambda change: (change.size(), change.changed, change.missing, change.added),
     )
     return _describe_content_change(closest)
 
 
-def content_error(dist: metadata.Distribution, approvals: Collection[Approval]) -> str | None:
+def content_error(
+    dist: metadata.Distribution, approvals: Collection[ApprovedContent]
+) -> str | None:
     """配布の今の中身が、その配布と版の承認の記録と違う理由。同じなら None。"""
-    if not any(isinstance(approval, ApprovedContent) for approval in approvals):
-        # 旧い形の記録は配布を読まずに断る。RECORD の有無や読めないファイルで理由を変えない
-        return _LEGACY_APPROVAL_REASON
     try:
         hashes, failures = _scan_record(dist)
     except RecordError as no_record:

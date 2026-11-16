@@ -9,7 +9,7 @@ from jigane.commands import generation
 from jigane.commands.views.review import source_lines
 from jigane.findings.discard import ShardConcerns
 from jigane.groups.definitions import GroupId
-from jigane.judgment_map.classification import build_judgment_map
+from jigane.judgment_map.classification import FilePair, build_judgment_map
 from jigane.judgment_map.configuration import Config
 from jigane.judgment_map.map_kind import MAP_FILE, dump_map
 from jigane.reviews import lifecycle as review_module
@@ -21,7 +21,6 @@ from jigane.reviews.lifecycle import (
     PullRequestOrigin,
     RangeOrigin,
     ReviewError,
-    read_stored_sources,
 )
 from jigane.skills import macro, sharded, shards
 from jigane.skills.assembly import AssemblyInput
@@ -67,28 +66,6 @@ def test_diff_review_without_pull_request_round_trips(tmp_path: Path) -> None:
     assert isinstance(loaded.origin, RangeOrigin)
     assert not loaded.is_pull_request
     assert loaded.base_tree_path == tmp_path / "base"
-
-
-def test_legacy_pull_request_value_is_split_by_the_upgrade() -> None:
-    legacy = {
-        **INFO.to_dict(),
-        "linked_issues": [],
-        "base_sha": "b",
-        "head_sha": "h",
-        "merge_base": "m",
-        "base_tree": "/t",
-    }
-    raw = {
-        "id": "owner/repo#1",
-        "declaration": {"source": "pull_request", "intent": None, "excerpts": []},
-        "warnings": [],
-        "pull_request": legacy,
-    }
-    upgraded = review_formats._REVIEW_UPGRADES[1](raw)
-    source, info = read_stored_sources(upgraded["pull_request"], upgraded["diff_source"])
-    assert source is not None
-    assert source.base_tree == "/t"
-    assert info == INFO
 
 
 def test_header_lines_are_split_by_source(tmp_path: Path) -> None:
@@ -145,17 +122,16 @@ def test_mode_is_derived_and_a_conflicting_stored_value_is_ignored(tmp_path: Pat
         meta_path = loaded.id.directory() / REVIEW_FILE
         stored = json.loads(meta_path.read_text(encoding="utf-8"))
         assert "mode" not in stored
-        # 版 3 の review.json は format が 3 で、導ける項目の mode を食い違う値で持つ
-        v3 = {
+        # 導ける項目の mode を食い違う値で持つ review.json
+        conflicting = {
             **stored,
-            "format": 3,
             "kind": str(original.kind),
             "mode": "feature" if expected == "diff" else "diff",
             "is_diff": original.mode != "diff",
             "is_pull_request": False,
         }
-        meta_path.write_text(json.dumps(v3), encoding="utf-8")
-        # 版 3 から 4 への移しが mode を捨てるので、読み戻しは差分の出所の有無が決める
+        meta_path.write_text(json.dumps(conflicting), encoding="utf-8")
+        # 読み戻しは保存された mode でなく、差分の出所の有無が決める
         assert load_review(loaded.id).mode == expected
         shutil.rmtree(loaded.id.directory())
 
@@ -275,7 +251,7 @@ def test_shards_are_built_from_the_three_source_shapes(
     directory = review.id.directory()
     directory.mkdir(parents=True)
     (directory / review_formats.PAIRS_FILE).write_text(
-        json.dumps([["edit.py", "edit.py"]]), encoding="utf-8"
+        json.dumps(review_formats.dump_pairs([FilePair("edit.py", "edit.py")])), encoding="utf-8"
     )
     units = shards.build_units(review)
     assert [unit.path for unit in units] == ["edit.py"]

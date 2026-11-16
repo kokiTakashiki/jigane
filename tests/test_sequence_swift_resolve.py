@@ -152,7 +152,7 @@ def test_bind_uses_the_external_label_of_a_renamed_parameter(tmp_path: Path) -> 
     assert take is not None
     assert run is not None
     site = next(
-        c for c in index.adapter.call_sites(required(index.adapter.body_of(run.node)), b"")
+        c for c in index.adapter.call_sites(required(index.adapter.body_node_of(run.node)), b"")
     )
     assert isinstance(site, CallSite)
     pairs = take.bind(site.arguments, positional_labels=True)

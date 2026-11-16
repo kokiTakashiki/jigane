@@ -14,6 +14,10 @@ import subprocess
 from pathlib import Path
 
 from jigane.git.process import CommandError, child_environment, launch_failure, resolve_command
+from jigane.git.tree_files import UNTRACKED_FILES_ARGS as _UNTRACKED_LISTING_ARGS
+
+# 追跡外で ignore もされていないファイルを列挙する git の引数。scripts の道具が共有する
+UNTRACKED_FILES_ARGS = ("ls-files", *_UNTRACKED_LISTING_ARGS)
 
 
 def run_tool(

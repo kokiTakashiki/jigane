@@ -6,7 +6,7 @@ from review_fakes import make_review
 from test_policy_classes import whole
 
 from jigane.figures.models import TableFigure
-from jigane.languages.base import TypeFieldReader
+from jigane.languages.base import TypeFieldNameExtractor
 from jigane.reviews.lifecycle import Review
 from jigane.skills import policy_field_copies
 from jigane.skills.policy_figures import (
@@ -181,7 +181,7 @@ def test_file_review_has_no_table(tmp_path: Path) -> None:
 def test_registered_in_after_regions_with_the_type_field_reader(tmp_path: Path) -> None:
     entry = next(e for e in REGISTRY if e.key == "field_copies")
     assert entry.slot == FigureSlot.AFTER_REGIONS
-    assert entry.interface is TypeFieldReader
+    assert entry.interface is TypeFieldNameExtractor
     review = _range_review(tmp_path, _tree(CASE / "before"), _tree(CASE / "after"))
     placed = next(p for p in diagrams_of(review).figures if p.key == "field_copies")
     assert placed.to_json()["kind"] == "table"

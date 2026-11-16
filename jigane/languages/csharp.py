@@ -16,8 +16,9 @@ from jigane.languages import (
     type_names,
 )
 from jigane.languages.base import (
-    Argument,
+    AddedPublicName,
     BodyBounds,
+    CallArgument,
     CallParts,
     CallSite,
     ConcurrencyStep,
@@ -25,8 +26,9 @@ from jigane.languages.base import (
     DeclarationKind,
     DeclarationSpans,
     DeferredSite,
-    FilePathPattern,
-    Import,
+    FilePathExpression,
+    FlowStep,
+    ImportedModule,
     Isolation,
     IsolationContext,
     Locals,
@@ -34,16 +36,16 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
-    PublicName,
     ReceiverKind,
-    RegexScan,
+    RegexSites,
     Sharing,
-    Step,
-    StringComparison,
+    StringLiteralComparison,
+    StringLiteralSet,
     TypeDecl,
-    TypeFields,
+    TypeFieldNames,
     TypeScope,
-    ValueSet,
+    UnsupportedSyntax,
+    UnsupportedSyntaxKind,
     Visibility,
     import_nodes,
     leading_components,
@@ -62,6 +64,7 @@ from jigane.languages.csharp_nodes import (
     modifiers,
     named_declarations,
     named_declarators,
+    nameless_declarator_nodes,
     namespace_container,
 )
 from jigane.languages.node_text import text_of
@@ -118,7 +121,7 @@ def _opener_and_closer(node: Node) -> tuple[Node, Node] | None:
             return opener, child
         if child.type == "arrow_expression_clause":
             # arrow_expression_clause は => を必ず持つ（欠ければ MISSING の節点で補われる）
-            arrow = next(c for c in child.children if c.type == "=>")
+            arrow = required(next((c for c in child.children if c.type == "=>"), None))
             return arrow, node
         if child.type == "accessor_list":
             accessors = [c for c in child.children if c.type == "accessor_declaration"]
@@ -182,13 +185,13 @@ def _lambda_parameter_names(lambda_node: Node) -> list[str]:
     return names
 
 
-def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]:
+def _arguments(node: Node, captured: Node | None = None) -> tuple[CallArgument, ...]:
     arguments = captured or node.child_by_field_name("arguments")
     if arguments is None:
         arguments = next((c for c in node.children if c.type == "argument_list"), None)
     if arguments is None:
         return ()
-    result: list[Argument] = []
+    result: list[CallArgument] = []
     for argument in arguments.named_children:
         if not argument.named_children:
             continue
@@ -196,7 +199,7 @@ def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]
             (c for c in argument.children if c.type == "name_colon"), None
         )
         name = text_of(label).rstrip(":").strip() if label is not None else None
-        result.append(Argument(argument.named_children[-1], name))
+        result.append(CallArgument(argument.named_children[-1], name))
     return tuple(result)
 
 
@@ -270,7 +273,7 @@ class _CSharpRules(calls_core.RuleDefaults):
     def call_parts(self, call: Node) -> CallParts:
         return _call_parts(call)
 
-    def arguments(self, node: Node) -> tuple[Argument, ...]:
+    def arguments(self, node: Node) -> tuple[CallArgument, ...]:
         return _arguments(node)
 
     def function_name(self, node: Node) -> str | None:
@@ -298,6 +301,13 @@ class _CSharpRules(calls_core.RuleDefaults):
 
 
 _RULES = _CSharpRules()
+
+
+_NAMELESS_DECLARATOR = UnsupportedSyntaxKind(
+    "nameless_declarator",
+    "名前を取れない宣言子（C#。クラス直下の `Foo.Bar(x);` など）",
+    "文をメソッドかコンストラクタの中に移してください（C# ではクラス直下に文を書けません）。",
+)
 
 
 class CSharpAdapter:
@@ -335,13 +345,15 @@ class CSharpAdapter:
         # 無名クラスを型の名前で持たない言語
         return None
 
-    def markup_path(self, path: str) -> str | None:
+    def paired_markup_path(self, path: str) -> str | None:
         return csharp_xaml.paired_xaml_path(path)
 
-    def markup_handlers(self, markup: str) -> frozenset[str]:
+    def handler_names_in_markup(self, markup: str) -> frozenset[str]:
         return csharp_xaml.handler_names(markup)
 
-    def imported_names(self, _root_node: Node, _source: bytes, _path: str, /) -> dict[str, str]:
+    def imported_name_origins(
+        self, _root_node: Node, _source: bytes, _path: str, /
+    ) -> dict[str, str]:
         # using は名前を束縛しないので、受け手の無い名前の解決に使う表は持たない
         return {}
 
@@ -377,7 +389,7 @@ class CSharpAdapter:
         # C# の共有の札は別の段で実装するので、札は出さない
         return Sharing.UNKNOWN
 
-    def body_of(self, member_node: Node) -> Node | None:
+    def body_node_of(self, member_node: Node) -> Node | None:
         return member_node.child_by_field_name("body") or next(
             (c for c in member_node.children if c.type == "arrow_expression_clause"), None
         )
@@ -385,29 +397,31 @@ class CSharpAdapter:
     def call_sites(self, body_node: Node, _source: bytes, /) -> list[CallSite | DeferredSite]:
         return calls_core.call_sites(body_node, load_queries(self.grammar), _RULES)
 
-    def receiver_of(self, expression: Node) -> ReceiverKind:
+    def receiver_kind_of(self, expression: Node) -> ReceiverKind:
         return calls_core.receiver_of(expression, _RULES)
 
-    def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
+    def regex_sites(self, root_node: Node, _source: bytes, path: str, /) -> RegexSites:
         return csharp_regex.regex_scan(root_node, path)
 
-    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+    def string_literal_sets(self, source: str, path: str, /) -> list[StringLiteralSet]:
         return csharp_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
 
-    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+    def string_literal_comparisons(
+        self, source: str, path: str, /
+    ) -> list[StringLiteralComparison]:
         return csharp_string_comparisons.string_comparisons_of(
             parse(self, source.encode()).root_node, path
         )
 
-    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+    def type_field_names(self, text: str, path: str, /) -> list[TypeFieldNames]:
         return csharp_type_fields.type_fields_of(
             lambda: parse(self, text.encode()).root_node, path
         )
 
-    def file_path_patterns(
+    def file_path_expressions(
         self, root_node: Node, _source: bytes, path: str, /
-    ) -> list[FilePathPattern]:
-        return csharp_file_paths.file_path_patterns(root_node, path)
+    ) -> list[FilePathExpression]:
+        return csharp_file_paths.file_path_expressions(root_node, path)
 
     def added_public_names(
         self,
@@ -415,12 +429,12 @@ class CSharpAdapter:
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         return csharp_public_names.added_public_names_of(
             lambda source: parse(self, source.encode()).root_node, before, after, changed
         )
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+    def discriminator_flow_steps(self, body_node: Node, _source: bytes, /) -> list[FlowStep]:
         return csharp_discriminators.discriminator_steps(body_node)
 
     def locals_of(self, body_node: Node) -> Locals:
@@ -542,8 +556,8 @@ class CSharpAdapter:
             # 演算子、インデクサ、イベント、列挙子など。受け手の解決の対象にしない
             return
 
-    def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
-        found: list[Import] = []
+    def imported_modules(self, root_node: Node, _source: bytes, /) -> list[ImportedModule]:
+        found: list[ImportedModule] = []
         for node in import_nodes(self, root_node):
             # 別名の宣言 `using A = X.Y;` では、別名は name フィールドで、取り込む先は最後の名前
             targets = [
@@ -553,12 +567,18 @@ class CSharpAdapter:
                 and node.field_name_for_child(i) != "name"
             ]
             if targets:
-                found.append(Import(text_of(targets[-1]), targets[-1].start_point.row + 1))
+                found.append(ImportedModule(text_of(targets[-1]), targets[-1].start_point.row + 1))
         return found
 
-    def technology_of(self, module: str) -> str:
+    def technology_name_of(self, module: str) -> str:
         # 名前空間は会社名と製品名の二つで一つの単位になることが多い
         return leading_components(module, 2)
+
+    def unsupported_syntax(self, root_node: Node, _source: bytes, /) -> list[UnsupportedSyntax]:
+        return [
+            UnsupportedSyntax(_NAMELESS_DECLARATOR, node.start_point.row + 1)
+            for node in nameless_declarator_nodes(root_node)
+        ]
 
     def declarations(self, root_node: Node, _source: bytes, /) -> list[Declaration]:
         result: list[Declaration] = []

@@ -31,6 +31,13 @@ class AllowScan:
     allowed: dict[AllowedSpot, str] = field(default_factory=dict)
     malformed: tuple[int, ...] = ()
 
+    def reason_for(self, rule: str, line: int) -> str | None:
+        """規則 rule が line で外されていれば、その理由。外されていなければ None。"""
+        return self.allowed.get(AllowedSpot(rule, line))
+
+    def permits(self, rule: str, line: int) -> bool:
+        return self.reason_for(rule, line) is not None
+
 
 @cache
 def _pattern(keyword: str) -> re.Pattern[str]:

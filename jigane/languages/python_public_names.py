@@ -17,7 +17,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import NamedTuple, Self, cast
 
-from jigane.languages.base import PublicName, PublicNameKind
+from jigane.languages.base import AddedPublicName, PublicNameKind
 from jigane.languages.public_names_core import (
     AddedParameter,
     Definition,
@@ -287,7 +287,7 @@ def _added_init_parameters(
 
 def added_public_names(
     before: Mapping[str, str], after: Mapping[str, str], changed: Collection[str]
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     """足した公開の名前の順は、足した名前、足した引数、足した `__init__` の引数。"""
     return core_added_public_names(
         before,

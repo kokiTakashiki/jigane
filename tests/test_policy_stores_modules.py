@@ -244,7 +244,7 @@ def test_read_side_counts_only_types_defined_in_the_repository(tmp_path: Path) -
 
 def access_keys(sources: dict[str, str]) -> dict[str, tuple[str, str, list[str]]]:
     return {
-        side.function: (side.role.value, side.kind.value, sorted(side.keys))
+        side.function_qualified_name: (side.role.value, side.format.value, sorted(side.keys))
         for access in python_stores.store_accesses(sources)
         for side in access.sides
     }
@@ -277,7 +277,7 @@ def test_each_import_form_binds_the_module_it_names() -> None:
             "def save_rel(p):\n    json.dump({'r': 1}, open(p / TABLE, 'w'))\n"
         ),
     }
-    accesses = {a.path: a.names for a in python_stores.store_accesses(sources)}
+    accesses = {a.path: a.file_names for a in python_stores.store_accesses(sources)}
     assert accesses == {
         "star.py": frozenset({"u.json"}),
         "dotted.py": frozenset(),
@@ -456,7 +456,7 @@ def test_store_accesses_skips_sources_ast_cannot_parse() -> None:
 
 def _read_sides(source: str) -> dict[str, tuple[str, frozenset[str]]]:
     return {
-        side.function: (side.kind.name, side.keys)
+        side.function_qualified_name: (side.format.name, side.keys)
         for access in python_stores.store_accesses({"m.py": source})
         for side in access.sides
         if side.role.name == "READ"

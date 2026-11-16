@@ -1,10 +1,22 @@
 """`--max-budget-usd-per-call` の引数の定義。`run` と `estimate` が同じものを使う。"""
 
 import argparse
+import math
 from typing import Any
 
 from jigane.groups.definitions import DIAGRAM_SHAPE, GROUPS, PRINCIPLE_RUNS
 from jigane.llm_runs.defaults import resolve_run_defaults
+
+
+def positive_finite_usd(text: str) -> float:
+    """有限で 0 より大きい額だけを受ける。nan と inf は上限として効かない。"""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"数値ではありません: {text!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"有限で 0 より大きい額を渡してください: {text!r}")
+    return value
 
 
 def _budget_defaults_text() -> str:
@@ -50,10 +62,11 @@ def _policy_diagram_text() -> str:
 def add_max_budget_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--max-budget-usd-per-call",
-        type=float,
+        type=positive_finite_usd,
         default=None,
         help=(
             "Claude Code CLI の 1 回の起動あたりの上限の目安です（USD。超えることがあります）。"
+            "有限で 0 より大きい値だけを受けます。"
             f"省略すると群の既定（{_budget_defaults_text()}）を使います。"
             f"{_policy_diagram_text()}"
             "設計書の形は起動が 1 回なので、この値が実行全体の目安になります。"

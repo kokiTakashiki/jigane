@@ -15,7 +15,7 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import ComparisonKind, StringComparison
+from jigane.languages.base import ComparisonKind, StringLiteralComparison
 from jigane.languages.java_value_sets import elements, factory_arguments
 from jigane.languages.value_set_core import (
     literal_strings,
@@ -104,7 +104,7 @@ def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, Compar
         yield value, ComparisonKind.REGEX
 
 
-def string_comparisons_of(root: Node, path: str) -> list[StringComparison]:
+def string_comparisons_of(root: Node, path: str) -> list[StringLiteralComparison]:
     """ファイルの文字列との比較を、行の順に返す。"""
     named = _named_sequences(root)
     found = [

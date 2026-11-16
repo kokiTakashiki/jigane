@@ -3,17 +3,17 @@ from pathlib import Path
 import pytest
 from tree_sitter import Node
 
-from jigane.languages.base import Call as CallKind
 from jigane.languages.base import (
+    CallReceiver,
     CallSite,
     DeferredSite,
-    Member,
-    Name,
-    Paren,
-    Self,
+    MemberReceiver,
+    NameReceiver,
+    ParenReceiver,
+    SelfReceiver,
     SequenceAdapter,
-    Super,
-    Unknown,
+    SuperReceiver,
+    UnknownReceiver,
     parse,
 )
 from jigane.languages.python import PythonAdapter
@@ -28,7 +28,7 @@ def _body(code: str) -> tuple[Node, bytes]:
     source = code.encode()
     root = parse(adapter, source).root_node
     function = root.children[0]
-    body = adapter.body_of(function)
+    body = adapter.body_node_of(function)
     assert body is not None
     return body, source
 
@@ -45,7 +45,7 @@ def test_python_adapter_is_sequence_adapter() -> None:
 def test_calls_in_evaluation_order() -> None:
     sites = _sites("def f():\n    a(b(), c())\n    d()\n")
     assert [s.name for s in sites if isinstance(s, CallSite)] == ["b", "c", "a", "d"]
-    ends = [s.end for s in sites]
+    ends = [s.node.end_byte for s in sites]
     assert ends == sorted(ends)
 
 
@@ -62,7 +62,7 @@ def test_super_call_is_not_an_arrow_but_receiver_is_super() -> None:
     (site,) = sites
     assert isinstance(site, CallSite)
     assert site.receiver is not None
-    assert isinstance(adapter.receiver_of(site.receiver), Super)
+    assert isinstance(adapter.receiver_kind_of(site.receiver), SuperReceiver)
 
 
 def test_receiver_kinds() -> None:
@@ -71,22 +71,26 @@ def test_receiver_kinds() -> None:
         "    (m).n()\n"
     )
     kinds = [
-        adapter.receiver_of(s.receiver) for s in sites if isinstance(s, CallSite) and s.receiver
+        adapter.receiver_kind_of(s.receiver)
+        for s in sites
+        if isinstance(s, CallSite) and s.receiver
     ]
-    assert isinstance(kinds[0], Self)
-    assert kinds[1] == Name("claude")
-    assert isinstance(kinds[2], Member)
+    assert isinstance(kinds[0], SelfReceiver)
+    assert kinds[1] == NameReceiver("claude")
+    assert isinstance(kinds[2], MemberReceiver)
     assert kinds[2].name == "y"
-    assert isinstance(kinds[3], CallKind)
-    assert isinstance(kinds[4], Paren)
-    assert isinstance(adapter.receiver_of(_body("def f():\n    1 + 2\n")[0].children[0]), Unknown)
+    assert isinstance(kinds[3], CallReceiver)
+    assert isinstance(kinds[4], ParenReceiver)
+    assert isinstance(
+        adapter.receiver_kind_of(_body("def f():\n    1 + 2\n")[0].children[0]), UnknownReceiver
+    )
 
 
 def test_cls_is_self() -> None:
     (site,) = _sites("def f(cls):\n    cls.make()\n")
     assert isinstance(site, CallSite)
     assert site.receiver is not None
-    assert isinstance(adapter.receiver_of(site.receiver), Self)
+    assert isinstance(adapter.receiver_kind_of(site.receiver), SelfReceiver)
 
 
 def test_lambda_body_calls_are_deferred() -> None:

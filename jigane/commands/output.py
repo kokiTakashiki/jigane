@@ -98,10 +98,13 @@ def print_group_json(group: GroupId, body: dict[str, Any], review: Review) -> No
 
 
 def print_lost_reasons(lost: Sequence[selection_module.LostReason]) -> None:
-    """置き換えで消えた異議の理由を、標準エラーに一件一行で出す。"""
+    """置き換えで消えた異議と保留の理由を、標準エラーに一件一行で出す。"""
     for item in lost:
         reason = " ".join(item.reason.splitlines())
-        print(f"注: {item.number} の異議を置き換えました。消えた理由: {reason}", file=sys.stderr)
+        print(
+            f"注: {item.number} の{item.kind.value}を置き換えました。消えた理由: {reason}",
+            file=sys.stderr,
+        )
 
 
 def print_removal(removal: selection_module.Removal) -> None:

@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand
+from jigane.git.invocation import git_invocation, run_invocation
 
 # 依存や生成物のディレクトリは、宣言の探索にもレビューの対象の列挙にも入れない
 EXCLUDED_DIRECTORY_NAMES = frozenset(
@@ -31,9 +33,9 @@ class Repository:
     repo: str
 
 
-def _git(directory: Path, *arguments: str) -> str | None:
+def _git(directory: Path, subcommand: GitSubcommand, *arguments: str) -> str | None:
     try:
-        output = process.run_command(["git", *arguments], cwd=directory)
+        output = run_invocation(git_invocation(subcommand.value, arguments, cwd=directory))
     except (OSError, process.CommandError):
         # git が入っていない環境も、git でないディレクトリと同じに扱う
         return None
@@ -50,11 +52,11 @@ def parse_remote_url(url: str) -> tuple[str, str] | None:
 def identify_git(directory: Path) -> Repository | None:
     """git のリポジトリに属するディレクトリのリポジトリを返す。git の外なら None。"""
     directory = directory.resolve()
-    top_level = _git(directory, "rev-parse", "--show-toplevel")
+    top_level = _git(directory, GitSubcommand.REV_PARSE, "--show-toplevel")
     if top_level is None:
         return None
     root = Path(top_level).resolve()
-    url = _git(root, "remote", "get-url", "origin")
+    url = _git(root, GitSubcommand.REMOTE, "get-url", "origin")
     parsed = parse_remote_url(url) if url else None
     if parsed is None:
         return _local(root)

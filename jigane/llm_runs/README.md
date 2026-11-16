@@ -15,7 +15,7 @@ LLM の起動、実行の記録、見積もりと使用量、使った額を受�
 | `defaults` | 1 回の起動の上限と effort の既定を決めます |
 | `usage_table` | `usage.csv` の列と値の定義を持ちます |
 | `claude_schema` | claude の `--json-schema` へ渡すスキーマの組み立て（`json_schema_of`）。モデルから title を除き、$ref を展開します |
-| `claude_inputs` | jigane が Claude Code に渡す情報の種類（`ClaudeInput`）と、雛形の差し込み口からの対応表を持ちます |
+| `claude_inputs` | jigane が Claude Code に渡す情報の種類（`ClaudeInput`）と、雛形の差し込み口、見出し、固定のラベル（文言は `jigane.text.prompt_labels`）からの対応表を持ちます |
 | `cost` | 起動で使った額とその出所を持ちます |
 | `pricing` | モデルごとの単価の表と、プロンプトの大きさから費用への換算（見積もりの額）を持ちます。`claude` が読みます |
 
@@ -23,9 +23,9 @@ LLM の起動、実行の記録、見積もりと使用量、使った額を受�
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`findings`、`git`、`groups`、`languages`
+読むサブパッケージ：`findings`、`git`、`groups`、`languages`、`preconditions`、`text`
 
-読まれるサブパッケージ：`commands`、`skills`
+読まれるサブパッケージ：`commands`、`repository_docs`、`skills`
 
 <!-- END GENERATED: dependencies -->
 

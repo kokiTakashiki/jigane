@@ -6,14 +6,14 @@
 定義の索引のキーは部品が決める（既定は種類と修飾名）。同じキーの定義は一つに合わせる。
 構文木の型は部品が決める（Swift、Java、C# は tree-sitter の節点、Python は `ast`）。
 足した引数のような言語固有の行は、部品が規則の結果（`AddedParameter`）だけを返し、
-`PublicName` はここで組む。
+`AddedPublicName` はここで組む。
 """
 
 from collections.abc import Callable, Collection, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Self
 
-from jigane.languages.base import PublicName, PublicNameKind
+from jigane.languages.base import AddedPublicName, PublicNameKind
 
 type ParseSource[Root] = Callable[[str], Root]
 type Place = tuple[str, int]
@@ -56,7 +56,7 @@ type SiteCounter = Callable[[Definition, Tree], list[Site]]
 
 @dataclass(frozen=True)
 class AddedParameter:
-    """足した引数一つ分の規則の結果。`PublicName` はここから core が組む。"""
+    """足した引数一つ分の規則の結果。`AddedPublicName` はここから core が組む。"""
 
     # 引数の名前。行の名前は定義の修飾名にこの名前を付けて組む
     name: str
@@ -175,8 +175,8 @@ def place_in(definition: Definition, changed: Collection[str]) -> Place | None:
 
 def public_name(
     qualified: str, kind: PublicNameKind, place: Place, sites: Sequence[Site]
-) -> PublicName:
-    return PublicName(qualified, kind, place[0], place[1], callers_of(sites))
+) -> AddedPublicName:
+    return AddedPublicName(qualified, kind, place[0], place[1], callers_of(sites))
 
 
 def added_definitions(
@@ -200,7 +200,7 @@ def added_public_names[Root](
     after: Mapping[str, str],
     changed: Collection[str],
     rules: Rules[Root],
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     """足した名前、`rules.added_parameters` の並びごとに足した引数の順。
 
     `added_parameters` の各規則は、変えたファイルに出現がある後の定義ごとに呼ぶ。

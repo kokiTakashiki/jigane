@@ -1,0 +1,20 @@
+id: no-bare-next-generator
+language: python
+severity: error
+message: 既定値の無い next(... for ...) は、見つからないとき StopIteration を投げる。生成器や反復子の中では反復の終わりと取り違えられるので、next(..., None) を required で包む。
+# 試験では StopIteration が試験の失敗として表に出るので、事業のコードだけに掛ける
+ignores:
+  - tests/**
+  - tests_posix/**
+  - tests_windows/**
+rule:
+  kind: call
+  all:
+    - has:
+        field: function
+        kind: identifier
+        regex: ^next$
+    # 引数が生成器式ひとつだけの形。既定値を渡すと引数は argument_list になる
+    - has:
+        field: arguments
+        kind: generator_expression

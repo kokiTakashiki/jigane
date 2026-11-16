@@ -1,14 +1,14 @@
 import pytest
 
-from jigane.languages.base import FilePathAdapter, FilePathPattern, FileUsage, parse
+from jigane.languages.base import FilePathExpression, FilePathExpressionExtractor, FileUsage, parse
 from jigane.languages.java import JavaAdapter
-from jigane.languages.java_file_paths import file_path_patterns
+from jigane.languages.java_file_paths import file_path_expressions
 
 
-def patterns(code: str) -> list[FilePathPattern]:
+def patterns(code: str) -> list[FilePathExpression]:
     java = JavaAdapter()
     source = code.encode()
-    return java.file_path_patterns(parse(java, source).root_node, source, "R.java")
+    return java.file_path_expressions(parse(java, source).root_node, source, "R.java")
 
 
 def pairs(code: str) -> list[tuple[str, FileUsage]]:
@@ -16,7 +16,7 @@ def pairs(code: str) -> list[tuple[str, FileUsage]]:
 
 
 def test_java_adapter_offers_the_reader() -> None:
-    assert isinstance(JavaAdapter(), FilePathAdapter)
+    assert isinstance(JavaAdapter(), FilePathExpressionExtractor)
 
 
 def test_files_reads_and_readers_read() -> None:
@@ -156,12 +156,12 @@ def test_lambda_belongs_to_the_enclosing_method() -> None:
         "} } }\n"
     )
     found = patterns(code)
-    assert [(p.function, p.line) for p in found] == [("Outer.R.f", 3)]
+    assert [(p.function_qualified_name, p.line) for p in found] == [("Outer.R.f", 3)]
 
 
 def test_constructor_is_part_of_the_qualified_name() -> None:
     code = "class R {\n    R(Path p) throws Exception { Files.delete(p); }\n}\n"
-    assert [p.function for p in patterns(code)] == ["R.R"]
+    assert [p.function_qualified_name for p in patterns(code)] == ["R.R"]
 
 
 def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,8 +169,8 @@ def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch)
     source = b"class R { void f(Path p) throws Exception { Files.delete(p); } }"
     root = parse(java, source).root_node
 
-    def explode(_self: object, _rules: object) -> list[FilePathPattern]:
+    def explode(_self: object, _rules: object) -> list[FilePathExpression]:
         raise RecursionError
 
     monkeypatch.setattr("jigane.languages.file_paths_core._Reader.read", explode)
-    assert file_path_patterns(root, "R.java") == []
+    assert file_path_expressions(root, "R.java") == []

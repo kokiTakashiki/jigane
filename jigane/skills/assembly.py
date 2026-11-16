@@ -10,6 +10,8 @@ from jigane.findings.records import (
     RelatedHistory,
     load_history_checked,
 )
+from jigane.repository_docs.reader import NO_DOCS, RepositoryDocs
+from jigane.reviews.catalog import ReviewSummary
 from jigane.reviews.lifecycle import Review
 from jigane.reviews.relations import related_reviews
 
@@ -18,7 +20,7 @@ from jigane.reviews.relations import related_reviews
 class RelatedLoad:
     """関連するレビューと、そのレビューの履歴。警告にはレビューの持ち主の印が付いている。"""
 
-    review: Review
+    review: ReviewSummary
     history: HistoryLoad
 
 
@@ -55,6 +57,8 @@ class AssemblyInput:
 
     review: Review
     source: HistorySource
+    # リポジトリが定めた文書。レビューの入口で一度だけ読み、設定が無ければ空
+    docs: RepositoryDocs = NO_DOCS
     # このインスタンスの中だけで覚える作った結果。比較にも表示にも入れない
     _remembered: dict[Hashable, Any] = field(
         init=False, default_factory=dict, compare=False, repr=False
@@ -70,11 +74,14 @@ class AssemblyInput:
         return cast("T", self._remembered[key])
 
     @classmethod
-    def load(cls, review: Review) -> "AssemblyInput":
+    def load(cls, review: Review, docs: RepositoryDocs = NO_DOCS) -> "AssemblyInput":
         """履歴を、同じレビューの分も関連するレビューの分もここで一度読む。"""
-        return cls.from_loaded(review, load_history_checked(review.id.directory()))
+        return cls.from_loaded(review, load_history_checked(review.id.directory()), docs)
 
     @classmethod
-    def from_loaded(cls, review: Review, own: HistoryLoad) -> "AssemblyInput":
+    def from_loaded(
+        cls, review: Review, own: HistoryLoad, docs: RepositoryDocs = NO_DOCS
+    ) -> "AssemblyInput":
         """縁が読んだ同じレビューの履歴を受け、関連するレビューの分だけここで読む。"""
-        return cls(review, HistorySource.from_loaded(review, own))
+        source = HistorySource.from_loaded(review, own)
+        return cls(review, source, docs)

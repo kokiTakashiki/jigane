@@ -40,6 +40,7 @@ from jigane.sequence.roots import (
     select_roots,
 )
 from jigane.sequence.side import Side
+from jigane.text.prompt_labels import NO_CALL_ENTRIES_LABEL, UNRELATED_CALL_ENTRIES_LABEL
 
 # 注記の文は二本で持つ。*_TEXT と *_NOTE は LLM に渡す資料の常体、*_DISPLAY は利用者に見せる敬体。
 # 資料の文は評価の結果を動かさないため変えない
@@ -51,9 +52,9 @@ NO_INTERACTION_TEXT = "変更した宣言はあるが、他の型とのやり取
 NO_INTERACTION_DISPLAY = "変更した宣言はありますが、他の型とのやり取りがありません。"
 SKIPPED_NAMES_SHOWN = 3
 # 図にしない入口の区分ごとの注記。一覧の元の条件は sequences_of にある
-NO_CALL_ENTRIES_NOTE = "呼び出しの無い入口 {count} 件は図にしない: {names}"
+NO_CALL_ENTRIES_NOTE = NO_CALL_ENTRIES_LABEL.text + "{count} 件は図にしない: {names}"
 MARKUP_CALLED_ENTRIES_NOTE = "XAML から呼ばれる入口 {count} 件は図にしない: {names}"
-UNRELATED_CALL_ENTRIES_NOTE = "変更に関わる呼び出しの無い入口 {count} 件は図にしない: {names}"
+UNRELATED_CALL_ENTRIES_NOTE = UNRELATED_CALL_ENTRIES_LABEL.text + "{count} 件は図にしない: {names}"
 UNRESOLVED_CALL_ENTRIES_NOTE = "呼び先を解けない呼び出しがある入口 {count} 件は図にしない: {names}"
 DROPPED_CHANGES_NOTE = "入口として拾えなかった変更 {count} 件: {names}"
 NO_CALL_ENTRIES_DISPLAY = "呼び出しのない入口 {count} 件は図にしません: {names}"

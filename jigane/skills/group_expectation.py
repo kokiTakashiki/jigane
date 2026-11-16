@@ -11,7 +11,7 @@ from typing import Any
 
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
-from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_reviews
+from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_review_summaries
 from jigane.skills.estimate_result import EstimateCommon
 from jigane.skills.pipeline import ESTIMATE_COUNTING_VERSION, read_runs
 
@@ -56,7 +56,7 @@ def _read_group_multiplier(repository_root: Path, group: GroupId) -> float | Non
     runs.json は群ごとに最新の回だけを持つので、同じレビューに限ると標本が増えない。
     """
     ratios: list[float] = []
-    for review in list_reviews(ARCHIVED_INCLUDE):
+    for review in list_review_summaries(ARCHIVED_INCLUDE):
         if review.repository_root != str(repository_root):
             continue
         run = read_runs(review.id.directory()).get(group)

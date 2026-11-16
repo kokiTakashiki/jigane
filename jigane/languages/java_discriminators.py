@@ -10,11 +10,11 @@ return の値は `Kind.A` の形のフィールド参照だけを残す。
 from tree_sitter import Node
 
 from jigane.languages import discriminators_core as core
-from jigane.languages.base import Return, Step
+from jigane.languages.base import FlowReturn, FlowStep
 from jigane.languages.node_text import text_of
 
 
-def discriminator_steps(body_node: Node) -> list[Step]:
+def discriminator_steps(body_node: Node) -> list[FlowStep]:
     """本体の分岐と return を文書順に返す。"""
     return core.steps(_statements(body_node), _RULES)
 
@@ -24,28 +24,28 @@ def _statements(node: Node) -> list[Node]:
     return list(node.named_children) if node.type == "block" else [node]
 
 
-def _return_or_yield(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _return_or_yield(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     expression = statement.named_children[0] if statement.named_children else None
     if expression is not None and expression.type == "switch_expression":
         return [core.switch_branch(expression, _RULES, is_value=True)]
-    return [Return(core.member_text(expression, _RULES))]
+    return [FlowReturn(core.member_text(expression, _RULES))]
 
 
-def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     return [core.if_branch(statement, _RULES)]
 
 
-def _switch_expression(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _switch_expression(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     return [core.switch_branch(statement, _RULES)]
 
 
-def _expression_value(statement: Node, *, is_value: bool) -> Step | None:
+def _expression_value(statement: Node, *, is_value: bool) -> FlowStep | None:
     # switch 式の腕の中では、式文を値として読む
     if statement.type == "expression_statement" and is_value and statement.named_children:
-        return Return(core.member_text(statement.named_children[0], _RULES))
+        return FlowReturn(core.member_text(statement.named_children[0], _RULES))
     return None
 
 
@@ -54,13 +54,13 @@ def _condition_text(statement: Node) -> str:
     return text_of(condition)[1:-1].strip() if condition is not None else "?"
 
 
-def _then_steps(statement: Node, *, is_value: bool) -> list[Step]:
+def _then_steps(statement: Node, *, is_value: bool) -> list[FlowStep]:
     del is_value
     consequence = statement.child_by_field_name("consequence")
     return core.steps(_statements(consequence), _RULES) if consequence else []
 
 
-def _else_steps(statement: Node, *, is_value: bool) -> list[Step] | None:
+def _else_steps(statement: Node, *, is_value: bool) -> list[FlowStep] | None:
     del is_value
     alternative = statement.child_by_field_name("alternative")
     return None if alternative is None else core.steps(_statements(alternative), _RULES)

@@ -3,7 +3,6 @@
 import copy
 import json
 import logging
-import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -17,8 +16,6 @@ from jigane.findings.discard import (
     CONCERNS_INTRO,
     DISCARDED_VIEWPOINT,
     KEY_FROM_CONCERN,
-    PLACE_SEPARATOR,
-    DiscardKind,
     DiscardState,
     DiscardSummary,
     DisclosedNitReason,
@@ -31,11 +28,12 @@ from jigane.findings.discard import (
     summary_of_counts,
 )
 from jigane.groups.definitions import GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
-from jigane.groups.viewpoints import VIEWPOINTS, Viewpoint, by_legacy_number, by_number, by_uuid
+from jigane.groups.viewpoints import by_number, by_uuid
+from jigane.preconditions.required import required
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
 from jigane.storage.review_error import ReviewError
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 # 読み込み口の警告はここへ流す。標準エラーへの出し方は呼ぶ側（CLI の出力層）が handler で決める
 LOGGER = logging.getLogger(__name__)
@@ -299,16 +297,10 @@ def kind_of(*, scope_record: dict[str, Any] | None, continued_from: str | None) 
     return FindingKind.REGULAR
 
 
-# 保存済みの古い名前から今の区分への読み替え。実装の指摘を保留にしていた時期の名前は残りとして読む
-_LEGACY_TRIAGES = {"deferred": Triage.REMAINING}
-
-
 def triage_of(value: object) -> Triage | None:
     """JSON の文字列を区分へ変える。区分を持たない値と知らない名前は None。"""
     if not isinstance(value, str) or not value:
         return None
-    if value in _LEGACY_TRIAGES:
-        return _LEGACY_TRIAGES[value]
     try:
         return Triage(value)
     except ValueError:
@@ -875,9 +867,9 @@ class StoredTheme:
 
     @classmethod
     def from_json(cls, raw: dict[str, Any], where: str = "") -> "StoredTheme":
-        """保存された一件を読む。区分の旧い名前の読み替えはここで一度だけ行う。渡された辞書は書き換えない。
+        """保存された一件を読む。渡された辞書は書き換えない。
 
-        今の版の形だけを読む。欠けた鍵の補いは read_findings_json が呼ぶ版ごとの移しが行う。
+        今の版の形だけを読む。版の検査は read_findings_json が先に行う。
         """
         data = copy.deepcopy(raw)
         raw_triage = data.pop(_KEY_TRIAGE)
@@ -899,7 +891,7 @@ class StoredTheme:
         )
 
     def to_json(self) -> dict[str, Any]:
-        """現行の形だけを書く。旧形式の読み替えは from_json だけが行う。"""
+        """現行の形だけを書く。"""
         return {
             **self.extra,
             _KEY_ID: self.id,
@@ -960,7 +952,7 @@ class FindingBody:
         return None
 
     def json_with(self, decision: TriageDecision | None) -> dict[str, Any]:
-        """現行の形だけを書く。旧形式の移しは境が行う。区分と理由は決定から取る。"""
+        """現行の形だけを書く。区分と理由は決定から取る。"""
         triage = None if decision is None else decision.triage
         triage_reason = None if decision is None else decision.reason
         raw: dict[str, Any] = {
@@ -1047,7 +1039,7 @@ class StoredFinding:
     ) -> "StoredFinding":
         """保存物の一件を読む。裁定も raw の adjudication から読む。渡された辞書は書き換えない。
 
-        今の版の形だけを読む。古い形は read_findings_json が呼ぶ版ごとの移しが先に直す。
+        今の版の形だけを読む。古い版は read_findings_json が先に止める。
         """
         data = copy.deepcopy(raw)
         adjudication = _adjudication_from(data.pop(KEY_ADJUDICATION))
@@ -1199,7 +1191,9 @@ def display_category_of(finding: TriagedFinding) -> DisplayCategory:
                 pass
             case _:
                 assert_never(entry.split)
-    return next(entry.category for entry in displays if isinstance(entry.split, Otherwise))
+    return required(
+        next((entry.category for entry in displays if isinstance(entry.split, Otherwise)), None)
+    )
 
 
 def group_by_display_category(
@@ -1262,7 +1256,7 @@ class StoredFindings:
     def from_json(cls, raw: dict[str, Any], where: str = "") -> "StoredFindings":
         """今の版の形の全体を読む。渡された辞書は書き換えない。
 
-        版の判別と古い形の移しは read_findings_json が先に行う。
+        版の検査は read_findings_json が先に行う。
         """
         data = copy.deepcopy(raw)
         themes = tuple(StoredTheme.from_json(t, where) for t in data[_KEY_THEMES])
@@ -1286,7 +1280,7 @@ class StoredFindings:
         )
 
     def to_json(self) -> dict[str, Any]:
-        """現行の形だけを書く。旧形式の移行は read_findings_json が行う。"""
+        """現行の形だけを書く。"""
         return {
             _KEY_FORMAT: FINDINGS_FORMAT,
             _KEY_LAST_NUMBER: self.last_number,
@@ -1360,21 +1354,21 @@ def _stored_file_name(where: str, file: str) -> str:
 
 
 def read_findings_json(raw: dict[str, Any], where: str = "") -> StoredFindings:
-    """findings.json を読む境の唯一の口。版を見て今の版まで移してから型へ読む。
-
-    移した結果は書き戻さない。書くのは常に今の版である。
-    """
-    upgraded = upgrade_mapping(
-        _stored_file_name(where, FINDINGS_FILE),
-        raw,
-        current=FINDINGS_FORMAT,
-        upgrades=_UPGRADES,
+    """findings.json を読む境の唯一の口。今の版以外は止める。"""
+    current_fields = require_current_version(
+        _stored_file_name(where, FINDINGS_FILE), raw, current=FINDINGS_FORMAT
     )
     groups = {
         name: _with_memory_viewpoints(findings) if name in GROUP_IDS else findings
-        for name, findings in upgraded[_KEY_GROUPS].items()
+        for name, findings in current_fields[_KEY_GROUPS].items()
     }
-    return StoredFindings.from_json({**upgraded, _KEY_GROUPS: groups}, where)
+    return StoredFindings.from_json({**current_fields, _KEY_GROUPS: groups}, where)
+
+
+def stored_findings_size(directory: Path) -> int:
+    """保存した findings.json のバイト数。ファイルが無ければ 0。"""
+    path = directory / FINDINGS_FILE
+    return path.stat().st_size if path.is_file() else 0
 
 
 def load_findings_state(directory: Path) -> FilledFindings:
@@ -1397,115 +1391,7 @@ def load_findings_state(directory: Path) -> FilledFindings:
     )
 
 
-# 古い結果が捨てた候補の nit の主張の末尾に添えていた一文。いまは主張に含めない
-_HANDOFF_NOTE = "方針では確かめられない。実装のレビューで確かめる。"
-
-
-def _upgrade_finding_v1(finding: dict[str, Any]) -> dict[str, Any]:
-    """版 1 の指摘一件を版 2 の形へ移す。辞書から辞書への純粋な関数で、渡された辞書は書き換えない。
-
-    欠けた鍵は、版 2 の書き手が必ず書く鍵（null や空文字を含む）だけを足す。
-    nit_reason、triage_reason、deepens、from_concern、out_of_scope は書き手も省くので足さない。
-    """
-    data = copy.deepcopy(finding)
-    for key in (_KEY_SEVERITY, _KEY_VIEWPOINT, _KEY_CLAIM):
-        data.setdefault(key, "")
-    for key in (KEY_THEME, _KEY_TRIAGE, KEY_ADJUDICATION):
-        data.setdefault(key, None)
-    _migrate_legacy_nit(data)
-    return data
-
-
-def _upgrade_findings_v1(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 1 の findings.json を版 2 の形へ移す。辞書から辞書への純粋な関数。
-
-    区分をテーマだけが持つ時期の指摘は、テーマの区分を写す。
-    last_number を持たない最も古い形は、持っている指摘の最大の番号から決める。再利用しないため。
-    現行に無い名前の群は読まずに保つので、指摘の移しもかけない。
-    """
-    data = copy.deepcopy(raw)
-    themes = []
-    for theme in data.get(_KEY_THEMES, []):
-        filled: dict[str, Any] = {
-            _KEY_TITLE: "",
-            _KEY_FINDING_IDS: [],
-            _KEY_SEVERITY: "",
-            _KEY_TRIAGE: None,
-        }
-        themes.append(filled | theme)
-    theme_triages = {
-        theme[_KEY_ID]: triage
-        for theme in themes
-        if (triage := triage_of(theme[_KEY_TRIAGE])) is not None
-    }
-    numbers = [0]
-    groups: dict[str, Any] = {}
-    for name, findings in data[_KEY_GROUPS].items():
-        numbers += [
-            int(m[1]) for f in findings if (m := re.fullmatch(r"F(\d+)", str(f.get(_KEY_ID))))
-        ]
-        if name not in GROUP_IDS:
-            groups[name] = findings
-            continue
-        upgraded = [_upgrade_finding_v1(f) for f in findings]
-        for finding in upgraded:
-            if triage_of(finding[_KEY_TRIAGE]) is None and finding[KEY_THEME] in theme_triages:
-                finding[_KEY_TRIAGE] = theme_triages[finding[KEY_THEME]].value
-        groups[name] = upgraded
-    return {
-        _KEY_FORMAT: 2,
-        _KEY_LAST_NUMBER: data.get(_KEY_LAST_NUMBER, max(numbers)),
-        _KEY_GROUPS: groups,
-        _KEY_STALE_GROUPS: data.get(_KEY_STALE_GROUPS, []),
-        _KEY_LAST_THEME_NUMBER: data.get(_KEY_LAST_THEME_NUMBER, 0),
-        _KEY_THEMES: themes,
-    }
-
-
-# 版 2 の開示済みの限界の懸念の文「{主張}（開示の場所: {場所の列}）」。場所は読点で並ぶ。
-# 読み戻しはこの移しだけが行う
-_V2_DISCLOSED_CONCERN = re.compile(r"(.*)（開示の場所: (.+)）", re.DOTALL)
-
-
-def _upgrade_finding_v2(finding: dict[str, Any]) -> dict[str, Any]:
-    """版 2 の指摘一件を版 3 の形へ移す。純粋な関数で、渡された辞書は書き換えない。
-
-    版 3 は nit_reason に places を持つ。
-    版 2 では開示済みの限界の場所が懸念の文の末尾にだけあった。
-    形に合う開示済みの限界は、concern を主張だけにし、場所を places へ分ける。
-    形に合わない開示済みの限界は、場所を作らず places を空にし、concern は文のまま残す。
-    方針の群が捨てた候補から写した開示済みの限界も場所を持たず、同じ形（種類は残して places が空）
-    で保存される。種類を other へ落とすと、その札と束ねの対象から外れて別の挙動になる。
-    それ以外の種類は places を空にする。
-    """
-    data = copy.deepcopy(finding)
-    reason = data.get(KEY_NIT_REASON)
-    # 版 2 の書き手は nit_reason を省く。無ければ移す中身がない
-    if reason is None or "places" in reason:
-        return data
-    reason["places"] = []
-    if reason["kind"] != DiscardKind.DISCLOSED_LIMITATION.value:
-        return data
-    matched = _V2_DISCLOSED_CONCERN.fullmatch(reason["concern"] or "")
-    places = [] if matched is None else [p for p in matched.group(2).split(PLACE_SEPARATOR) if p]
-    if matched is None or not places:
-        return data
-    reason["concern"] = matched.group(1)
-    reason["places"] = places
-    return data
-
-
-def _upgrade_findings_v2(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 2 の findings.json を版 3 の形へ移す。現行に無い群は移さない。"""
-    data = copy.deepcopy(raw)
-    for name, findings in data[_KEY_GROUPS].items():
-        if name in GROUP_IDS:
-            data[_KEY_GROUPS][name] = [_upgrade_finding_v2(f) for f in findings]
-    data[_KEY_FORMAT] = 3
-    return data
-
-
-# 観点の欠けは版 1 の移しが空文字で入れる。表に無いので、捨てた印と並べて変換しない
+# 観点の欠けは空文字で表す。表に無いので、捨てた印と並べて変換しない
 _UNCONVERTED_VIEWPOINTS = (DISCARDED_VIEWPOINT, "")
 
 
@@ -1534,157 +1420,6 @@ def _viewpoint_from_stored(value: object) -> str:
         return by_uuid(uuid.UUID(str(value))).number
     except (KeyError, ValueError, TypeError, AttributeError) as error:
         raise ValueError(f"観点の UUID を読めません: {value!r}") from error
-
-
-def _upgrade_finding_v3(finding: dict[str, Any]) -> dict[str, Any]:
-    """版 3 の指摘一件を版 4 の形へ移す。純粋な関数で、渡された辞書は書き換えない。
-
-    版 4 は観点を番号でなく UUID で保存する。版 3 の番号は 0.1.x の置き場の旧い番号で読む。
-    """
-    data = copy.deepcopy(finding)
-    number = data.get(_KEY_VIEWPOINT)
-    if number in _UNCONVERTED_VIEWPOINTS:
-        return data
-    try:
-        data[_KEY_VIEWPOINT] = str(by_legacy_number(str(number)).uuid)
-    except KeyError as error:
-        named = _viewpoint_by_numbered_name(str(number))
-        if named is None:
-            raise ValueError(f"表に無い旧い観点の番号です: {number!r}") from error
-        data[_KEY_VIEWPOINT] = str(named.uuid)
-    return data
-
-
-def _viewpoint_by_numbered_name(value: str) -> Viewpoint | None:
-    """「旧い番号＋半角空白一つ＋表の name」の文字列に当たる観点を返す。
-
-    実際の置き場には、観点が番号だけでなくこの形で残っている。
-    name が空の観点はこの形を取らない。
-    """
-    for viewpoint in VIEWPOINTS:
-        if viewpoint.name and value == f"{viewpoint.legacy_number} {viewpoint.name}":
-            return viewpoint
-    return None
-
-
-def _upgrade_findings_v3(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 3 の findings.json を版 4 の形へ移す。現行に無い群は移さない。"""
-    data = copy.deepcopy(raw)
-    for name, findings in data[_KEY_GROUPS].items():
-        if name in GROUP_IDS:
-            data[_KEY_GROUPS][name] = [_upgrade_finding_v3(f) for f in findings]
-    data[_KEY_FORMAT] = 4
-    return data
-
-
-# 保存された版から一つ上の版へ移す関数。読む境がここを順にたどる
-_UPGRADES: dict[int, Upgrade] = {
-    1: _upgrade_findings_v1,
-    2: _upgrade_findings_v2,
-    3: _upgrade_findings_v3,
-}
-
-
-def _upgrade_history_v1(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 1 の findings_history.json を版 2 の形へ移す。辞書から辞書への純粋な関数。
-
-    回の鍵（ran_at、findings、discard）は版をまたいで変わらない。変わるのは指摘一件の形だけで、
-    その移しは findings.json と同じ _upgrade_finding_v1 を通す。
-    現行に無い群の名前は、ここで弾かずに型へ読む段で壊れた履歴にする。
-    """
-    data = copy.deepcopy(raw)
-    for rounds in data[_KEY_GROUPS].values():
-        for entry in rounds:
-            entry[_KEY_FINDINGS] = [_upgrade_finding_v1(f) for f in entry[_KEY_FINDINGS]]
-    data[_KEY_FORMAT] = 2
-    return data
-
-
-def _upgrade_history_v2(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 2 の findings_history.json を版 3 の形へ移す。指摘一件の移しは findings.json と共通。"""
-    data = copy.deepcopy(raw)
-    for rounds in data[_KEY_GROUPS].values():
-        for entry in rounds:
-            entry[_KEY_FINDINGS] = [_upgrade_finding_v2(f) for f in entry[_KEY_FINDINGS]]
-    data[_KEY_FORMAT] = 3
-    return data
-
-
-def _upgrade_history_v3(raw: dict[str, Any]) -> dict[str, Any]:
-    """版 3 の findings_history.json を版 4 の形へ移す。指摘一件の移しは findings.json と共通。"""
-    data = copy.deepcopy(raw)
-    for rounds in data[_KEY_GROUPS].values():
-        for entry in rounds:
-            entry[_KEY_FINDINGS] = [_upgrade_finding_v3(f) for f in entry[_KEY_FINDINGS]]
-    data[_KEY_FORMAT] = 4
-    return data
-
-
-# findings_history.json の版 → 一つ上の版へ移す関数。版は findings.json と同じ FINDINGS_FORMAT
-_HISTORY_UPGRADES: dict[int, Upgrade] = {
-    1: _upgrade_history_v1,
-    2: _upgrade_history_v2,
-    3: _upgrade_history_v3,
-}
-
-
-# 古い形は書かれた時点の規則で読む。現行の表を引くと、表の変更で古い保存物の読みが変わる
-_LEGACY_NOT_NIT_KINDS = frozenset({DiscardKind.SETTLED_EARLIER, DiscardKind.SETTLED_EARLIER.value})
-
-
-def _migrate_legacy_nit(finding: dict[str, Any]) -> None:
-    """捨てた候補から写した nit の古い形を、現行の形に直す。
-
-    nit でない指摘には触れない。
-    現行の形は nit_reason 欄を持ち、claim が NitReason.claim と一致する。
-    古い形は、nit_reason 欄の代わりに discard_kind 欄と concern 欄を持ち、
-    claim の末尾に添え文が付く。直した結果は種類、元の文、懸念の文を nit_reason に持つ。
-    元の文は古い保存物に残っていないので、添え文を外した claim で代える。
-    settled_earlier の種類（古い欄でも nit_reason でも）は nit にしない種類なので、
-    nit_reason を外して理由なしの捨てた候補として読む。
-    discard_kind 欄を持たない最も古い結果と、知らない種類の名前を持つ結果は、種類を決められず、
-    添え文を外すだけにする。知らない名前で読み込みを止めると、履歴全体が壊れた扱いになる。
-    """
-    if finding.get("viewpoint") != DISCARDED_VIEWPOINT:
-        return
-    claim = finding.get("claim", "")
-    stripped = claim.removesuffix(_HANDOFF_NOTE) or claim
-    legacy_kind = finding.pop("discard_kind", None)
-    legacy_concern = finding.pop("concern", None)
-    kind = _legacy_discard_kind(legacy_kind, finding.get("id"))
-    stored = finding.get(KEY_NIT_REASON)
-    if kind in _LEGACY_NOT_NIT_KINDS or (
-        stored is not None and stored.get("kind") in _LEGACY_NOT_NIT_KINDS
-    ):
-        # 前の回で直った候補は nit にならない。理由なしの捨てた候補で残せば表示が崩れない
-        finding.pop(KEY_NIT_REASON, None)
-        kind = None
-    if finding.get(KEY_NIT_REASON) is None and kind is not None:
-        # 版 2 の形（places を持たない）で書く。版 3 への移しが続けて places を足す
-        finding[KEY_NIT_REASON] = {
-            "kind": kind.value,
-            "text": stripped,
-            "concern": legacy_concern or None,
-        }
-    raw_reason = finding.get(KEY_NIT_REASON)
-    if raw_reason is None:
-        finding["claim"] = stripped
-    else:
-        finding["claim"] = raw_reason["concern"] or raw_reason["text"]
-
-
-def _legacy_discard_kind(raw: str | None, finding_id: object) -> DiscardKind | None:
-    if raw is None:
-        return None
-    try:
-        return DiscardKind(raw)
-    except ValueError:
-        LOGGER.warning(
-            "%s の捨てた理由の種類 %r は知らない名前なので、種類なしとして読みます",
-            finding_id,
-            raw,
-        )
-        return None
 
 
 def save_findings_state(directory: Path, state: StoredFindings) -> None:
@@ -1753,7 +1488,7 @@ class HistoryRound:
     def of_findings(
         cls, ran_at: str | None, findings: list[dict[str, Any]], discard: DiscardSummary
     ) -> "HistoryRound":
-        """指摘を型の回へ入れる唯一の口。今の版の形だけを受け取る。旧形式は読む境が先に直す。"""
+        """指摘を型の回へ入れる唯一の口。今の版の形だけを受け取る。古い版は読む境が先に止める。"""
         stored = tuple(StoredFinding.from_json(finding) for finding in findings)
         return cls(ran_at, stored, discard)
 
@@ -1772,7 +1507,7 @@ class HistoryRound:
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> "HistoryRound":
-        """今の版の形の一回を読む。版の移しは済んでいる前提で、新しい回の組み立てには使わない。"""
+        """今の版の形の一回を読む。版の検査は済んでいる前提で、新しい回の組み立てには使わない。"""
         stored = raw.get(_KEY_DISCARD)
         if stored is None:
             summary = DiscardSummary(DiscardState.UNRECORDED)
@@ -1798,7 +1533,7 @@ class HistoryFile:
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> "HistoryFile":
-        """今の版の形を読む。版の移しは read_history_json が済ませる。"""
+        """今の版の形を読む。版の検査は read_history_json が済ませる。"""
         return cls(
             {
                 GroupId(group): tuple(HistoryRound.from_json(entry) for entry in rounds)
@@ -1808,24 +1543,18 @@ class HistoryFile:
 
 
 def read_history_json(raw: dict[str, Any], where: str = "") -> HistoryFile:
-    """findings_history.json を読む境の唯一の口。版を見て今の版まで移してから型へ読む。
-
-    移した結果は書き戻さない。書くのは常に今の版である。
-    """
-    upgraded = upgrade_mapping(
-        _stored_file_name(where, HISTORY_FILE),
-        raw,
-        current=FINDINGS_FORMAT,
-        upgrades=_HISTORY_UPGRADES,
+    """findings_history.json を読む境の唯一の口。今の版以外は止める。"""
+    current_fields = require_current_version(
+        _stored_file_name(where, HISTORY_FILE), raw, current=FINDINGS_FORMAT
     )
     groups = {
         name: [
             {**entry, _KEY_FINDINGS: _with_memory_viewpoints(entry[_KEY_FINDINGS])}
             for entry in rounds
         ]
-        for name, rounds in upgraded[_KEY_GROUPS].items()
+        for name, rounds in current_fields[_KEY_GROUPS].items()
     }
-    return HistoryFile.from_json({**upgraded, _KEY_GROUPS: groups})
+    return HistoryFile.from_json({**current_fields, _KEY_GROUPS: groups})
 
 
 @dataclass(frozen=True)

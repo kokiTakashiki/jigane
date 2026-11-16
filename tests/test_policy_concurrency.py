@@ -8,8 +8,8 @@ from review_fakes import make_review
 from jigane.languages.base import (
     ActorDomain,
     BlockingWait,
-    Body,
     ConcurrencyAdapter,
+    ConcurrencyBody,
     EventLoopDomain,
     GlobalActorDomain,
     Isolation,
@@ -932,7 +932,7 @@ def test_blocking_wait_is_silent_outside_async_and_off_the_main_thread() -> None
 
 
 def test_a_par_without_any_drawn_branch_is_not_drawn() -> None:
-    empty = Body(isolation=NonisolatedDomain(), steps=())
+    empty = ConcurrencyBody(isolation=NonisolatedDomain(), steps=())
     par = StructuredConcurrency(StructuredKind.JOIN_ALL, (empty,), 1, "async let")
     drawing = drawing_with(on_main=False)
     assert drawing.render((par,), NonisolatedDomain(), in_async=True, depth=0) == []

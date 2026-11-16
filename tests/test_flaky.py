@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from gates_support import write_gates_file
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_GATE_VIOLATION, EXIT_OK
@@ -16,9 +15,10 @@ from jigane.flaky.catalog import (
     load_catalog,
     parse_catalog,
 )
+from jigane.flaky.checks import Certainty
 from jigane.flaky.detector import Detection, QueryDetection, detect_source
 from jigane.flaky.explanation import explain
-from jigane.flaky.gates import load_gates, update_gates
+from jigane.flaky.gates import update_gates
 from jigane.gates.entry import Gates
 from jigane.gates.line_scope import AllLines, ChangedLines, LineScope
 from jigane.judgment_map.allow_annotation import split_rows
@@ -293,7 +293,7 @@ def test_numbers_are_never_reused(tmp_path: Path) -> None:
 def test_reclassified_detection_gets_number_of_new_class(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_detect(*, undetermined: bool) -> object:
+    def fake_detect(*, certainty: Certainty) -> object:
         def _detect_stub(
             _root: object, _paths: object, _catalog: object, _scope: object
         ) -> list[Detection]:
@@ -303,7 +303,7 @@ def test_reclassified_detection_gets_number_of_new_class(
                     "tests/test_a.py",
                     5,
                     "time.sleep(1)",
-                    undetermined,
+                    certainty,
                     spec=next(i for i in CATALOG if i.id == "FLK-ASYNC-WAIT").queries[0],
                 )
             ]
@@ -312,12 +312,12 @@ def test_reclassified_detection_gets_number_of_new_class(
 
     out = tmp_path / "out"
     out.mkdir()
-    monkeypatch.setattr(gates_module, "detect", fake_detect(undetermined=False))
+    monkeypatch.setattr(gates_module, "detect", fake_detect(certainty=Certainty.CONFIRMED))
     first = update_gates(
         out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
     )
     assert [v.number for v in first.violations] == ["G1"]
-    monkeypatch.setattr(gates_module, "detect", fake_detect(undetermined=True))
+    monkeypatch.setattr(gates_module, "detect", fake_detect(certainty=Certainty.UNDETERMINED))
     second = update_gates(
         out, tmp_path, ["tests/test_a.py"], [], CATALOG, renames={}, unreadable_segments=()
     )
@@ -476,40 +476,6 @@ def test_gate_entries_carry_the_explanation_not_only_the_id(tmp_path: Path) -> N
     item = next(i for i in CATALOG if i.id == "FLK-ASYNC-WAIT")
     assert by_id["FLK-ASYNC-WAIT"].explanation == item.explanation.to_json()
     assert by_id[ANNOTATION_ID].explanation == ANNOTATION_EXPLANATION.to_json()
-
-
-def _old_gates_file(directory: Path, ids: list[str]) -> None:
-    entries = [
-        {
-            "number": f"G{n}",
-            "id": item_id,
-            "path": "tests/test_a.py",
-            "line": 1,
-            "excerpt": "x",
-            "reason": "",
-            "cause": "Annotation",
-            "confidence": "direct",
-            "origin": "o",
-            "legitimate": "",
-        }
-        for n, item_id in enumerate(ids, 1)
-    ]
-    state = {"violations": entries, "warnings": []}
-    write_gates_file(directory, state)
-
-
-def test_load_gates_fills_the_explanation_missing_from_an_old_file(tmp_path: Path) -> None:
-    item = next(i for i in CATALOG if i.id == "FLK-ASYNC-WAIT")
-    _old_gates_file(tmp_path, [item.id, ANNOTATION_ID, "FLK-GONE"])
-    loaded = load_gates(tmp_path)
-    assert loaded is not None
-    by_id = {v.id: v.explanation for v in loaded.violations}
-    assert by_id[item.id] == item.explanation.to_json()
-    assert by_id[ANNOTATION_ID] == ANNOTATION_EXPLANATION.to_json()
-    # 目録に無い ID は注記の文でも別の規則の文でもなく、説明が無いと分かる文になる
-    assert by_id["FLK-GONE"] != ANNOTATION_EXPLANATION.to_json()
-    assert "FLK-GONE" in by_id["FLK-GONE"]["concern"]
-    assert "目録に無い" in by_id["FLK-GONE"]["concern"]
 
 
 def test_explain_does_not_take_an_unknown_id_for_an_annotation_violation() -> None:

@@ -1,6 +1,6 @@
 """方針のレビューに渡す、足した公開の口と呼ぶ側の表。
 
-公開の名前の読みは言語のアダプタの口（`PublicNameReader`）に任せ、口を持たない言語のファイルは読まない。
+公開の名前の読みは言語のアダプタの口（`AddedPublicNameFinder`）に任せ、口を持たない言語のファイルは読まない。
 
 変更で足した、または引数を足した公開の名前を一行ずつ示し、変更の後の木の中の呼ぶ側を名前で照合して数える。
 名前と数だけを渡し、コードの文は渡さない。変更前の木を持たないファイルのレビューは、足したものが定まらないので描かない。
@@ -12,7 +12,7 @@ from pathlib import Path
 from jigane.figures.models import RowChange, TableFigure, TableRow
 from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.languages import registry
-from jigane.languages.base import PublicName, PublicNameKind, PublicNameReader
+from jigane.languages.base import AddedPublicName, AddedPublicNameFinder, PublicNameKind
 from jigane.policy_materials import changed_files
 from jigane.reviews.lifecycle import Review
 
@@ -49,7 +49,7 @@ def _sources(root: Path, paths: list[str]) -> dict[str, str]:
     return texts
 
 
-def _row(name: PublicName) -> TableRow:
+def _row(name: AddedPublicName) -> TableRow:
     callers = "、".join(f"`{caller}`" for caller in name.callers) or NO_CALLER
     return TableRow(
         (
@@ -63,11 +63,11 @@ def _row(name: PublicName) -> TableRow:
     )
 
 
-def _by_reader(paths: Iterable[str]) -> dict[str, tuple[PublicNameReader, list[str]]]:
-    groups: dict[str, tuple[PublicNameReader, list[str]]] = {}
+def _by_reader(paths: Iterable[str]) -> dict[str, tuple[AddedPublicNameFinder, list[str]]]:
+    groups: dict[str, tuple[AddedPublicNameFinder, list[str]]] = {}
     for path in paths:
         adapter = registry.adapter_for(path)
-        if isinstance(adapter, PublicNameReader):
+        if isinstance(adapter, AddedPublicNameFinder):
             groups.setdefault(adapter.name, (adapter, []))[1].append(path)
     return groups
 
@@ -82,7 +82,7 @@ def caller_table(review: Review) -> TableFigure | None:
     )
     before_by_reader = _by_reader(changed_files.file_changes(review, before=True))
     tree_by_reader = _by_reader(walk_tree_files(root, root))
-    names: list[PublicName] = []
+    names: list[AddedPublicName] = []
     for key, (reader, changed) in changed_by_reader.items():
         before_paths = before_by_reader[key][1] if key in before_by_reader else []
         tree_paths = tree_by_reader[key][1] if key in tree_by_reader else []

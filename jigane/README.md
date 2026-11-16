@@ -23,12 +23,13 @@ PR または作業ツリーの変更を受け取り、レビューの材料（�
 | [`judgment_map`](judgment_map/README.md) | 判断の地図、変更の宣言、変更の種類、`.jigane.toml` の規則を受け持ちます。 |
 | [`languages`](languages/README.md) | ソースファイルを tree-sitter で構文木にし、言語ごとの違いを `LanguageAdapter` の裏に閉じ込めます。 |
 | [`llm_runs`](llm_runs/README.md) | LLM の起動、実行の記録、見積もりと使用量、使った額を受け持ちます。 |
-| [`markdown`](markdown/README.md) | Markdown の柵と見出しの判別、表のセルの整形を受け持ちます。 |
+| [`markdown`](markdown/README.md) | Markdown の柵と見出しの判別、本文を柵で囲む処理、表のセルの整形を受け持ちます。 |
 | [`policy_materials`](policy_materials/README.md) | 方針の群に渡す資料（図と表）を組みます。 |
 | [`preconditions`](preconditions/README.md) | 呼び出し側が保証している前提を確かめ、型を絞ります。 |
 | [`publishing`](publishing/README.md) | 返信とレポートの描画を受け持ちます。 |
 | [`pull_request_context`](pull_request_context/README.md) | PR の取得、変更の背景、レビューボットの指摘を受け持ちます。 |
 | [`regex`](regex/README.md) | 変更した正規表現を、LLM を使わずに数えて札にします。 |
+| [`repository_docs`](repository_docs/README.md) | リポジトリが自分で定めた開発方針とセキュリティ指針の文書を、レビューのプロンプトへ渡す材料として読みます。 |
 | [`reviews`](reviews/README.md) | レビューの組み立て、保存、読み込み、更新、選別、付属の文書を受け持ちます。 |
 | [`sequence`](sequence/README.md) | レビューが変更した宣言から、変更が届く入口（根）ごとのシーケンス図を、LLM を使わずに作ります。 |
 | [`skills`](skills/README.md) | LLM に指摘を作らせるスキル群を持ちます。 |
@@ -82,6 +83,7 @@ flowchart TB
         technology_list
         publishing
         static_analysis
+        repository_docs
     end
     subgraph cli
         commands

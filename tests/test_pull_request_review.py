@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from fakes import MacroFake, discovered, run_command_stub, settings_for
 from pr_support import BODY, URL, advance_head, clone_bare, commit_all, git
-from review_fakes import EXTRA_WARNING
+from review_fakes import EXTRA_WARNING, current_form_findings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
@@ -341,7 +341,8 @@ def test_refresh_after_head_advances(pr: dict[str, Any]) -> None:
     assert {"added.py", "gone.py"} <= set(before)
     directory = created.id.directory()
     (directory / "findings.json").write_text(
-        json.dumps({"last_number": 1, "groups": {"macro": []}}), encoding="utf-8"
+        json.dumps(current_form_findings({"last_number": 1, "groups": {"macro": []}})),
+        encoding="utf-8",
     )
 
     advance_head(pr)
@@ -397,7 +398,8 @@ def test_refresh_title_only_updates_declaration_not_trees(pr: dict[str, Any]) ->
     created = create_pull_request_review(URL)
     directory = created.id.directory()
     (directory / "findings.json").write_text(
-        json.dumps({"last_number": 1, "groups": {"macro": []}}), encoding="utf-8"
+        json.dumps(current_form_findings({"last_number": 1, "groups": {"macro": []}})),
+        encoding="utf-8",
     )
     watched = [
         *(p for p in (directory / "trees").rglob("*") if p.is_file()),
@@ -703,7 +705,7 @@ def test_bot_comments_feed_macro_and_map(pr: dict[str, Any]) -> None:
     assert region["kind"] == "bot_response"
     assert region["bot_comment_ids"] == [101]
     assert saved["comments"][0]["region_keys"] == [region["key"]]
-    findings = macro.bot_findings(review)
+    findings = macro.bot_findings_section(review)
     assert findings is not None
     assert "id 101" in findings
     assert "戻り値を見直す" in findings
@@ -755,23 +757,6 @@ def test_review_does_not_write_approval_and_ignores_a_stored_one(
     shown = json.loads(capsys.readouterr().out)
     assert "approval" not in shown
     assert "approval_status" not in shown
-
-
-@pytest.mark.usefixtures("pr")
-def test_legacy_review_json_is_read_into_the_separated_form() -> None:
-    review = create_pull_request_review(URL)
-    path = review.id.directory() / "review.json"
-    stored = json.loads(path.read_text(encoding="utf-8"))
-    # 版を持たない古い記録の形にする
-    del stored["format"]
-    stored["warnings"] = review.warnings
-    source = stored.pop("diff_source")
-    stored["pull_request"] = {**stored["pull_request"], "linked_issues": [], **source}
-    path.write_text(json.dumps(stored), encoding="utf-8")
-
-    loaded = load_review(review.id)
-
-    assert loaded.origin == review.origin
 
 
 def test_refresh_rebuilds_the_pull_request_body_warnings(pr: dict[str, Any]) -> None:

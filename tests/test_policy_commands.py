@@ -4,7 +4,7 @@ from review_fakes import make_review
 from test_policy_classes import feature_review, whole
 
 from jigane.figures.models import FigureKind, RowChange, TableFigure
-from jigane.skills import macro, policy_commands
+from jigane.skills import macro, policy_commands, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import REGISTRY, diagrams_of
 from jigane.storage.store import ReviewKind
@@ -85,5 +85,5 @@ def test_registered_after_tree_and_reaches_prompt_and_diagrams(tmp_path: Path) -
     placed = next(p for p in diagrams_of(review).figures if p.key == "commands")
     assert placed.to_json()["kind"] == "table"
     assert "--region" in macro.diagram_materials_text(
-        AssemblyInput.load(review), macro.policy_sections(review)
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
     )

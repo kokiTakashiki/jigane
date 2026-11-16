@@ -24,7 +24,7 @@ def test_builtin_plugins_declare_the_four_languages() -> None:
     for plugin in plugins:
         assert isinstance(plugin, LanguagePlugin)
         assert plugin.origin == Builtin()
-        assert plugin.api_version == ApiVersion(1, 0)
+        assert plugin.api_version == ApiVersion(2, 0)
         assert plugin.data is None
 
 

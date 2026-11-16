@@ -6,7 +6,7 @@
 
 import ast
 
-from jigane.languages.base import TypeFields
+from jigane.languages.base import TypeFieldNames
 from jigane.languages.python_ast import parse_python
 
 ENUM_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"})
@@ -32,14 +32,14 @@ def _field_names(cls: ast.ClassDef) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
-def type_fields_of(text: str, path: str) -> list[TypeFields]:
+def type_fields_of(text: str, path: str) -> list[TypeFieldNames]:
     """ファイルのトップレベルの型を、文書順に返す。読めないファイルは空。"""
     module = parse_python(text)
     if module is None:
         # parse の後は module.body の直下しか読まないので、parse の失敗だけを見れば足りる
         return []
     return [
-        TypeFields(node.name, path, node.lineno, fields)
+        TypeFieldNames(node.name, path, node.lineno, fields)
         for node in module.body
         if isinstance(node, ast.ClassDef) and (fields := _field_names(node))
     ]

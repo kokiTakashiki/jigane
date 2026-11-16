@@ -11,10 +11,10 @@ from jigane.judgment_map.classification import FindingTouch
 from jigane.static_analysis.models import DropReason, SarifFileRecord, SarifImport, StaticFinding
 from jigane.static_analysis.reader import SarifError, read_sarif
 from jigane.storage.review_error import ReviewError
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 STATIC_FINDINGS_FILE = "static_findings.json"
-# static_findings.json の形の版。形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
+# static_findings.json の形の版。形を変えたら一つ上げる
 STATIC_FINDINGS_FORMAT = 1
 RAISING_LEVELS = frozenset({"error", "warning"})
 
@@ -188,15 +188,9 @@ def select_for_refresh(
     )
 
 
-# 版 1 が最初の版なので、移しはまだ無い
-_UPGRADES: dict[int, Upgrade] = {}
-
-
 def load_static_findings(raw: Mapping[str, Any]) -> StaticFindingsStore:
-    """static_findings.json を読む境の一か所。保存された版から今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(
-        STATIC_FINDINGS_FILE, raw, current=STATIC_FINDINGS_FORMAT, upgrades=_UPGRADES
-    )
+    """static_findings.json を読む境の一か所。版が今の版と一致することを確かめてから型へ読む。"""
+    stored = require_current_version(STATIC_FINDINGS_FILE, raw, current=STATIC_FINDINGS_FORMAT)
     try:
         return StaticFindingsStore(
             stored["analyzed_commit"],

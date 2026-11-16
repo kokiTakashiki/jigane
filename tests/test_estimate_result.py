@@ -7,13 +7,14 @@ import pytest
 
 from jigane.groups.definitions import GROUPS, GroupId
 from jigane.reviews.lifecycle import create_feature_review
-from jigane.skills import estimator
+from jigane.skills import estimator, launch_prompts
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import (
     DiagramPolicyEstimate,
     ImplementationEstimate,
     SecurityEstimate,
 )
+from jigane.skills.launch_prompts import LaunchInput
 
 PACKAGE = Path(__file__).parent.parent / "jigane"
 READERS = (
@@ -41,7 +42,7 @@ def test_every_group_maps_to_one_estimate_type(project: Path) -> None:
     }
     assert set(expected) == {group.identifier for group in GROUPS}
     for group in GROUPS:
-        estimate = estimator.estimate_of(assembly, group.identifier)
+        estimate = estimator.estimate_of(LaunchInput(assembly, group.identifier))
         assert type(estimate) is expected[group.identifier]
 
 
@@ -69,7 +70,9 @@ def _group_branches(source: str) -> tuple[int, int, set[str]]:
 
 
 def test_the_group_branch_lives_in_one_match_with_assert_never() -> None:
-    matches, never_calls, cases = _group_branches(inspect.getsource(estimator))
+    # 見積もりとプロンプトの群の分け方の match は group_launch の一か所で、見積もりは持たない
+    assert _group_branches(inspect.getsource(estimator))[0] == 0
+    matches, never_calls, cases = _group_branches(inspect.getsource(launch_prompts.group_launch))
     assert matches == 1
     assert never_calls == 1
     assert cases == {each.name for each in GroupId}

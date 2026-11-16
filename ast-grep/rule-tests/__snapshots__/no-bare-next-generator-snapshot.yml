@@ -1,0 +1,40 @@
+id: no-bare-next-generator
+snapshots:
+  "def f(items):\n    return next(\n        item\n        for item in items\n        if item\n    )\n":
+    labels:
+    - source: |-
+        next(
+                item
+                for item in items
+                if item
+            )
+      style: primary
+      start: 25
+      end: 91
+    - source: next
+      style: secondary
+      start: 25
+      end: 29
+    - source: |-
+        (
+                item
+                for item in items
+                if item
+            )
+      style: secondary
+      start: 29
+      end: 91
+  "next(c for c in children if c.type == \":\")":
+    labels:
+    - source: next(c for c in children if c.type == ":")
+      style: primary
+      start: 0
+      end: 42
+    - source: next
+      style: secondary
+      start: 0
+      end: 4
+    - source: (c for c in children if c.type == ":")
+      style: secondary
+      start: 4
+      end: 42

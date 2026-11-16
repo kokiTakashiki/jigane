@@ -118,9 +118,9 @@ def _install_staging(staging: Path, final: Path, review_id: CheckedReviewId) -> 
 
 def _make_staging(final: Path) -> Path:
     ensure_data_home()
-    final.parent.mkdir(parents=True, exist_ok=True)
+    final.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     staging = final.parent / f"{STAGING_PREFIX}{uuid.uuid4().hex}"
-    staging.mkdir()
+    staging.mkdir(mode=0o700)
     return staging
 
 
@@ -164,4 +164,4 @@ def staged_save_target(review_id: CheckedReviewId, staging: Path) -> SaveTarget:
 def prepare_save_target(target: SaveTarget) -> None:
     """書く前に、置き場の根と書く先のディレクトリが無ければ作る。"""
     ensure_data_home()
-    target.writing.mkdir(parents=True, exist_ok=True)
+    target.writing.mkdir(mode=0o700, parents=True, exist_ok=True)

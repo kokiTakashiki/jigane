@@ -4,7 +4,7 @@ from importlib.metadata import EntryPoint
 
 from jigane.languages.approval import ApprovalsByPair, content_error
 from jigane.languages.enabled import EnabledLanguage
-from jigane.languages.plugin import LanguagePlugin
+from jigane.languages.plugin import PLUGIN_API_VERSION, ApiVersion, LanguagePlugin
 from jigane.languages.states import (
     LanguageNotEnabled,
     LanguageReady,
@@ -45,6 +45,27 @@ def _owner(
     return ", ".join(sorted(approved_distributions)), None
 
 
+def _old_api_version(entry_point: EntryPoint, plugin: object) -> LanguageUnavailable | None:
+    """宣言したプラグイン API のバージョンの major が jigane より小さければ、その状態。"""
+    if not isinstance(plugin, LanguagePlugin):
+        # 型の誤りの説明は validate_plugin が返す
+        return None
+    declared: object = plugin.api_version
+    if not isinstance(declared, ApiVersion) or declared.major >= PLUGIN_API_VERSION.major:
+        # major が大きいときは「古い」の案内が当たらないので、validate_plugin の説明に任せる
+        return None
+    return LanguageUnavailable(
+        entry_point.name,
+        ReasonKind.API_VERSION_OLD,
+        f"言語プラグイン「{entry_point.name}」は、古いプラグイン API のバージョン"
+        f"（{declared.major}.{declared.minor}）を宣言しています。"
+        f"この jigane のプラグイン API のバージョンは"
+        f" {PLUGIN_API_VERSION.major}.{PLUGIN_API_VERSION.minor} です。"
+        "プラグインを新しい API に合わせて直し、"
+        f"ApiVersion({PLUGIN_API_VERSION.major}, {PLUGIN_API_VERSION.minor}) を宣言してください。",
+    )
+
+
 def _load(entry_point: EntryPoint) -> LanguagePlugin | LanguageUnavailable:
     try:
         factory = entry_point.load()
@@ -57,7 +78,11 @@ def _load(entry_point: EntryPoint) -> LanguagePlugin | LanguageUnavailable:
             f"{type(error).__name__}: {error}",
             _dist_name(entry_point),
             entry_point.dist.version if entry_point.dist is not None else None,
+            import_failed=isinstance(error, ImportError),
         )
+    old = _old_api_version(entry_point, plugin)
+    if old is not None:
+        return old
     reason = validate_plugin(entry_point, plugin)
     if reason is not None or not isinstance(plugin, LanguagePlugin):
         # 型が違う場合の説明は validate_plugin が返しているので、reason は None にならない

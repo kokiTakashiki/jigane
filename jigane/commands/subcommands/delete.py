@@ -14,7 +14,12 @@ from jigane.reviews.catalog import TRASH_DIRECTORY
 from jigane.reviews.resolution import resolve_review
 from jigane.storage.locking import LOCK_FILE, review_lock
 from jigane.storage.review_creation import remove_claim_lock
-from jigane.storage.store import REVIEW_FILE, CheckedReviewId, check_review_id, data_home
+from jigane.storage.store import (
+    REVIEW_FILE,
+    CheckedReviewId,
+    check_review_id,
+    data_home,
+)
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:

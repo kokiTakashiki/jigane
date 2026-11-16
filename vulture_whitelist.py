@@ -78,7 +78,6 @@ _.WORKING_DIRECTORY  # 同上
 
 # --- 観点の表の読み込み口。置き場と表示とプロンプトを表へ移す後の刻みが引く ---
 _.by_number  # groups/viewpoints.py。表示とプロンプトを表へ移す後の刻みが引く
-_.by_legacy_number  # 同上。0.1.x の置き場の番号を読む後の刻みが引く
 
 # --- 設計書の形の観点の識別子。表の番号の文字列から ViewpointId(row.number) が引くので、コードに名前が現れない ---
 _.M0  # design/division.py の ViewpointId
@@ -89,3 +88,8 @@ _.M4  # 同上
 _.M6  # 同上
 # pytest.mark.usefixtures が文字列で引く fixture。
 _.all_principle_shapes
+
+# --- 後続の枝（手順 2 以降）が呼ぶ公開関数 ---
+_.settings_path  # repository_docs/settings.py。setup のスクリプトが追記先を引く（手順 6）
+_.record_word  # repository_docs/skip_reason.py。runs.json の欄を書く側が使う（手順 5）
+_.experimental  # subcommands/debug.py の DebugRunJson。debug run --json の鍵で、TypedDict の項目は名前でなく JSON の鍵として出力に出る

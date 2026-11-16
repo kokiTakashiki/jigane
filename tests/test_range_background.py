@@ -4,12 +4,8 @@ from pathlib import Path
 
 import pytest
 from pr_support import commit_all, git
-from store_format_support import check_upgrades
 
 from jigane.pull_request_context.background import (
-    _UPGRADES,
-    BACKGROUND_FILE,
-    BACKGROUND_FORMAT,
     PAST_PULL_REQUEST_LIMIT,
     PastChange,
     PastCommit,
@@ -143,7 +139,3 @@ def test_split_range_rejects_other_shapes(range_text: str) -> None:
 )
 def test_default_range_name(head: str, expected: str) -> None:
     assert default_range_name(head, "abcdef1234567890") == expected
-
-
-def test_upgrade_table_has_every_step() -> None:
-    check_upgrades(BACKGROUND_FILE, BACKGROUND_FORMAT, _UPGRADES)

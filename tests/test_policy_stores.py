@@ -3,7 +3,7 @@ from pathlib import Path
 from test_policy_classes import feature_review
 
 from jigane.figures.models import TableFigure
-from jigane.skills import macro, policy_stores
+from jigane.skills import macro, policy_figures, policy_stores
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import REGISTRY, diagrams_of
 
@@ -127,7 +127,9 @@ def test_no_figure_when_the_change_touches_no_store(tmp_path: Path) -> None:
 def test_registered_and_reaches_prompt(tmp_path: Path) -> None:
     assert any(e.key == "stores" for e in REGISTRY)
     review = feature_review(tmp_path, "s.py", SOURCE)
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert "### 保存物の書く側と読む側" in text
 
 

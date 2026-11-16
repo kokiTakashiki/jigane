@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import ClassVar
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand
+from jigane.git.invocation import git_command
 
 RecordedCommit = Callable[[str], str | None]
 
@@ -107,14 +109,16 @@ def classify_status(status: str, recorded_commit: RecordedCommit) -> tuple[Submo
 def submodule_notes(root: Path) -> tuple[SubmoduleNote, ...]:
     """git を実行して `root` のサブモジュールの注記を読む。"""
     try:
-        status = process.run_command(["git", "submodule", "status"], cwd=root)
+        status = process.run_command(git_command(GitSubcommand.SUBMODULE, "status"), cwd=root)
     except (OSError, process.CommandError):
         # git の外のディレクトリや git が無い環境には、サブモジュールの状態が無い
         return ()
 
     def recorded_commit(path: str) -> str | None:
         try:
-            return process.run_command(["git", "rev-parse", f"HEAD:{path}"], cwd=root).strip()
+            return process.run_command(
+                git_command(GitSubcommand.REV_PARSE, f"HEAD:{path}"), cwd=root
+            ).strip()
         except (OSError, process.CommandError):
             # 親の HEAD にそのパスの記録が無い
             return None

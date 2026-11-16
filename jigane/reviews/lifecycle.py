@@ -10,6 +10,7 @@ from jigane.flaky.catalog import load_catalog
 from jigane.flaky.gates import update_gates
 from jigane.gates.entry import Gates
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand
 from jigane.git.repository import Repository, identify, identify_git
 from jigane.git.revision import CommitSha, parse_commit_sha
 from jigane.git.tree_files import walk_tree_files
@@ -56,6 +57,7 @@ from jigane.pull_request_context.fetching import (
     fetch_pull_request,
     parse_pull_request_url,
 )
+from jigane.reviews.kind_fields import kind_fields_of
 from jigane.reviews.range_head import (
     UNTRACKED,
     BaseLost,
@@ -424,7 +426,7 @@ class Review:
 
     def kind_fields(self) -> dict[str, Any]:
         """種類から導く JSON の項目。to_dict と list の行はここから組み立てる。"""
-        return _kind_fields(self.kind)
+        return kind_fields_of(self.kind)
 
     def to_stored_dict(self) -> dict[str, Any]:
         """review.json へ書く形。id から導ける種類の項目、warnings、宣言の表示名は保存しない。"""
@@ -464,15 +466,6 @@ class Review:
             },
         }
         return printed
-
-
-def _kind_fields(kind: ReviewKind) -> dict[str, Any]:
-    return {
-        "kind": str(kind),
-        "mode": kind.mode,
-        "is_diff": kind.is_diff,
-        "is_pull_request": kind.is_pull_request,
-    }
 
 
 def _enumerate_files(root: Path, targets: list[Path]) -> list[str]:
@@ -883,7 +876,7 @@ def judge_files(root: Path, files: list[str], touches: Sequence[FindingTouch] = 
 def _head_commit(root: Path) -> str:
     """ファイルのレビューには変更後のコミットが無いので、HEAD を解析したコミットとみなす。"""
     try:
-        return run_git(root, "rev-parse", "HEAD").strip()
+        return run_git(root, GitSubcommand.REV_PARSE, "HEAD").strip()
     except process.CommandError as error:
         raise ReviewError(f"HEAD を解けません: {root}") from error
 
@@ -1152,7 +1145,7 @@ def _commits_text(root: Path, merge_base: str, head_sha: str) -> tuple[str, bool
     """(コミットの題と本文を並べた文, 本文を持つコミットがあるか)。"""
     output = run_git(
         root,
-        "log",
+        GitSubcommand.LOG,
         "--reverse",
         f"--format={_COMMIT_START}%s{_COMMIT_FIELD}%b",
         "--end-of-options",

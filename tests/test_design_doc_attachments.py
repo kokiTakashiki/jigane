@@ -149,7 +149,7 @@ def test_read_attachments_returns_typed_contents_not_stale_when_unchanged(repo: 
     review = create_design_doc_review(repo, DOCUMENT, attach=[MEMO])
     read = read_attachments(review)
     assert read == (AttachmentContent(MEMO, "# 検証メモ\n\n分割で履歴が残る。\n", stale=False),)
-    assert version_drifts(review, read_document(repo / DOCUMENT), read) == ()
+    assert version_drifts(review, read_document(repo, DOCUMENT), read) == ()
 
 
 def test_read_attachments_marks_a_changed_document_stale(repo: Path) -> None:
@@ -158,7 +158,7 @@ def test_read_attachments_marks_a_changed_document_stale(repo: Path) -> None:
     read = read_attachments(review)
     assert [item.stale for item in read] == [True]
     assert read[0].text == "# 検証メモ\n\n改訂した。\n"
-    drifts = version_drifts(review, read_document(repo / DOCUMENT), read)
+    drifts = version_drifts(review, read_document(repo, DOCUMENT), read)
     assert drifts == (VersionDrift(str(review.id), DriftedRole.ATTACHMENT, MEMO),)
     notice = drift_notice(drifts)
     assert notice is not None

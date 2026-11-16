@@ -20,7 +20,7 @@ from typing import Self, cast
 
 from tree_sitter import Node
 
-from jigane.languages.base import PublicName, PublicNameKind
+from jigane.languages.base import AddedPublicName, PublicNameKind
 from jigane.languages.node_text import text_or_empty
 from jigane.languages.public_names_core import (
     AddedParameter,
@@ -310,7 +310,7 @@ def added_public_names_of(
     before: Mapping[str, str],
     after: Mapping[str, str],
     changed: Collection[str],
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     """足した名前、足した引数の順。"""
     return added_public_names(
         before,

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from jigane.flaky.catalog import load_catalog
+from jigane.flaky.checks import Certainty
 from jigane.flaky.detector import detect_source
 from jigane.gates.line_scope import AllLines
 from jigane.languages.base import LanguageAdapter
@@ -177,7 +178,11 @@ def test_network_target(case: Case) -> None:
     found = detect_source(
         case.path, case.source.encode(), ADAPTERS[case.language], CATALOG, AllLines()
     )
-    network = [(d.undetermined, d.reason) for d in found if d.item_id == "FLK-NETWORK"]
+    network = [
+        (d.certainty is Certainty.UNDETERMINED, d.reason)
+        for d in found
+        if d.item_id == "FLK-NETWORK"
+    ]
     assert network == ([] if case.expected is None else [case.expected])
 
 

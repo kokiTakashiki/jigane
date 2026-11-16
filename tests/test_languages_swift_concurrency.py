@@ -81,7 +81,7 @@ def isolation(
 
 def steps(code: str, enclosing: Isolation | None = None) -> list[ConcurrencyStep]:
     root, source = root_of(f"func f() async {{\n{code}\n}}\n")
-    body = adapter.body_of(find(root, {"function_declaration"}, "f"))
+    body = adapter.body_node_of(find(root, {"function_declaration"}, "f"))
     assert body is not None
     return adapter.concurrency_steps(body, source, enclosing or NonisolatedDomain())
 

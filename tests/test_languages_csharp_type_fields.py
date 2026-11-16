@@ -1,21 +1,21 @@
 import pytest
 from tree_sitter import Node
 
-from jigane.languages.base import TypeFieldReader, TypeFields
+from jigane.languages.base import TypeFieldNameExtractor, TypeFieldNames
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.csharp_type_fields import type_fields_of
 
 
-def _read(source: str) -> list[TypeFields]:
-    return CSharpAdapter().type_fields(source, "a.cs")
+def _read(source: str) -> list[TypeFieldNames]:
+    return CSharpAdapter().type_field_names(source, "a.cs")
 
 
 def _shape(source: str) -> list[tuple[str, int, tuple[str, ...]]]:
-    return [(t.name, t.line, t.fields) for t in _read(source)]
+    return [(t.type_name, t.line, t.field_names) for t in _read(source)]
 
 
 def test_csharp_adapter_satisfies_the_type_field_reader() -> None:
-    assert isinstance(CSharpAdapter(), TypeFieldReader)
+    assert isinstance(CSharpAdapter(), TypeFieldNameExtractor)
 
 
 def test_instance_fields_and_auto_properties_are_fields() -> None:

@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 import pytest
-from language_plugin_support import Installer, approved, entry_points_in, legacy_record
+from language_plugin_support import Installer, approved, entry_points_in
 
 from jigane.languages import registry
 from jigane.languages.approval import ApprovedContent, FileDigest, reapproval_reason
@@ -68,13 +68,6 @@ def test_reason_compares_with_the_approval_that_differs_least() -> None:
     assert "s.py" not in reason
 
 
-def test_reason_for_a_record_in_the_old_form_says_it_cannot_be_compared() -> None:
-    legacy = legacy_record("zig").content
-    assert reapproval_reason([legacy], {"a.py": _A}) == (
-        "旧い形の承認記録です（中身の照合ができません）"
-    )
-
-
 def _detail(tmp_path: Path, enabled: tuple[EnabledLanguage, ...]) -> str:
     states = discover(entry_points_in(tmp_path), enabled, registry.builtin_plugins())
     (failure,) = [s for s in states if isinstance(s, LanguageUnavailable)]
@@ -110,16 +103,6 @@ def test_discover_counts_a_new_record_line_as_added(install: Installer, tmp_path
     assert "増えた: extra.py" in _detail(tmp_path, enabled)
 
 
-def test_discover_says_a_record_in_the_old_form_cannot_be_compared(
-    install: Installer, tmp_path: Path
-) -> None:
-    install("kotlin")
-    assert _detail(tmp_path, (legacy_record("kotlin"),)) == (
-        "旧い形の承認記録です（中身の照合ができません）。"
-        "jigane languages enable kotlin で承認し直してください"
-    )
-
-
 def test_discover_keeps_the_unreadable_file_reason(
     install: Installer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -136,14 +119,3 @@ def test_discover_keeps_the_unreadable_file_reason(
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
     detail = _detail(tmp_path, enabled)
     assert "RECORD に載る fakelang_kotlin.py を読めません" in detail
-
-
-def test_old_form_record_gets_the_old_form_reason_even_without_a_record_file(
-    install: Installer, tmp_path: Path
-) -> None:
-    install("kotlin")
-    (tmp_path / "site" / "fakelang_kotlin_dist-1.0.dist-info" / "RECORD").unlink()
-    assert _detail(tmp_path, (legacy_record("kotlin"),)) == (
-        "旧い形の承認記録です（中身の照合ができません）。"
-        "jigane languages enable kotlin で承認し直してください"
-    )

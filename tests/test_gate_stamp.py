@@ -7,6 +7,7 @@ import gate_stamp
 import pytest
 from dev_launch import run_tool
 
+from jigane.git import process
 from jigane.git.process import CommandError, run_command
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -448,7 +449,7 @@ def test_ref_names_are_passed_after_end_of_options(monkeypatch: pytest.MonkeyPat
         seen.append(args)
         return "a" * 40
 
-    monkeypatch.setattr(gate_stamp, "run_command", fake_run)
+    monkeypatch.setattr(process, "run_command", fake_run)
     evil = "--upload-pack=touch /tmp/x"
     gate_stamp.peel_to_commit(evil)
     gate_stamp.base_commit(gate_stamp.PushedRef(evil, evil))

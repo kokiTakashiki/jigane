@@ -137,6 +137,14 @@ def test_range_is_passed_after_end_of_options(monkeypatch: pytest.MonkeyPatch) -
         seen.append(args)
         return ""
 
-    monkeypatch.setattr(checker, "run_command", fake_run)
+    monkeypatch.setattr(checker.process, "run_command", fake_run)
     checker.find_offenders(Path(), "--output=x")
     assert seen[0].index("--end-of-options") < seen[0].index("--output=x")
+
+
+def test_log_format_argument_separates_fields_with_the_separator() -> None:
+    # 整形指定は検査が定数と見なせるよう 1 つの文字列で書く。区切りが SEPARATOR とずれないよう縛る
+    checker = load_checker()
+    expected = "--format=" + checker.SEPARATOR.join(["%h", "%ae", "%ce"])
+
+    assert expected == checker.LOG_FORMAT_ARGUMENT

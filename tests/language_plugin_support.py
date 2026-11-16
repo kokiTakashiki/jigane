@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from jigane.languages import grammars, registry
-from jigane.languages.approval import LegacyApproval, read_content
+from jigane.languages.approval import ApprovedContent, read_content
 from jigane.languages.enabled import EnabledLanguage
 from jigane.languages.plugin import Distribution, LanguagePlugin
 from jigane.languages.plugins import discover
@@ -71,23 +71,27 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Install
         *,
         suffixes: tuple[str, ...] = (".fake",),
         adapter_name: str | None = None,
-        major: int = 1,
+        major: int = 2,
         minor: int = 0,
         complete: bool = True,
         raises: bool = False,
+        import_failure: bool = False,
         origin: str | None = None,
         dist: str | None = None,
         suffixes_expr: str | None = None,
         data_dir: Path | None = None,
         grammar: str = "python",
         spec_expr: str = 'GrammarSpec(pack_version="1", hashes={})',
+        members: str = "",
     ) -> Path:
         module = f"fakelang_{name}"
         marker = tmp_path / f"{module}.marker"
         dist = dist or f"{module}-dist"
         installed.append(module)
         body = (
-            'raise RuntimeError("boom")'
+            "import no_such_module_for_jigane_tests"
+            if import_failure
+            else 'raise RuntimeError("boom")'
             if raises
             else _RETURN.format(
                 origin=origin or f'Distribution("{dist}", "1.0")',
@@ -102,7 +106,7 @@ def install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Install
             adapter_name=adapter_name or name,
             grammar=grammar,
             suffixes_expr=suffixes_expr or f"frozenset({sorted(suffixes)!r})",
-            declarations=_COMPLETE if complete else "",
+            declarations=(_COMPLETE if complete else "") + members,
             factory_body=body,
         )
         (site / f"{module}.py").write_text(source, encoding="utf-8")
@@ -150,9 +154,9 @@ def approved(name: str, dist: str | None = None) -> EnabledLanguage:
     return EnabledLanguage(name, installed.name, installed.version, read_content(installed))
 
 
-def legacy_record(name: str, dist: str | None = None, version: str = "1.0") -> EnabledLanguage:
-    """中身を記録する前の形の承認。配布が入っているかは問わない。"""
-    return EnabledLanguage(name, dist or f"fakelang_{name}-dist", version, LegacyApproval())
+def recorded(name: str, dist: str | None = None, version: str = "1.0") -> EnabledLanguage:
+    """中身が空の承認。配布が入っているかは問わず、入っていれば今の中身とは合わない。"""
+    return EnabledLanguage(name, dist or f"fakelang_{name}-dist", version, ApprovedContent(()))
 
 
 def enabled_of(*names: str) -> tuple[EnabledLanguage, ...]:

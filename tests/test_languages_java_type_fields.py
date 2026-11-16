@@ -1,21 +1,21 @@
 import pytest
 from tree_sitter import Node
 
-from jigane.languages.base import TypeFieldReader, TypeFields
+from jigane.languages.base import TypeFieldNameExtractor, TypeFieldNames
 from jigane.languages.java import JavaAdapter
 from jigane.languages.java_type_fields import type_fields_of
 
 
-def _read(source: str) -> list[TypeFields]:
-    return JavaAdapter().type_fields(source, "A.java")
+def _read(source: str) -> list[TypeFieldNames]:
+    return JavaAdapter().type_field_names(source, "A.java")
 
 
 def _shape(source: str) -> list[tuple[str, int, tuple[str, ...]]]:
-    return [(t.name, t.line, t.fields) for t in _read(source)]
+    return [(t.type_name, t.line, t.field_names) for t in _read(source)]
 
 
 def test_java_adapter_satisfies_the_type_field_reader() -> None:
-    assert isinstance(JavaAdapter(), TypeFieldReader)
+    assert isinstance(JavaAdapter(), TypeFieldNameExtractor)
 
 
 def test_instance_fields_are_fields_by_name() -> None:

@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import TypeFields
+from jigane.languages.base import TypeFieldNames
 from jigane.languages.csharp_nodes import (
     NAMESPACES,
     TYPE_KINDS,
@@ -93,17 +93,19 @@ def _top_level_types(container: Node) -> Iterator[Node]:
             yield node
 
 
-def _read(root: Node, path: str) -> list[TypeFields]:
-    found: list[TypeFields] = []
+def _read(root: Node, path: str) -> list[TypeFieldNames]:
+    found: list[TypeFieldNames] = []
     for node in _top_level_types(root):
         name = node.child_by_field_name("name")
         fields = _field_names(node)
         if name is not None and fields:
-            found.append(TypeFields(text_or_empty(name), path, node.start_point.row + 1, fields))
+            found.append(
+                TypeFieldNames(text_or_empty(name), path, node.start_point.row + 1, fields)
+            )
     return found
 
 
-def type_fields_of(parse_root: Callable[[], Node], path: str) -> list[TypeFields]:
+def type_fields_of(parse_root: Callable[[], Node], path: str) -> list[TypeFieldNames]:
     """ファイルのトップレベルの型を、文書順に返す。構文木を作れないファイルは空を返す。"""
     try:
         return _read(parse_root(), path)

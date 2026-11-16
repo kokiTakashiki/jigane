@@ -9,6 +9,7 @@ class ReasonKind(StrEnum):
     LOAD_ERROR = "load_error"
     VALIDATION_ERROR = "validation_error"
     GRAMMAR_ERROR = "grammar_error"
+    API_VERSION_OLD = "api_version_old"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class LanguageUnavailable:
     detail: str
     distribution: str | None = None
     version: str | None = None
+    # entry point の読み込みが ImportError で落ちたとき真。表示する側が案内の一行を足す
+    import_failed: bool = False
 
 
 @dataclass(frozen=True)

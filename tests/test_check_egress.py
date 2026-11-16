@@ -590,3 +590,222 @@ def test_missing_document_fails(tmp_path: Path) -> None:
 def test_document_without_table_fails(tmp_path: Path) -> None:
     write_document(tmp_path, "# 送り先\n\n表なし\n")
     assert any("表が無い" in p for p in document(tmp_path, DOCUMENT_ALLOWLIST))
+
+
+def _script_tree(tmp_path: Path, source: str) -> Path:
+    root = make_tree(tmp_path, {})
+    (root / "scripts" / "tool.py").write_text(textwrap.dedent(source), encoding="utf-8")
+    return root
+
+
+def test_script_launcher_import_fails(tmp_path: Path) -> None:
+    root = _script_tree(tmp_path, "from jigane.git.process import run_command\n")
+    assert any("scripts/tool.py:1" in p for p in commands(root))
+
+
+def test_script_variable_git_argv_fails(tmp_path: Path) -> None:
+    root = _script_tree(
+        tmp_path,
+        """
+        from jigane.git import process
+
+        def f(sha):
+            process.run_command(["git", "show", sha])
+        """,
+    )
+    assert any("scripts/tool.py:5" in p for p in commands(root))
+
+
+def test_script_own_function_named_like_launcher_is_flagged(tmp_path: Path) -> None:
+    root = _script_tree(
+        tmp_path,
+        """
+        def run_command(command):
+            return 0
+
+        def main(command):
+            return run_command(command)
+        """,
+    )
+    assert any("scripts/tool.py:6" in p for p in commands(root))
+
+
+def test_script_destinations_are_not_checked(tmp_path: Path) -> None:
+    root = _script_tree(tmp_path, 'URL = "https://example.org/x"\n')
+    assert run(root) == []
+
+
+def test_script_listed_function_passes(tmp_path: Path) -> None:
+    root = _script_tree(
+        tmp_path,
+        """
+        from jigane.git import process
+
+        def run(args):
+            return process.run_command(["git", *args])
+        """,
+    )
+    checker = load_checker()
+    checker.VARIABLE_GIT_ARGV_ALLOWED[("scripts.tool", "run")] = checker.PassThrough("試験用")
+    assert checker.check_commands(root) == []
+
+
+def test_module_level_string_constant_name_counts_as_constant(tmp_path: Path) -> None:
+    root = _script_tree(
+        tmp_path,
+        """
+        from jigane.git import process
+
+        NAME = "stamp"
+
+        def f():
+            process.run_command(["git", "rev-parse", "--git-path", NAME])
+        """,
+    )
+    assert commands(root) == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        'NAME = "other"',
+        'NAME += "x"',
+        "NAME: str = 'x'",
+        "from os import path as NAME",
+        "def NAME(): pass",
+        "NAME, other = 'a', 'b'",
+    ],
+)
+def test_reassigned_name_is_not_a_constant(tmp_path: Path, extra: str) -> None:
+    root = _script_tree(
+        tmp_path,
+        f"""
+        from jigane.git import process
+
+        NAME = "stamp"
+        {extra}
+
+        def f():
+            process.run_command(["git", "rev-parse", "--git-path", NAME])
+        """,
+    )
+    assert len(commands(root)) == 1
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "def f(NAME):\n    process.run_command(['git', 'x', NAME])",
+        "def f(*, NAME):\n    process.run_command(['git', 'x', NAME])",
+        "def f(NAME, /):\n    process.run_command(['git', 'x', NAME])",
+        "def f(*NAME):\n    process.run_command(['git', 'x', NAME])",
+        "def f(**NAME):\n    process.run_command(['git', 'x', NAME])",
+        "g = lambda NAME: 0\n\ndef f():\n    process.run_command(['git', 'x', NAME])",
+        (
+            "def f():\n    try:\n        pass\n    except OSError as NAME:\n"
+            "        process.run_command(['git', 'x', NAME])"
+        ),
+        (
+            "def f(v):\n    match v:\n        case [1, *NAME]:\n"
+            "            process.run_command(['git', 'x', NAME])"
+        ),
+        (
+            "def f(v):\n    match v:\n        case 1 as NAME:\n"
+            "            process.run_command(['git', 'x', NAME])"
+        ),
+        (
+            "def f(v):\n    match v:\n        case {'k': 1, **NAME}:\n"
+            "            process.run_command(['git', 'x', NAME])"
+        ),
+    ],
+)
+def test_shadowing_binding_is_not_a_constant(tmp_path: Path, definition: str) -> None:
+    source = 'from jigane.git import process\n\nNAME = "stamp"\n\n' + definition + "\n"
+    root = _script_tree(tmp_path, source)
+    assert len(commands(root)) >= 1
+
+
+def test_non_string_or_function_local_name_is_not_a_constant(tmp_path: Path) -> None:
+    root = _script_tree(
+        tmp_path,
+        """
+        from jigane.git import process
+
+        COUNT = 3
+
+        def f():
+            local = "x"
+            process.run_command(["git", "show", COUNT])
+            process.run_command(["git", "show", local])
+        """,
+    )
+    assert len(commands(root)) == 2
+
+
+def _gh_launch(tmp_path: Path, argv: str, *, listed: bool = True) -> list[str]:
+    root = _script_tree(
+        tmp_path,
+        f"""
+        from jigane.git import process
+
+        def read_gh(endpoint):
+            return process.run_command({argv})
+        """,
+    )
+    checker = load_checker()
+    if listed:
+        checker.GH_ARGV_ALLOWED[("scripts.tool", "read_gh")] = checker.GhApiEndpointLast("試験用")
+    problems: list[str] = checker.check_commands(root)
+    return problems
+
+
+@pytest.mark.parametrize(
+    "argv",
+    ['["gh", "api", endpoint]', '["gh", "api", "--paginate", "--slurp", endpoint]'],
+)
+def test_listed_gh_api_launch_passes(tmp_path: Path, argv: str) -> None:
+    assert _gh_launch(tmp_path, argv) == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        '["gh", "api", "x"]',
+        '["gh", "pr", endpoint]',
+        '["gh", "api", make(endpoint)]',
+        '["gh", "api", f"repos/{endpoint}"]',
+        '["gh", "api", *endpoint]',
+        '["gh", endpoint]',
+    ],
+)
+def test_listed_gh_launch_fails_with_other_shape(tmp_path: Path, argv: str) -> None:
+    assert len(_gh_launch(tmp_path, argv)) == 1
+
+
+def test_unlisted_gh_launch_fails(tmp_path: Path) -> None:
+    assert len(_gh_launch(tmp_path, '["gh", "api", endpoint]', listed=False)) == 1
+
+
+def _invocation_tree(tmp_path: Path, argv_expression: str) -> Path:
+    root = make_tree(tmp_path, {})
+    (tmp_path / "jigane" / "git").mkdir()
+    (tmp_path / "jigane" / "git" / "invocation.py").write_text(
+        textwrap.dedent(
+            f"""
+            from jigane.git import process
+
+            def run_invocation(invocation, other):
+                return process.run_command({argv_expression})
+            """
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_run_invocation_launch_of_its_own_argv_passes(tmp_path: Path) -> None:
+    assert commands(_invocation_tree(tmp_path, "invocation.argv")) == []
+
+
+def test_run_invocation_launch_of_another_name_argv_fails(tmp_path: Path) -> None:
+    assert len(commands(_invocation_tree(tmp_path, "other.argv"))) == 1

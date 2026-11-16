@@ -1,7 +1,9 @@
 from collections.abc import Iterable
-from pathlib import PurePosixPath
 
-DOCUMENT_SUFFIXES = frozenset({".md", ".rst", ".txt"})
+from jigane.text.path_suffix import suffix_of
+
+MARKDOWN_SUFFIX = ".md"
+DOCUMENT_SUFFIXES = frozenset({MARKDOWN_SUFFIX, ".rst", ".txt"})
 
 DOCUMENT_ONLY_NOTICE = (
     "変更したファイル（削除を除く）がすべて文書です。方針の群は図と表だけを読み、ファイルの本文を読みません。"
@@ -10,7 +12,11 @@ DOCUMENT_ONLY_NOTICE = (
 
 
 def is_document_path(path: str) -> bool:
-    return PurePosixPath(path).suffix.lower() in DOCUMENT_SUFFIXES
+    return suffix_of(path) in DOCUMENT_SUFFIXES
+
+
+def is_markdown_path(path: str) -> bool:
+    return suffix_of(path) == MARKDOWN_SUFFIX
 
 
 def all_documents(paths: Iterable[str]) -> bool:

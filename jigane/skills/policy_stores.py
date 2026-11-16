@@ -1,4 +1,4 @@
-"""方針のレビューに渡す、保存物の書く側と読む側の表。鍵の抽出は言語の層（`StoreAccessReader`）が行う。
+"""方針のレビューに渡す、保存物の書く側と読む側の表。鍵の抽出は言語の層（`StoreAccessExtractor`）が行う。
 
 保存物は、JSON と CSV と TSV のファイルの名前の定数で束ねるか、
 `to_json` と `from_json` を持つ型で束ねる。
@@ -15,7 +15,7 @@ from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.languages import registry
 from jigane.languages.base import (
     PARAMETER_STORE_MARK,
-    StoreAccessReader,
+    StoreAccessExtractor,
     StoreFormat,
     StoreRole,
     StoreSide,
@@ -88,24 +88,25 @@ class _Store:
 def _collect(root: Path, paths: list[str], changed: set[str]) -> dict[str, _Store]:
     stores: dict[str, _Store] = {}
     touched: set[str] = set()
-    by_reader: dict[int, tuple[StoreAccessReader, dict[str, str]]] = {}
+    by_reader: dict[int, tuple[StoreAccessExtractor, dict[str, str]]] = {}
     for path in paths:
         adapter = registry.adapter_for(path)
         text = read_tree_text(root, path)
-        if not isinstance(adapter, StoreAccessReader) or text is None:
+        if not isinstance(adapter, StoreAccessExtractor) or text is None:
             continue
         by_reader.setdefault(id(adapter), (adapter, {}))[1][path] = text
     for reader_adapter, sources in by_reader.values():
         for access in reader_adapter.store_accesses(sources):
-            names = set(access.names)
-            if access.pair_owner is not None:
-                names.add(f"{access.pair_owner}{PAIR_LABEL}")
+            names = set(access.file_names)
+            if access.pair_owner_type_name is not None:
+                names.add(f"{access.pair_owner_type_name}{PAIR_LABEL}")
             if not names:
                 # ファイル名で束ねられない側は、鍵に使った語彙が相手側と同じときだけ束ねる
                 names = {
-                    f"{label} の{'列' if side.kind is StoreFormat.CSV else '鍵'}を持つ {side.kind}"
+                    f"{label} の{'列' if side.format is StoreFormat.CSV else '鍵'}"
+                    f"を持つ {side.format}"
                     for side in access.sides
-                    for label in side.labels
+                    for label in side.key_vocabulary_names
                 }
             for name in names:
                 store = stores.setdefault(name, _Store())
@@ -122,14 +123,16 @@ def _cell(
     if not sides:
         # 独自の形式は読み書きの相手を拾う手がかりが弱く、無いと言い切れない。
         # 引数で渡るファイルの相手は、呼ぶ側の引数の先にあり、この関数の名前からは辿れない
-        has_custom = any(s.kind is StoreFormat.CUSTOM for s in other)
+        has_custom = any(s.format is StoreFormat.CUSTOM for s in other)
         return UNIDENTIFIED if has_custom or by_parameter else NOT_FOUND
     parts = []
-    for side in sorted(sides, key=lambda s: (s.path, s.function)):
+    for side in sorted(sides, key=lambda s: (s.path, s.function_qualified_name)):
         detail = ", ".join(sorted(side.keys))
-        if with_types and side.types:
-            detail += f"（作る型: {', '.join(sorted(side.types))}）"
-        parts.append(f"{side.function}: {detail}" if detail else side.function)
+        if with_types and side.created_type_names:
+            detail += f"（作る型: {', '.join(sorted(side.created_type_names))}）"
+        parts.append(
+            f"{side.function_qualified_name}: {detail}" if detail else side.function_qualified_name
+        )
     return "; ".join(parts)
 
 
@@ -144,7 +147,7 @@ def store_table(review: Review) -> TableFigure | None:
     changed = {
         p
         for p, entry in files.items()
-        if entry.exists_after and isinstance(registry.adapter_for(p), StoreAccessReader)
+        if entry.exists_after and isinstance(registry.adapter_for(p), StoreAccessExtractor)
     }
     if not changed:
         return None
@@ -152,7 +155,7 @@ def store_table(review: Review) -> TableFigure | None:
     paths = [
         p
         for p in walk_tree_files(root, root)
-        if isinstance(registry.adapter_for(p), StoreAccessReader)
+        if isinstance(registry.adapter_for(p), StoreAccessExtractor)
         and not registry.is_test_path(p, adapters)
     ]
     rows = []
@@ -177,7 +180,7 @@ def store_table(review: Review) -> TableFigure | None:
                     ),
                     ", ".join(sorted(written - read)) if store.readers else "",
                     ", ".join(sorted(read - written)) if store.writers else "",
-                    "、".join(sorted({s.kind for s in [*store.writers, *store.readers]})),
+                    "、".join(sorted({s.format for s in [*store.writers, *store.readers]})),
                 ),
                 RowChange.UNCHANGED,
             )

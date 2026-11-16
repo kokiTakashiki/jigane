@@ -10,7 +10,6 @@ commands = ["ruff"]
 # 非公開の作業
 [[task]]
 name = "export-public"
-omit_from_public_copy = true
 description = "写しを作る"
 commands = ["python scripts/export_public.py"]
 

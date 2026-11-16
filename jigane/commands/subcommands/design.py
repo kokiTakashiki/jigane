@@ -20,7 +20,6 @@ from jigane.design.recommend import (
     CandidateKind,
     Found,
     Location,
-    LocationKind,
     Match,
     NamedReason,
     NotFound,
@@ -34,6 +33,7 @@ from jigane.design.review_documents import attachment_candidates
 from jigane.design.submodule_notes import submodule_lines
 from jigane.design.submodule_status import SubmoduleNote
 from jigane.git import repository
+from jigane.languages.kinds import LocationKind
 
 _NUMBERED_TITLE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
 _VIA_PHRASE = {

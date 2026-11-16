@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from listing_support import listing_warnings
 from pr_support import URL
 
 from jigane.commands import main
@@ -105,15 +106,31 @@ def test_load_stops_when_the_slot_kind_differs_from_the_stored_source(
 
 
 @pytest.mark.usefixtures("pr")
-def test_list_skips_a_mismatched_record_and_warns() -> None:
+def test_list_skips_a_mismatched_record_and_warns(caplog: pytest.LogCaptureFixture) -> None:
     pull_request = create_pull_request_review(URL).id
     bad = ReviewId(pull_request.owner, pull_request.repo, "9", ReviewKind.PULL_REQUEST)
     _relocate(pull_request, bad, _drop_pull_request)
-    with pytest.warns(UserWarning, match=str(bad)):
-        listed = list_reviews()
+    listed = list_reviews()
     assert [review.id for review in listed] == [pull_request]
+    assert any(f"一覧から除きました: {bad}: " in text for text in listing_warnings(caplog))
     with pytest.raises(ReviewError):
         load_review(check_review_id(bad))
+
+
+@pytest.mark.usefixtures("pr")
+def test_list_command_prints_the_skipped_record_as_one_warning_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pull_request = create_pull_request_review(URL).id
+    bad = ReviewId(pull_request.owner, pull_request.repo, "9", ReviewKind.PULL_REQUEST)
+    _relocate(pull_request, bad, _drop_pull_request)
+    capsys.readouterr()
+    assert main(["list"]) == EXIT_OK
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith(f"警告: 一覧から除きました: {bad}: ")
+    assert "UserWarning" not in lines[0]
+    assert "catalog.py" not in lines[0]
 
 
 @pytest.mark.usefixtures("pr")

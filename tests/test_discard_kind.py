@@ -3,10 +3,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from review_fakes import history_rounds, stored_finding
+from review_fakes import current_form_findings, stored_finding
 from shard_prompt_support import shard_prompt
 
-from jigane.findings import discard
 from jigane.findings.discard import (
     DiscardedCandidate,
     DiscardKind,
@@ -26,14 +25,11 @@ from jigane.findings.discard import (
     nit_reason_of_claim,
 )
 from jigane.findings.records import (
-    HISTORY_FILE,
     TriagedFinding,
     concerns_section,
     fill_triage,
     load_findings_state,
     passed_concerns,
-    read_stored_state,
-    save_findings_state,
 )
 from jigane.groups.definitions import MACRO, MICRO, GroupId
 from jigane.llm_runs.finding_model import Finding
@@ -43,8 +39,6 @@ from jigane.skills.assembly import AssemblyInput
 from jigane.skills.macro import discarded_as_nits
 
 UNVERIFIABLE = DiscardKind.UNVERIFIABLE_FROM_DIAGRAM
-# 古い結果が主張の末尾に添えていた一文。移行の検査で、古い形を作るために使う
-HANDOFF_NOTE = "方針では確かめられない。実装のレビューで確かめる。"
 
 
 def reason_of(reason: str, kind: DiscardKind) -> NitReason:
@@ -102,7 +96,10 @@ REPRESENTATIVES = [
         DiscardKind.DECIDED_BY_DECLARATION,
     ),
     (
-        "MarkupBindingAdapter の置き方は、宣言の「XAML の読み取りは C# の側に置く」と一致する。",
+        (
+            "MarkupEventHandlerExtractor の置き方は、"
+            "宣言の「XAML の読み取りは C# の側に置く」と一致する。"
+        ),
         DiscardKind.DECIDED_BY_DECLARATION,
     ),
     (
@@ -503,71 +500,16 @@ def test_nit_reason_round_trips_through_json() -> None:
 
 def test_nit_reason_reads_only_the_current_form() -> None:
     assert _plain("x").finding.nit_reason is None
-    # 捨てた候補でない指摘の古い欄は、read_findings_json の移しの対象外で読み替えない
+    # 捨てた候補でない指摘の古い欄は、読み替えない
     legacy = stored_finding({"id": "F1", "claim": "A", "discard_kind": "other"})
     assert legacy.body.nit_reason is None
 
 
 def _write_findings(directory: Path, findings: list[dict[str, Any]]) -> None:
     raw = {"last_number": 0, "groups": {"macro": findings}}
-    (directory / "findings.json").write_text(json.dumps(raw), encoding="utf-8")
-
-
-def test_load_findings_state_migrates_the_legacy_nit_form(tmp_path: Path) -> None:
-    legacy_with_concern = {
-        **_NIT_BASE,
-        "id": "F1",
-        "claim": "A が懸念である。" + HANDOFF_NOTE,
-        "discard_kind": UNVERIFIABLE.value,
-        "concern": "A が懸念である。",
-    }
-    legacy_without_concern = {
-        **_NIT_BASE,
-        "id": "F2",
-        "claim": "局所の整理で手戻りが小さい。",
-        "discard_kind": DiscardKind.NOT_A_CONTRACT.value,
-    }
-    oldest = {**_NIT_BASE, "id": "F3", "claim": "種類の無い。" + HANDOFF_NOTE}
-    _write_findings(tmp_path, [legacy_with_concern, legacy_without_concern, oldest])
-    loaded = {
-        f.finding.id: f.finding for f in load_findings_state(tmp_path).groups[GroupId("macro")]
-    }
-
-    first = loaded["F1"]
-    assert "discard_kind" not in first.extra
-    assert "concern" not in first.extra
-    reason = first.nit_reason
-    concern = ExtractedConcern("A が懸念である。")
-    assert reason == OrdinaryNitReason(UNVERIFIABLE, "A が懸念である。", concern)
-    assert first.claim == reason.claim == "A が懸念である。"
-    second = loaded["F2"].nit_reason
-    expected = OrdinaryNitReason(
-        DiscardKind.NOT_A_CONTRACT, "局所の整理で手戻りが小さい。", NoConcern()
+    (directory / "findings.json").write_text(
+        json.dumps(current_form_findings(raw)), encoding="utf-8"
     )
-    assert second == expected
-    assert loaded["F2"].claim == "局所の整理で手戻りが小さい。"
-    # 種類を持たない最も古い形は、添え文を外すだけで nit_reason を作らない
-    assert loaded["F3"].nit_reason is None
-    assert loaded["F3"].claim == "種類の無い。"
-
-
-def test_legacy_nit_is_read_by_the_rule_of_its_version_not_the_current_table(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    facts = discard.DISCARD_KIND_FACTS
-    monkeypatch.setitem(
-        facts, DiscardKind.SETTLED_EARLIER, discard.KindFacts("前の回で決着", becomes_nit=True)
-    )
-    settled = {**_NIT_BASE, "id": "F2", "claim": "B。", "discard_kind": "settled_earlier"}
-    stored = {**_NIT_BASE, "id": "F3", "claim": "C。"}
-    stored["nit_reason"] = _nit("C。", UNVERIFIABLE, "C。").to_json()
-    stored["nit_reason"]["kind"] = "settled_earlier"
-    _write_findings(tmp_path, [settled, stored])
-    loaded = {
-        f.finding.id: f.finding for f in load_findings_state(tmp_path).groups[GroupId("macro")]
-    }
-    assert loaded["F2"].nit_reason is None
-    assert loaded["F3"].nit_reason is None
 
 
 def test_migration_is_idempotent_on_the_current_form(tmp_path: Path) -> None:
@@ -584,68 +526,6 @@ def test_finding_schema_has_no_legacy_nit_fields() -> None:
     assert "nit_reason" in properties
     assert "discard_kind" not in properties
     assert "concern" not in properties
-
-
-def test_saving_the_state_drops_the_legacy_nit_fields(tmp_path: Path) -> None:
-    legacy = {
-        **_NIT_BASE,
-        "id": "F1",
-        "claim": "A が懸念である。" + HANDOFF_NOTE,
-        "discard_kind": UNVERIFIABLE.value,
-        "concern": "A が懸念である。",
-    }
-    _write_findings(tmp_path, [legacy])
-    # 読み直した保存物をそのまま書き戻す書き手の道
-    save_findings_state(tmp_path, read_stored_state(tmp_path))
-    stored = json.loads((tmp_path / "findings.json").read_text(encoding="utf-8"))
-    saved = stored["groups"]["macro"][0]
-    assert "discard_kind" not in saved
-    assert "concern" not in saved
-    expected = OrdinaryNitReason(
-        UNVERIFIABLE, "A が懸念である。", ExtractedConcern("A が懸念である。")
-    )
-    assert stored_finding(saved).body.nit_reason == expected
-
-
-def test_history_read_migrates_the_legacy_nit_form(tmp_path: Path) -> None:
-    legacy = {
-        **_NIT_BASE,
-        "id": "F1",
-        "claim": "A が懸念である。" + HANDOFF_NOTE,
-        "discard_kind": UNVERIFIABLE.value,
-        "concern": "A が懸念である。",
-    }
-    raw = {"groups": {"macro": [{"ran_at": None, "findings": [legacy]}]}}
-    (tmp_path / HISTORY_FILE).write_text(json.dumps(raw), encoding="utf-8")
-    [round_] = history_rounds(tmp_path, "macro")  # type: ignore[arg-type]
-    [stored] = round_.findings
-    assert "discard_kind" not in stored.to_json()
-    expected = OrdinaryNitReason(
-        UNVERIFIABLE, "A が懸念である。", ExtractedConcern("A が懸念である。")
-    )
-    assert stored.body.nit_reason == expected
-
-
-def test_history_read_keeps_a_legacy_nit_of_an_unknown_kind_and_other_findings(
-    tmp_path: Path,
-) -> None:
-    unknown = {**_NIT_BASE, "id": "F1", "claim": "A。" + HANDOFF_NOTE, "discard_kind": "gone"}
-    # 捨てた候補でない指摘は、古い欄の名前を持っていても触らない
-    other = {
-        "id": "F2",
-        "severity": "warning",
-        "viewpoint": "M2",
-        "claim": "B。" + HANDOFF_NOTE,
-        "discard_kind": "gone",
-    }
-    raw = {"groups": {"macro": [{"ran_at": None, "findings": [unknown, other]}]}}
-    (tmp_path / HISTORY_FILE).write_text(json.dumps(raw), encoding="utf-8")
-    [round_] = history_rounds(tmp_path, "macro")  # type: ignore[arg-type]
-    first, second = round_.findings
-    assert first.body.claim == "A。"
-    assert "discard_kind" not in first.to_json()
-    assert first.body.nit_reason is None
-    assert second.to_json()["discard_kind"] == "gone"
 
 
 def test_passed_concerns_selects_once_and_counts_unspecified() -> None:

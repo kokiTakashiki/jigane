@@ -297,3 +297,15 @@ def test_declarations_skip_a_protocol_function_without_func_keyword() -> None:
     # 構文エラーで func を欠いた protocol_function_declaration があっても、読み取りを続ける
     found = declarations("protocol P { func p(x: Int{ }\n")
     assert {"P", "P.p(x:)"} <= set(found)
+
+
+def test_declarations_continue_after_a_broken_top_level_function() -> None:
+    # 名前の節点を欠く function_declaration は、この入力の幅では tree-sitter が作らない。
+    # 作られる壊れ方でも、後ろの宣言を読み続けることを固定する
+    found = declarations("func {}\nfunc after() {}\n")
+    assert "after()" in found
+
+
+def test_declarations_continue_after_a_broken_member_function() -> None:
+    found = declarations("struct S { func (a: Int) {} func after() {} }\n")
+    assert {"S", "S.after()"} <= set(found)

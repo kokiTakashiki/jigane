@@ -16,16 +16,18 @@ from jigane.languages import (
     type_names,
 )
 from jigane.languages.base import (
-    Argument,
+    AddedPublicName,
     BodyBounds,
+    CallArgument,
     CallParts,
     CallSite,
     ConcurrencyStep,
     Declaration,
     DeclarationKind,
     DeferredSite,
-    FilePathPattern,
-    Import,
+    FilePathExpression,
+    FlowStep,
+    ImportedModule,
     Isolation,
     IsolationContext,
     Locals,
@@ -33,18 +35,18 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
-    PublicName,
     ReceiverKind,
-    RegexScan,
+    RegexSites,
     Sharing,
-    Step,
     StoreAccess,
-    StringComparison,
+    StringLiteralComparison,
+    StringLiteralSet,
     TypeDecl,
-    TypeFields,
+    TypeFieldNames,
     TypeKind,
     TypeScope,
-    ValueSet,
+    UnsupportedSyntax,
+    UnsupportedSyntaxKind,
     Visibility,
     import_nodes,
     leading_components,
@@ -54,7 +56,11 @@ from jigane.languages.base import (
 from jigane.languages.calls_core import Captures
 from jigane.languages.node_text import text_of
 from jigane.languages.queries import load_queries
-from jigane.languages.swift_nodes import TYPE_DECLARATIONS, function_name_of
+from jigane.languages.swift_nodes import (
+    TYPE_DECLARATIONS,
+    function_name_of,
+    operator_function_nodes,
+)
 from jigane.preconditions.required import required
 
 _ASSIGNMENT_MIN_PARTS = 2  # 「=」と初期値
@@ -90,7 +96,9 @@ def _parameter_label(parameter: Node) -> str:
     if external is not None:
         return text_of(external)
     # parameter は simple_identifier を必ず持つ（欠ければ tree-sitter が MISSING の節点で補う）
-    return text_of(next(c for c in parameter.children if c.type == "simple_identifier"))
+    return text_of(
+        required(next((c for c in parameter.children if c.type == "simple_identifier"), None))
+    )
 
 
 def _parameters(node: Node) -> list[Node]:
@@ -177,11 +185,11 @@ def _label_text(label: Node | None) -> str | None:
     return text_of(label).rstrip(":").strip() if label is not None else None
 
 
-def _arguments(suffix: Node | None) -> tuple[Argument, ...]:
+def _arguments(suffix: Node | None) -> tuple[CallArgument, ...]:
     """call_suffix の引数。末尾のクロージャは、ラベルがあればそれを名前にして、最後に並べる。"""
     if suffix is None:
         return ()
-    result: list[Argument] = []
+    result: list[CallArgument] = []
     pending: str | None = None
     for child in suffix.children:
         if child.type == "value_arguments":
@@ -189,12 +197,12 @@ def _arguments(suffix: Node | None) -> tuple[Argument, ...]:
                 value = argument.child_by_field_name("value")
                 if argument.type == "value_argument" and value is not None:
                     result.append(
-                        Argument(value, _label_text(argument.child_by_field_name("name")))
+                        CallArgument(value, _label_text(argument.child_by_field_name("name")))
                     )
         elif child.type == "simple_identifier":
             pending = text_of(child)
         elif child.type == "lambda_literal":
-            result.append(Argument(child, pending))
+            result.append(CallArgument(child, pending))
             pending = None
     return tuple(result)
 
@@ -247,7 +255,7 @@ def _call_site(captures: Captures) -> CallSite | None:
             None,
             arguments,
             is_creation=True,
-            end=node.end_byte,
+            end_byte=node.end_byte,
             line=callee.start_point.row + 1,
         )
     name = text_of(callee)
@@ -388,7 +396,7 @@ class _SwiftRules(calls_core.RuleDefaults):
     def call_parts(self, call: Node) -> CallParts:
         return _call_parts(call)
 
-    def arguments(self, node: Node) -> tuple[Argument, ...]:
+    def arguments(self, node: Node) -> tuple[CallArgument, ...]:
         return _arguments(next((c for c in node.children if c.type == "constructor_suffix"), None))
 
     def function_name(self, node: Node) -> str | None:
@@ -460,6 +468,13 @@ def _for_variables(node: Node) -> list[LocalVariable]:
 _RULES = _SwiftRules()
 
 
+_OPERATOR_FUNCTION = UnsupportedSyntaxKind(
+    "operator_function",
+    "名前を取れない演算子関数（Swift）",
+    "演算子関数の中身を名前のある関数に移し、演算子からその関数を呼んでください。",
+)
+
+
 class SwiftAdapter:
     name = "swift"
     grammar = "swift"
@@ -492,17 +507,23 @@ class SwiftAdapter:
         # 無名クラスを型の名前で持たない言語
         return None
 
-    def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
-        found: list[Import] = []
+    def imported_modules(self, root_node: Node, _source: bytes, /) -> list[ImportedModule]:
+        found: list[ImportedModule] = []
         for node in import_nodes(self, root_node):
             module = next((c for c in node.children if c.type == "identifier"), None)
             if module is not None:
-                found.append(Import(text_of(module), module.start_point.row + 1))
+                found.append(ImportedModule(text_of(module), module.start_point.row + 1))
         return found
 
-    def technology_of(self, module: str) -> str:
+    def technology_name_of(self, module: str) -> str:
         # import struct Foo.Bar は Foo モジュールの Bar を取り込むので、最上位の名前で束ねる
         return leading_components(module, 1)
+
+    def unsupported_syntax(self, root_node: Node, _source: bytes, /) -> list[UnsupportedSyntax]:
+        return [
+            UnsupportedSyntax(_OPERATOR_FUNCTION, node.start_point.row + 1)
+            for node in operator_function_nodes(root_node)
+        ]
 
     def declarations(self, root_node: Node, _source: bytes, /) -> list[Declaration]:
         result: list[Declaration] = []
@@ -545,6 +566,9 @@ class SwiftAdapter:
             name = self.function_declaration_name(statement)
             if name is None:
                 # 構文エラーで func か名前を欠いた宣言は、残りの宣言の処理を続けるために飛ばす
+                # 試した構文エラーの入力（14 種の断片、長さ 1〜4、3 つの外枠）では
+                # 到達できなかった。
+                # 文法の版で名前を欠く節が出たときにレビュー全体を止めないために残す。
                 return
             self._add(
                 result,
@@ -721,7 +745,9 @@ class SwiftAdapter:
             )
         )
 
-    def imported_names(self, _root_node: Node, _source: bytes, _path: str, /) -> dict[str, str]:
+    def imported_name_origins(
+        self, _root_node: Node, _source: bytes, _path: str, /
+    ) -> dict[str, str]:
         # import は名前を束縛しないので、受け手の無い名前の解決に使う表は持たない
         return {}
 
@@ -732,7 +758,7 @@ class SwiftAdapter:
         self._collect_types(root_node, "", path, result)
         return result
 
-    def body_of(self, member_node: Node) -> Node | None:
+    def body_node_of(self, member_node: Node) -> Node | None:
         if member_node.type in ("property_declaration", "protocol_property_declaration"):
             computed = self._computed(member_node)
             if computed is None:
@@ -744,12 +770,12 @@ class SwiftAdapter:
             return computed if any(c.type == "statements" for c in computed.children) else None
         return member_node.child_by_field_name("body")
 
-    def file_path_patterns(
+    def file_path_expressions(
         self, root_node: Node, _source: bytes, path: str, /
-    ) -> list[FilePathPattern]:
-        return swift_file_paths.file_path_patterns(root_node, path)
+    ) -> list[FilePathExpression]:
+        return swift_file_paths.file_path_expressions(root_node, path)
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+    def discriminator_flow_steps(self, body_node: Node, _source: bytes, /) -> list[FlowStep]:
         return swift_discriminators.discriminator_steps(body_node)
 
     def call_sites(self, body_node: Node, _source: bytes, /) -> list[CallSite | DeferredSite]:
@@ -765,7 +791,7 @@ class SwiftAdapter:
                 flattened.extend(site.calls)
             else:
                 flattened.append(site)
-        return sorted(flattened, key=lambda s: s.end)
+        return sorted(flattened, key=lambda s: s.end_byte)
 
     def isolation_of(
         self, declaration_node: Node, _source: bytes, context: IsolationContext, /
@@ -791,10 +817,10 @@ class SwiftAdapter:
     def sharing_of(self, type_name: str, context: IsolationContext) -> Sharing:
         return swift_concurrency.sharing_of(type_name, context)
 
-    def receiver_of(self, expression: Node) -> ReceiverKind:
+    def receiver_kind_of(self, expression: Node) -> ReceiverKind:
         return calls_core.receiver_of(expression, _RULES)
 
-    def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
+    def regex_sites(self, root_node: Node, _source: bytes, path: str, /) -> RegexSites:
         return swift_regex.regex_scan(root_node, path)
 
     def store_accesses(self, sources: Mapping[str, str], /) -> list[StoreAccess]:
@@ -802,10 +828,10 @@ class SwiftAdapter:
             sources, lambda source: parse(self, source.encode()).root_node
         )
 
-    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+    def string_literal_sets(self, source: str, path: str, /) -> list[StringLiteralSet]:
         return swift_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
 
-    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+    def type_field_names(self, text: str, path: str, /) -> list[TypeFieldNames]:
         return swift_type_fields.type_fields_of(parse(self, text.encode()).root_node, path)
 
     def added_public_names(
@@ -814,12 +840,14 @@ class SwiftAdapter:
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         return swift_public_names.added_public_names_of(
             lambda source: parse(self, source.encode()).root_node, before, after, changed
         )
 
-    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+    def string_literal_comparisons(
+        self, source: str, path: str, /
+    ) -> list[StringLiteralComparison]:
         return swift_string_comparisons.string_comparisons_of(
             parse(self, source.encode()).root_node, path
         )
@@ -874,6 +902,9 @@ class SwiftAdapter:
             name = self.function_declaration_name(node)
             if name is None:
                 # 構文エラーで func か名前を欠いた宣言は、残りの宣言の処理を続けるために飛ばす
+                # 試した構文エラーの入力（14 種の断片、長さ 1〜4、3 つの外枠）では
+                # 到達できなかった。
+                # 文法の版で名前を欠く節が出たときにレビュー全体を止めないために残す。
                 return
             result.append(
                 MemberDecl(
@@ -884,7 +915,7 @@ class SwiftAdapter:
                     _parameter_declarations(node),
                     line,
                     node,
-                    self.body_of(node),
+                    self.body_node_of(node),
                     _selector(name, node),
                 )
             )
@@ -899,7 +930,7 @@ class SwiftAdapter:
                     _parameter_declarations(node),
                     line,
                     node,
-                    self.body_of(node),
+                    self.body_node_of(node),
                     _selector("init", node),
                 )
             )
@@ -909,7 +940,7 @@ class SwiftAdapter:
                 node.type == "protocol_property_declaration" or self._computed(node) is not None
             )
             member_kind: MemberKind = "property" if is_property else "field"
-            body = self.body_of(node)
+            body = self.body_node_of(node)
             result.extend(
                 MemberDecl(
                     owner, text_of(identifier), member_kind, annotation, (), line, node, body

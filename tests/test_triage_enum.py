@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from review_fakes import stored_finding
+from review_fakes import current_form_findings, stored_finding
 from triage_support import assigned, decided
 
 import jigane
@@ -23,7 +23,6 @@ from jigane.findings.records import (
     load_findings_state,
     triage_of,
     triage_sort_key,
-    triaged_dicts,
 )
 from jigane.groups.definitions import GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
 
@@ -78,7 +77,7 @@ def test_unknown_triage_is_read_as_none_with_a_warning(
         "groups": {"macro": [finding]},
         "themes": [{"id": "T1", "triage": "bogus2"}],
     }
-    (tmp_path / _STORE_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / _STORE_FILE).write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
     # 標準エラーへ出るのは CLI の入口が handler を付けた後だけなので、logging の記録で受ける
     with caplog.at_level("WARNING", logger="jigane.findings.records"):
         loaded = load_findings_state(tmp_path)
@@ -100,7 +99,7 @@ def test_groups_per_triage() -> None:
     ("value", "expected"),
     [
         ("must_read", Triage.MUST_READ),
-        ("deferred", Triage.REMAINING),
+        ("deferred", None),
         ("out_of_scope", Triage.OUT_OF_SCOPE),
         ("unknown", None),
         ("", None),
@@ -276,7 +275,7 @@ def _load(
     tmp_path: Path, findings: list[dict[str, object]], theme: dict[str, object]
 ) -> FilledFindings:
     state = {"last_number": 2, "groups": {"micro": findings}, "themes": [theme]}
-    (tmp_path / _STORE_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / _STORE_FILE).write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
     return load_findings_state(tmp_path)
 
 
@@ -286,18 +285,6 @@ def test_theme_triage_is_derived_from_its_findings_not_the_stored_copy(tmp_path:
         [_finding(1, triage="remaining"), _finding(2, triage="remaining")],
         {"id": "B1", "finding_ids": ["F1", "F2"], "triage": "must_read"},
     )
-    assert loaded.themes[0].triage is Triage.REMAINING
-
-
-def test_theme_only_triage_in_old_file_moves_to_findings_and_agrees(tmp_path: Path) -> None:
-    loaded = _load(
-        tmp_path,
-        [_finding(1), _finding(2)],
-        {"id": "B1", "finding_ids": ["F1", "F2"], "triage": "remaining"},
-    )
-    assert [f["triage"] for f in triaged_dicts(loaded.groups[GroupId("micro")])] == [
-        Triage.REMAINING
-    ] * 2
     assert loaded.themes[0].triage is Triage.REMAINING
 
 
@@ -427,7 +414,7 @@ def test_unknown_triage_warning_goes_through_logging(
 ) -> None:
     finding = {"id": "F1", "triage": "bogus", "severity": "warning", "adjudication": None}
     state = {"last_number": 1, "groups": {"macro": [finding]}}
-    (tmp_path / _STORE_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / _STORE_FILE).write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
     with caplog.at_level("WARNING", logger="jigane.findings.records"):
         load_findings_state(tmp_path)
     assert any("bogus" in record.getMessage() for record in caplog.records)

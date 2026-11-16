@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from fakes import RECORD_ROW, MacroFailure, MacroFake, discovered, settings_for
 from pr_support import commit_all
+from runs_support import write_runs_json
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -192,9 +193,8 @@ def test_design_no_material_run_records_the_design_shape(repo: Path) -> None:
 
 def test_design_estimate_takes_past_run_only_from_the_design_shape(repo: Path) -> None:
     review = create_design_doc_review(repo, DOCUMENT_PATH)
-    path = review.id.directory() / "runs.json"
     diagram_run = {"macro": {"model": "m", "shape": "diagram", "invocations": [RECORD_ROW]}}
-    path.write_text(json.dumps(diagram_run), encoding="utf-8")
+    write_runs_json(review.id.directory(), diagram_run)
     assert macro.estimate_macro(AssemblyInput.load(review)).to_record()["past_run"] is None
     _run(review, MacroFake([_on_document()]))
     estimate = macro.estimate_macro(AssemblyInput.load(review)).to_record()

@@ -23,10 +23,16 @@ from jigane.design.division import (
     section_marks,
     viewpoints_text,
 )
+from jigane.design.mermaid import UnreadableLine
 from jigane.design.parse import Section, parse_design
-from jigane.groups.definitions import GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
+from jigane.groups.definitions import GROUP_BY_ID, GROUP_IDS, MACRO, MICRO, SECURITY, GroupId
 from jigane.judgment_map.kinds import SectionKind
 from jigane.policy_materials.design_doc import design_materials
+from jigane.policy_materials.design_doc_structure import (
+    NO_STRUCTURE_TEXT,
+    is_structure_empty,
+    structure_text,
+)
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import adversarial, macro, macro_shared
 from jigane.skills.assembly import AssemblyInput
@@ -102,6 +108,38 @@ def test_structure_text_carries_the_marks(tmp_path: Path) -> None:
     lines = {line.strip(): line for line in materials.structure.splitlines()}
     assert any("6. 実装計画" in line and "印 実装" in line for line in lines)
     assert any("1. 序論" in line and "印 方針" in line for line in lines)
+
+
+def test_structure_text_prints_only_the_marks_it_is_given() -> None:
+    document = parse_design("## 1. 序論\n")
+    marks = dict.fromkeys(document.sections, MACRO)
+    text = structure_text(document, marks, ())
+    assert f"印 {GROUP_BY_ID[MACRO].label}" in text
+    empty = parse_design("")
+    assert structure_text(empty, {}, ()) == NO_STRUCTURE_TEXT
+
+
+def test_structure_text_lists_unreadable_lines_alone() -> None:
+    empty = parse_design("")
+    unreadable = (UnreadableLine(line_number=7, text="???"),)
+    assert not is_structure_empty(empty, unreadable)
+    text = structure_text(empty, {}, unreadable)
+    assert text != NO_STRUCTURE_TEXT
+    assert "読めなかった箇所:" in text
+    assert "- 7 行: " in text
+    assert is_structure_empty(empty, ())
+
+
+def test_structure_text_lists_diagrams_and_tables() -> None:
+    document = parse_design(
+        "```mermaid\nflowchart TD\n  A --> B\n```\n\n| 列1 | 列2 |\n| --- | --- |\n| a | b |\n"
+    )
+    text = structure_text(document, {}, ())
+    assert "Mermaid の図:" in text
+    assert "flowchart: 節点 2 個、辺 1 本" in text
+    assert "表:" in text
+    assert "列 2（列1、列2）、行 1" in text
+    assert not is_structure_empty(document, ())
 
 
 def _word_literals(source: str, words: set[str]) -> list[str]:

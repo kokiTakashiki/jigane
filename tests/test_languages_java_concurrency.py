@@ -73,7 +73,7 @@ def isolation(code: str, name: str, *others: str) -> Isolation:
 def steps(code: str, enclosing: Isolation | None = None) -> list[ConcurrencyStep]:
     source = f"class C {{\n void F() {{\n{code}\n}}\n}}\n".encode()
     root = parse(adapter, source).root_node
-    body = adapter.body_of(find(root, "F"))
+    body = adapter.body_node_of(find(root, "F"))
     assert body is not None
     return adapter.concurrency_steps(body, source, enclosing or NonisolatedDomain())
 

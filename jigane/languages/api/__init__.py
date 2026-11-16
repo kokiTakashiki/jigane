@@ -12,7 +12,6 @@ from jigane.languages.base import (
     split_declaration,
 )
 from jigane.languages.plugin import (
-    PLUGIN_API_VERSION,
     ApiVersion,
     Builtin,
     Distribution,
@@ -22,7 +21,6 @@ from jigane.languages.plugin import (
 )
 
 __all__ = [
-    "PLUGIN_API_VERSION",
     "ApiVersion",
     "BodyBounds",
     "Builtin",

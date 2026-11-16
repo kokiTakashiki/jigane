@@ -4,7 +4,7 @@ from pydantic import BaseModel, JsonValue
 
 
 def json_schema_of(model: type[BaseModel]) -> dict[str, JsonValue]:
-    """claude の `--json-schema` へ渡すスキーマ。title は除き、$ref は展開する。"""
+    """claude の `--json-schema` へ渡すスキーマ。title と discriminator は除き、$ref は展開する"""
     schema = model.model_json_schema()
     definitions = schema.pop("$defs", {})
     return _object_without_titles(_object_with_references(schema, definitions))
@@ -42,8 +42,14 @@ def _object_without_titles(node: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {
         key: _without_titles(value)
         for key, value in node.items()
-        if not (key == "title" and isinstance(value, str))
+        if not (key == "title" and isinstance(value, str)) and not _is_discriminator(key, value)
     }
+
+
+def _is_discriminator(key: str, value: JsonValue) -> bool:
+    # 区別付き合併が添える OpenAPI 拡張は claude の --json-schema が受け付けない。
+    # discriminator という名の項目の定義は propertyName を持たないので区別できる
+    return key == "discriminator" and isinstance(value, dict) and "propertyName" in value
 
 
 def _without_titles(node: JsonValue) -> JsonValue:

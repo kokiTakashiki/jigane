@@ -15,6 +15,7 @@ from jigane.llm_runs.cost import Measured
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import run_record
 from jigane.storage.review_error import ReviewError
+from jigane.storage.store_format import OlderFormatError
 
 
 @pytest.fixture
@@ -59,6 +60,7 @@ def test_completed_invocation_costs_are_attached(review: Review) -> None:
         is_error=False,
         terminal_reason=None,
         permission_denials=0,
+        started_at="2026-11-01T00:00:00+00:00",
         max_budget_usd=0.5,
     )
     tracked_settings = settings(lambda _: claude.InvocationResult(None, record))
@@ -108,7 +110,9 @@ def test_undeterminable_process_keeps_its_record_without_stopping_it(
         "pid": dead_pid(),
     }
     path = directory / IN_PROGRESS_FILE
-    path.write_text(json.dumps({"macro": started}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"format": run_record.IN_PROGRESS_FORMAT, "macro": started}), encoding="utf-8"
+    )
     monkeypatch.setattr(
         run_record, "process_presence", lambda _pid: run_record.ProcessPresence.UNKNOWN
     )
@@ -129,32 +133,6 @@ def test_stopped_at_is_none_only_for_vanished() -> None:
             run_record.StoppedRun(kind=kind, stopped_at=None, **kwargs)
     with pytest.raises(ValueError, match="vanished"):
         run_record.StoppedRun(kind=run_record.StopKind.VANISHED, stopped_at="t", **kwargs)
-
-
-def test_old_shape_stopped_runs_are_read(review: Review) -> None:
-    directory = review.id.directory()
-    base = {
-        "started_at": "2026-10-20T10:00:00+00:00",
-        "model": "m",
-        "effort": None,
-        "max_budget_usd": 1.0,
-        "pid": 7,
-        "cost_usd": None,
-        "completed_invocation_costs": [0.5],
-        "completed_cost_usd": 0.5,
-    }
-    old = [
-        {**base, "stopped_at": "2026-10-20T10:05:00+00:00"},
-        {**base, "stopped_at": None, "completed_invocation_costs": [], "completed_cost_usd": None},
-    ]
-    (directory / run_record.STOPPED_FILE).write_text(json.dumps({"macro": old}), encoding="utf-8")
-    view = run_record.stopped_view(directory, MACRO)
-    assert [run.kind for run in view.stopped_runs] == [
-        run_record.StopKind.INTERRUPT,
-        run_record.StopKind.VANISHED,
-    ]
-    assert view.stopped_runs[0].completed_cost_usd == 0.5
-    assert view.to_json()["stopped_runs"][0]["kind"] == "interrupt"
 
 
 def test_interrupted_cli_run_shows_up_in_show(
@@ -189,35 +167,32 @@ V1_START = {
 }
 
 
-def test_in_progress_v1_upgrades_to_current_keys() -> None:
-    old = {"macro": {"group": "macro", **V1_START, "cost_usd": None}}
-    loaded = run_record.load_in_progress(old)
-    dumped = run_record.dump_in_progress(loaded)
-    assert dumped["format"] == run_record.IN_PROGRESS_FORMAT
-    assert set(dumped["macro"]) == {"group", *V1_START}
+def _older_stored() -> list[tuple[Callable[[Mapping[str, Any]], object], dict[str, Any]]]:
+    return [
+        (run_record.load_in_progress, {"macro": {"group": "macro", **V1_START, "cost_usd": None}}),
+        (run_record.load_in_progress, {"format": 1, "macro": {"group": "macro", **V1_START}}),
+        (run_record.load_stopped, {"macro": []}),
+        (run_record.load_stopped, {"format": 1, "macro": []}),
+        (run_record.load_stopped, {"format": 2, "macro": []}),
+    ]
 
 
-def test_stopped_v1_upgrades_to_current_keys() -> None:
-    old = {
-        "macro": [
-            {
-                **V1_START,
-                "stopped_at": "2026-10-20T10:05:00+00:00",
-                "cost_usd": None,
-                "completed_invocation_costs": [0.5],
-                "completed_cost_usd": 0.5,
-            }
-        ]
-    }
-    dumped = run_record.dump_stopped(run_record.load_stopped(old))
-    assert dumped["format"] == run_record.STOPPED_FORMAT
-    assert set(dumped["macro"][0]) == {
-        "kind",
-        "stopped_at",
-        "completed_invocation_costs",
-        *V1_START,
-    }
-    assert run_record.load_stopped(dumped) == run_record.load_stopped(old)
+@pytest.mark.parametrize(("loader", "raw"), _older_stored())
+def test_older_format_stops_with_the_rebuild_hint(
+    loader: Callable[[Mapping[str, Any]], object], raw: dict[str, Any]
+) -> None:
+    with pytest.raises(OlderFormatError, match="jigane new") as error:
+        loader(raw)
+    assert "引き継がれません" in str(error.value)
+
+
+@pytest.mark.parametrize("loader", [run_record.load_in_progress, run_record.load_stopped])
+def test_newer_format_still_asks_for_an_update(
+    loader: Callable[[Mapping[str, Any]], object],
+) -> None:
+    with pytest.raises(ReviewError, match="より新しいバージョンの jigane") as error:
+        loader({"format": 99})
+    assert not isinstance(error.value, OlderFormatError)
 
 
 @pytest.mark.parametrize("loader", [run_record.load_in_progress, run_record.load_stopped])
@@ -225,27 +200,5 @@ def test_stopped_v1_upgrades_to_current_keys() -> None:
 def test_bad_format_version_is_rejected(
     loader: Callable[[Mapping[str, Any]], object], version: object
 ) -> None:
-    with pytest.raises(ReviewError, match="形の版"):
+    with pytest.raises(ReviewError, match=r"形の版|JSON の構造のバージョン"):
         loader({"format": version})
-
-
-def test_stopped_v2_drops_the_derivable_cost_sum() -> None:
-    old: dict[str, Any] = {
-        "macro": [
-            {
-                "kind": "interrupt",
-                **V1_START,
-                "stopped_at": "2026-10-20T10:05:00+00:00",
-                "completed_invocation_costs": [0.5],
-                "completed_cost_usd": 0.5,
-            }
-        ],
-        "format": 2,
-    }
-    loaded = run_record.load_stopped(old)
-    [run] = loaded[MACRO]
-    assert "completed_cost_usd" not in run_record.dump_stopped(loaded)["macro"][0]
-    assert run.completed_cost_usd == 0.5
-    assert run.to_json()["completed_cost_usd"] == 0.5
-    # 入力は書き換えない
-    assert "completed_cost_usd" in old["macro"][0]

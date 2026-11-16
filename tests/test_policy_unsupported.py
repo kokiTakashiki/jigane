@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import pytest
 from fakes import register_no_sequence_adapter
 
 from jigane.commands import main
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.skills import macro
+from jigane.skills import macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import (
     LANGUAGE_AGNOSTIC,
@@ -64,7 +65,7 @@ def test_python_only_change_is_not_unsupported(
     review = _review(tmp_path, monkeypatch, {"src/a.py": PYTHON})
     assert _unsupported(review) == {}
     assert "対応外" not in macro.diagram_materials_text(
-        AssemblyInput.load(review), macro.policy_sections(review)
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
     )
 
 
@@ -160,12 +161,36 @@ def test_prompt_names_the_language_without_an_interface_in_the_new_figures(
 def test_every_figure_states_its_language_interface() -> None:
     # 既定値に頼らず、16 種の図がすべて自分の口（または言語に依らないこと）を書いている
     assert len(REGISTRY) == 16
-    assert all(e.interface is LANGUAGE_AGNOSTIC or isinstance(e.interface, type) for e in REGISTRY)
+    assert all(
+        e.interface is LANGUAGE_AGNOSTIC or isinstance(e.interface, (type, tuple))
+        for e in REGISTRY
+    )
     assert {e.key for e in REGISTRY if e.interface is LANGUAGE_AGNOSTIC} == {
         "tree",
         "signatures",
         "cochange",
     }
+
+
+def test_a_figure_with_several_interfaces_needs_all_of_them() -> None:
+    @runtime_checkable
+    class First(Protocol):
+        def first(self) -> None: ...
+
+    @runtime_checkable
+    class Second(Protocol):
+        def second(self) -> None: ...
+
+    class OnlyFirst:
+        def first(self) -> None: ...
+
+    class Both(OnlyFirst):
+        def second(self) -> None: ...
+
+    interface = (First, Second)
+    assert policy_figures.implements_interface(Both(), interface)  # type: ignore[arg-type]
+    assert not policy_figures.implements_interface(OnlyFirst(), interface)  # type: ignore[arg-type]
+    assert isinstance(next(e.interface for e in REGISTRY if e.key == "value_sets"), tuple)
 
 
 def test_sequence_section_names_the_language_without_an_interface(
@@ -174,7 +199,9 @@ def test_sequence_section_names_the_language_without_an_interface(
     review = _review(tmp_path, monkeypatch, {"src/a.nosq": "class A { }\n"})
     register_no_sequence_adapter(monkeypatch)
     note = NOSEQ_BUILTIN_NOTE
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     sections = [s.rstrip() for s in text.split("### ")]
     sequence = next(s for s in sections if s.startswith("シーケンス図"))
     # 描けるシーケンス図が無くても、対応外の言語があれば一文は残る
@@ -211,7 +238,9 @@ def test_mixed_origins_put_the_builtin_sentence_first_in_every_user(
     review = _review(tmp_path, monkeypatch, files)
     register_no_sequence_adapter(monkeypatch, external=True)
     # 資料
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert BOTH_NOTE in text
     # CLI（文面と JSON）。画面は JSON の note をそのまま出す
     assert main(["diagrams", str(review.id)]) == 0
@@ -226,3 +255,10 @@ def test_mixed_origins_put_the_builtin_sentence_first_in_every_user(
         {"name": "Swift", "builtin": True},
         {"name": "no-sequence", "builtin": False},
     ]
+
+
+def test_a_language_agnostic_figure_is_implemented_by_every_adapter() -> None:
+    class Bare:
+        pass
+
+    assert policy_figures.implements_interface(Bare(), policy_figures.LANGUAGE_AGNOSTIC)  # type: ignore[arg-type]

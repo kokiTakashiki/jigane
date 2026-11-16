@@ -153,6 +153,41 @@ def test_deeply_nested_json_is_rejected(repository: Path) -> None:
         read_sarif([path], repository, repository)
 
 
+def test_nesting_just_over_the_limit_is_rejected_before_parsing(repository: Path) -> None:
+    depth = DEFAULT_LIMITS.max_nesting + 1
+    path = repository.parent / "deep.sarif"
+    path.write_text("[" * depth + "]" * depth, encoding="utf-8")
+    with pytest.raises(SarifError, match="入れ子"):
+        read_sarif([path], repository, repository)
+
+
+def test_nesting_at_the_limit_reaches_validation(repository: Path) -> None:
+    depth = DEFAULT_LIMITS.max_nesting
+    path = repository.parent / "deep.sarif"
+    path.write_text("[" * depth + "]" * depth, encoding="utf-8")
+    with pytest.raises(SarifError, match="型に合いません"):
+        read_sarif([path], repository, repository)
+
+
+def test_brackets_inside_strings_do_not_count_as_nesting(repository: Path) -> None:
+    # 逃がした引用符で字句が途切れないことも確かめる
+    text = '\\"' + "[" * (DEFAULT_LIMITS.max_nesting + 1)
+    document = log(run([result(extra_field=text)]))
+    assert len(read_one(repository, document).findings) == 1
+
+
+def test_recursion_error_while_parsing_is_rejected_as_too_deep(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 上限より浅くても、スタックの小さい環境では json.loads が RecursionError を出しうる
+    def overflowing(_document: object, **_options: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(json, "loads", overflowing)
+    with pytest.raises(SarifError, match="入れ子"):
+        read_one(repository, log(run([result()])))
+
+
 def test_top_level_array_is_rejected(repository: Path) -> None:
     with pytest.raises(SarifError):
         read_one(repository, [1, 2])

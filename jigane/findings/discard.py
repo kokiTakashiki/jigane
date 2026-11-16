@@ -17,7 +17,7 @@ DISCARDED_VIEWPOINT = "discarded"
 PLACE_SEPARATOR = "、"
 
 # 懸念の文が無い nit の主張の位置に出す一文。捨てた理由の文では代えない
-NO_CONCERN_CLAIM = "この nit には懸念の文がありません（古い記録）"
+NO_CONCERN_CLAIM = "この nit には懸念の文がありません"
 
 
 class DiscardKind(StrEnum):
@@ -424,7 +424,8 @@ class PassedConcern:
 class ShardConcerns:
     """シャードのプロンプトに渡す懸念。シャードごとに一度だけ組み立て、以後は変えない。
 
-    プロンプトの懸念の節と runs.json の記録は、この値だけから引く。
+    runs.json の記録は、この値をそのまま引く。プロンプトの懸念の節は、この値の文を一行にして組む。
+    組む箇所は skills/sharded.py の _one_line_concerns。
     """
 
     passed: tuple[PassedConcern, ...] = ()

@@ -1,22 +1,22 @@
 import pytest
 
-from jigane.languages.base import RegexAdapter, RegexDialect, RegexScan, RegexUse, parse
+from jigane.languages.base import RegexDialect, RegexSiteExtractor, RegexSites, RegexUse, parse
 from jigane.languages.java import JavaAdapter
 
 adapter = JavaAdapter()
 
 
-def scan(body: str) -> RegexScan:
+def scan(body: str) -> RegexSites:
     source = f"class A {{\n  void f() {{\n{body}\n  }}\n}}\n".encode()
-    return adapter.regex_literals(parse(adapter, source).root_node, source, "A.java")
+    return adapter.regex_sites(parse(adapter, source).root_node, source, "A.java")
 
 
 def patterns(body: str) -> list[tuple[str, str]]:
-    return [(found.call, found.pattern) for found in scan(body).literals]
+    return [(found.call_name, found.pattern) for found in scan(body).literal_sites]
 
 
 def test_adapter_satisfies_the_protocol() -> None:
-    assert isinstance(adapter, RegexAdapter)
+    assert isinstance(adapter, RegexSiteExtractor)
 
 
 def test_pattern_compile_and_matches() -> None:
@@ -40,7 +40,7 @@ def test_string_methods(method: str) -> None:
 
 
 def test_dialect_path_and_line() -> None:
-    found = scan('Pattern.compile("a");').literals[0]
+    found = scan('Pattern.compile("a");').literal_sites[0]
     assert found.dialect is RegexDialect.JAVA
     assert found.path == "A.java"
     assert found.line == 3
@@ -55,16 +55,16 @@ def test_single_character_split_is_ignored() -> None:
 
 def test_variable_argument_of_string_methods_is_dropped() -> None:
     found = scan("s.matches(p); s.replaceAll(p, r); s.replaceFirst(p, r); s.split(p);")
-    assert found.literals == ()
-    assert found.composed == ()
+    assert found.literal_sites == ()
+    assert found.composed_sites == ()
 
 
 def test_composed_pattern_class_calls() -> None:
     found = scan(
         'Pattern.compile(p); Pattern.matches("a" + p, s); Pattern.compile(String.format("%s", p));'
     )
-    assert found.literals == ()
-    assert [(c.call, c.line) for c in found.composed] == [
+    assert found.literal_sites == ()
+    assert [(c.call_name, c.line) for c in found.composed_sites] == [
         ("Pattern.compile", 3),
         ("Pattern.matches", 3),
         ("Pattern.compile", 3),
@@ -78,8 +78,8 @@ def test_plus_concatenation() -> None:
 def test_unrelated_calls_are_ignored() -> None:
     body = 'Other.compile("a"); s.contains("a"); s.replace("a", "b"); compile("a"); matches("a");'
     found = scan(body)
-    assert found.literals == ()
-    assert found.composed == ()
+    assert found.literal_sites == ()
+    assert found.composed_sites == ()
 
 
 def test_escapes_are_decoded() -> None:
@@ -101,7 +101,7 @@ def test_text_block_without_trailing_newline_and_line_continuation() -> None:
 def test_document_order() -> None:
     body = 'Pattern.compile("a"); s.split("bb"); Pattern.compile(p); Pattern.compile("c");'
     found = scan(body)
-    assert [lit.pattern for lit in found.literals] == ["a", "bb", "c"]
+    assert [lit.pattern for lit in found.literal_sites] == ["a", "bb", "c"]
 
 
 def test_uses() -> None:
@@ -110,7 +110,7 @@ def test_uses() -> None:
         ' s.replaceAll("ab", "c");'
         ' s.replaceFirst("ab", "c"); s.split("ab"); Pattern.compile(x);'
     )
-    assert [(r.call, r.use) for r in result.literals] == [
+    assert [(r.call_name, r.use) for r in result.literal_sites] == [
         ("Pattern.compile", RegexUse.COMPILE),
         ("Pattern.matches", RegexUse.MATCH),
         ("String.matches", RegexUse.MATCH),
@@ -118,24 +118,26 @@ def test_uses() -> None:
         ("String.replaceFirst", RegexUse.REPLACE),
         ("String.split", RegexUse.SPLIT),
     ]
-    assert [(r.call, r.use) for r in result.composed] == [("Pattern.compile", RegexUse.COMPILE)]
+    assert [(r.call_name, r.use) for r in result.composed_sites] == [
+        ("Pattern.compile", RegexUse.COMPILE)
+    ]
 
 
 def test_local_constant_is_followed_one_step() -> None:
     found = scan(
         'final String p = "a+" + "b";\nPattern.compile(p);\nString q = "c";\nx.matches(q);'
     )
-    assert [(x.call, x.pattern) for x in found.literals] == [
+    assert [(x.call_name, x.pattern) for x in found.literal_sites] == [
         ("Pattern.compile", "a+b"),
         ("String.matches", "c"),
     ]
-    assert found.composed == ()
+    assert found.composed_sites == ()
 
 
 def test_local_constant_is_not_followed_across_two_steps() -> None:
     found = scan('String p = "a";\nString q = p;\nPattern.compile(q);')
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 @pytest.mark.parametrize(
@@ -151,27 +153,27 @@ def test_local_constant_is_not_followed_across_two_steps() -> None:
 )
 def test_local_constant_is_not_followed(body: str) -> None:
     found = scan(body)
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_parameter_is_not_followed() -> None:
     source = b"class A {\n  void f(String p) {\n    Pattern.compile(p);\n  }\n}\n"
-    found = adapter.regex_literals(parse(adapter, source).root_node, source, "A.java")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    found = adapter.regex_sites(parse(adapter, source).root_node, source, "A.java")
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_non_plus_binary_expression_is_not_a_constant() -> None:
     result = scan('Pattern.compile("a" - "b");')
-    assert result.literals == ()
-    assert [(c.call, c.line) for c in result.composed] == [("Pattern.compile", 3)]
+    assert result.literal_sites == ()
+    assert [(c.call_name, c.line) for c in result.composed_sites] == [("Pattern.compile", 3)]
 
 
 def test_non_plus_binary_expression_in_a_string_method_is_not_a_constant() -> None:
     # `+` の連結なら定数として拾われる。`*` が拾われないことで、演算子の選り分けを確かめる。
     assert patterns('"x".matches("a" + "b");') == [("String.matches", "ab")]
     result = scan('"x".matches("a" * "b");')
-    assert result.literals == ()
-    # String の呼び出しは、定数でない引数を composed にも数えない
-    assert result.composed == ()
+    assert result.literal_sites == ()
+    # String の呼び出しは、定数でない引数を composed_sites にも数えない
+    assert result.composed_sites == ()

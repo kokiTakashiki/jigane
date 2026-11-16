@@ -5,16 +5,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import MacroFake, as_run, discovered, settings_for
+from fakes import STARTED_AT, MacroFake, as_run, discovered, settings_for
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.views.findings import over_budget_lines
 from jigane.findings.records import load_findings_state, triaged_dicts
-from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
 from jigane.llm_runs.cost import (
-    BudgetOutcome,
     Cost,
     LimitSubstitute,
     Measured,
@@ -65,7 +63,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _budget_error(cost: float | None) -> claude.ClaudeInvocationError:
     payload = {} if cost is None else {"total_cost_usd": cost}
-    record = claude.failure_record(payload, 0.5)
+    record = claude.failure_record(payload, 0.5, started_at=STARTED_AT)
     return claude.ClaudeInvocationError(
         "claude が is_error を返しました: error_max_budget_usd",
         record,
@@ -176,7 +174,11 @@ def test_limit_cost_is_called_the_limit_in_the_failure_line() -> None:
         Disposition.NOT_RERUN,
         ran_at="2026-10-21T00:00:00+00:00",
         invocation=FailedInvocation(
-            replace(claude.parse_record({}, 0.5), cost=LimitSubstitute(0.5)), "v", 10
+            replace(
+                claude.parse_record({}, 0.5, started_at=STARTED_AT), cost=LimitSubstitute(0.5)
+            ),
+            "v",
+            10,
         ),
     )
     (line,) = (v.text for v in failure_views([failure]))
@@ -228,7 +230,9 @@ def test_every_cost_value_round_trips_through_its_record(cost: Cost) -> None:
         1,
         Disposition.NOT_RERUN,
         ran_at="t",
-        invocation=FailedInvocation(replace(claude.parse_record({}, 0.5), cost=cost), "v", 10),
+        invocation=FailedInvocation(
+            replace(claude.parse_record({}, 0.5, started_at=STARTED_AT), cost=cost), "v", 10
+        ),
     )
     stored = json.loads(json.dumps(failure.as_record()))
     assert failure_from_record(stored).as_record() == failure.as_record()
@@ -342,13 +346,6 @@ def test_record_kind_is_stored_explicitly(project: Path) -> None:
     assert RunRecordKind.of_record(_runs(review)["macro"]) is RunRecordKind.SUCCEEDED_THEN_FAILED
 
 
-def test_records_without_a_kind_are_read_as_succeeded() -> None:
-    runs = pipeline.load_runs({"macro": {"discovered": 1}}).groups
-    macro_run = runs[GroupId.MACRO]
-    assert isinstance(macro_run, pipeline.PolicyGroupRun)
-    assert RunRecordKind.of_record(macro_run.to_json()) is RunRecordKind.SUCCEEDED
-
-
 def test_failure_row_is_marked_over_budget_by_its_kind(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     _fail(review, _budget_error(0.42))
@@ -369,37 +366,6 @@ def test_failure_row_is_marked_over_budget_by_its_kind(project: Path) -> None:
     assert "0.4200 USD（上限 0.5 USD）" in line
 
 
-def test_old_over_budget_flag_is_normalized_at_the_read_boundary() -> None:
-    old = {
-        "role": "discovery",
-        "split_index": 0,
-        "cost_usd": 0.9,
-        "over_budget": True,
-        "input_tokens": 1,
-        "output_tokens": 1,
-        "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "duration_ms": 1,
-        "num_turns": 1,
-        "is_error": False,
-        "terminal_reason": None,
-        "permission_denials": 0,
-        "max_budget_usd": 0.5,
-    }
-    clean = {**old, "over_budget": False, "cost_usd": 0.1}
-    runs = pipeline.load_runs({"micro": {"invocations": [old, clean]}})
-    run = next(iter(runs.groups.values()))
-    assert isinstance(run, pipeline.ShardedGroupRun)
-    assert run.invocations is not None
-    flagged, unflagged = run.invocations
-    assert flagged.budget_outcome is BudgetOutcome.EXCEEDED_AFTER_SUCCESS
-    assert unflagged.budget_outcome is None
-    assert "over_budget" not in flagged.to_json()
-    assert "over_budget" not in unflagged.to_json()
-    (item,) = pipeline.summarize_invocations(run)["over_budget"]
-    assert item["outcome"] == "exceeded_after_success"
-
-
 def test_old_failure_record_without_a_limit_is_read_with_none() -> None:
     failure = DiscoveryLaunchFailed(
         0,
@@ -408,7 +374,9 @@ def test_old_failure_record_without_a_limit_is_read_with_none() -> None:
         "r",
         1,
         Disposition.NOT_RERUN,
-        invocation=FailedInvocation(claude.failure_record(None, 0.5), "v", 10),
+        invocation=FailedInvocation(
+            claude.failure_record(None, 0.5, started_at=STARTED_AT), "v", 10
+        ),
     )
     stored = failure.as_record()
     del stored["invocation"]["max_budget_usd"]
@@ -424,7 +392,7 @@ def test_stopped_and_exceeded_are_distinct_in_one_run(project: Path) -> None:
     _fail(review, _budget_error(0.42))
     stopped = pipeline.summarize_invocations(as_run(_runs(review)["macro"]))["over_budget"]
     assert [item["outcome"] for item in stopped] == ["stopped_at_limit"]
-    exceeded = replace(claude.failure_record(None, 0.5), cost=Measured(0.9))
+    exceeded = replace(claude.failure_record(None, 0.5, started_at=STARTED_AT), cost=Measured(0.9))
     assert exceeded.exceeded_after_success()
     at_limit = replace(exceeded, cost=Measured(0.5))
     assert not at_limit.exceeded_after_success()
@@ -437,7 +405,9 @@ def test_stopped_and_exceeded_are_distinct_in_one_run(project: Path) -> None:
 def test_failure_of_another_kind_is_not_marked_over_budget(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     error = claude.ClaudeInvocationError(
-        "timeout", claude.failure_record(None, 0.5), claude.FailureKind.TIMEOUT
+        "timeout",
+        claude.failure_record(None, 0.5, started_at=STARTED_AT),
+        claude.FailureKind.TIMEOUT,
     )
     _fail(review, error)
     (row,) = [item.to_json() for item in pipeline.all_invocations(as_run(_runs(review)["macro"]))]
@@ -472,8 +442,10 @@ def test_failure_after_a_success_keeps_the_earlier_failures_too(project: Path) -
 
 
 def test_failure_record_substitutes_the_limit_only_when_nothing_was_reported() -> None:
-    assert claude.failure_record(None, 0.5).cost == LimitSubstitute(0.5)
-    assert claude.failure_record({"total_cost_usd": 0.42}, 0.5).cost == Measured(0.42)
+    assert claude.failure_record(None, 0.5, started_at=STARTED_AT).cost == LimitSubstitute(0.5)
+    assert claude.failure_record(
+        {"total_cost_usd": 0.42}, 0.5, started_at=STARTED_AT
+    ).cost == Measured(0.42)
 
 
 def test_earlier_failure_cost_survives_a_later_success(
@@ -529,15 +501,17 @@ def test_failure_success_failure_shows_only_the_last_failure_and_counts_both(
 
 def test_failure_before_any_api_call_is_not_charged() -> None:
     stopped = {"num_turns": 0, "usage": {"input_tokens": 0, "output_tokens": 0}}
-    assert claude.failure_record(stopped, 0.5).cost == NotCharged()
+    assert claude.failure_record(stopped, 0.5, started_at=STARTED_AT).cost == NotCharged()
     # 往復の有無が分からない結果や、トークンを使った結果は上限の額で代える
-    assert claude.failure_record({"usage": {}}, 0.5).cost == LimitSubstitute(0.5)
+    assert claude.failure_record(
+        {"usage": {}}, 0.5, started_at=STARTED_AT
+    ).cost == LimitSubstitute(0.5)
     spent = {"num_turns": 0, "usage": {"input_tokens": 9}}
-    assert claude.failure_record(spent, 0.5).cost == LimitSubstitute(0.5)
+    assert claude.failure_record(spent, 0.5, started_at=STARTED_AT).cost == LimitSubstitute(0.5)
     # 金額の報告がある結果は、その額を使う
     reported = {"num_turns": 0, "total_cost_usd": 0.1, "usage": {}}
-    assert claude.failure_record(reported, 0.5).cost == Measured(0.1)
-    assert claude.failure_record(None, 0.5).cost == LimitSubstitute(0.5)
+    assert claude.failure_record(reported, 0.5, started_at=STARTED_AT).cost == Measured(0.1)
+    assert claude.failure_record(None, 0.5, started_at=STARTED_AT).cost == LimitSubstitute(0.5)
 
 
 def test_not_charged_counts_as_zero_and_apart_from_the_estimate() -> None:
@@ -558,7 +532,7 @@ def test_limit_substitute_reads_and_not_charged_round_trips() -> None:
 
 
 def _stored_failure(cost: Cost, failure_round: FailureRound, index: int = 0) -> StoredFailure:
-    record = replace(claude.failure_record(None, 0.5), cost=cost)
+    record = replace(claude.failure_record(None, 0.5, started_at=STARTED_AT), cost=cost)
     return DiscoveryLaunchFailed(
         index=index,
         role="discovery",

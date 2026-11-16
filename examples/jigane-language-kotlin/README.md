@@ -14,9 +14,10 @@ jigane にプラグインのパッケージから言語を追加する例です�
 
 この例は、公開の窓口 `jigane.languages.api` の安定した口だけを使う形を示すため、次のものを持ちません。
 
-- 技術の表（`jigane technology-list`）：import の口（`ImportAdapter` の `imports` と `technology_of`）を実装していないので、Kotlin のファイルの import を読みません。Kotlin のファイルだけを変えた差分では、import が無いと出ます。この口は試験的な段（`jigane.languages.api.capabilities`）にあり、jigane の版ごとに形が変わりえます。
+- 技術の表（`jigane technology-list`）：import の口（`ImportedModuleExtractor` の `imported_modules` と `technology_name_of`）を実装していないので、Kotlin のファイルの import を読みません。Kotlin のファイルだけを変えた差分では、import が無いと出ます。この口は試験的な段（`jigane.languages.api.capabilities`）にあり、jigane の版ごとに形が変わりえます。
 - flaky の検査（`jigane flaky`）：`LanguagePlugin.data` が `None` で、型の置き場（`flaky/queries/kotlin.toml`）を持たないので、Kotlin のテストに当てる型がありません。テストのパスの判定（`test` と `androidTest`）は通りますが、検出はしません。
 - シーケンス図などの宣言の一覧以外の図：それぞれの口を実装していません。
+- サポートしない構文の申告：`unsupported_syntax` を実装しないので、構文エラーだけが当たります（[adding-languages.md の節](../../docs/adding-languages.md#サポートしない構文の申告)）。
 
 足すときは、`jigane/languages/README.md` の「追加の言語を書く」の節にある口と資料の置き場に従います。
 

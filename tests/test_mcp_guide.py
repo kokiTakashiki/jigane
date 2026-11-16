@@ -11,7 +11,9 @@ from jigane.groups.definitions import SECURITY
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import security, shards
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.mcp import McpSelection, McpServer, SecurityConfigError
+from jigane.skills.mcp import MCP_CONFIG_FILE, McpSelection, McpServer, SecurityConfigError
+from jigane.storage.store import data_home
+from jigane.text.json_input import SETTINGS_NESTING_LIMIT
 
 IOS_USE = "iOS と Android のアプリのコード"
 SERVER_USE = "サーバ、API、サーバ上で動くプラグインのコード"
@@ -171,3 +173,38 @@ def test_selection_servers_are_named_servers_with_use_for_only_when_guided(proje
         ("server-sec", SERVER_USE),
     ]
     assert [server.use_for for server in plain] == [None, None]
+
+
+def test_too_deep_guide_toml_is_an_error(project: Path) -> None:
+    write_mcp()
+    deep = "a = " + "[" * 5000 + "]" * 5000
+    with pytest.raises(SecurityConfigError, match="TOML として読めません"):
+        McpSelection.load(NAMES, write_guide(project, deep))
+
+
+@pytest.mark.usefixtures("project")
+def test_too_deep_mcp_json_is_an_error() -> None:
+    write_mcp()
+    depth = SETTINGS_NESTING_LIMIT + 1
+    (data_home() / MCP_CONFIG_FILE).write_text("[" * depth + "]" * depth, encoding="utf-8")
+    with pytest.raises(SecurityConfigError) as raised:
+        McpSelection.load(NAMES)
+    path = data_home() / MCP_CONFIG_FILE
+    assert str(raised.value) == (
+        f"{path} の JSON の入れ子が深すぎます（上限 {SETTINGS_NESTING_LIMIT} 段）。"
+        f"{path} を直してから、もう一度実行してください。"
+    )
+
+
+@pytest.mark.usefixtures("project")
+def test_recursion_error_in_json_loads_on_mcp_json_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_mcp()
+
+    def raise_recursion_error(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr("jigane.text.json_input.json.loads", raise_recursion_error)
+    with pytest.raises(SecurityConfigError, match="JSON の入れ子が深すぎます"):
+        McpSelection.load(NAMES)

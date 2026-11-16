@@ -6,6 +6,7 @@ from string import Template
 import pytest
 from fakes import MicroFake, clear_policy, d_finding, settings_for
 from markdown_support import items, section_prose
+from review_fakes import current_form_findings
 from shard_prompt_support import shard_prompt
 
 from jigane.commands import main
@@ -189,7 +190,9 @@ def write_previous_micro_finding(review: Review, path: str) -> None:
             ]
         },
     }
-    (review.id.directory() / FINDINGS_FILE).write_text(json.dumps(stored), encoding="utf-8")
+    (review.id.directory() / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(stored)), encoding="utf-8"
+    )
 
 
 def discovery_prompts(review: Review) -> list[str]:

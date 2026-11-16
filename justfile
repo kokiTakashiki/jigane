@@ -40,12 +40,22 @@ default:
 jigane *args:
     uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane {{quote(args)}}
 
+# jigane が返す失敗の種類を一覧する（引数はそのまま jigane debug errors へ通す。--json で機械が読む形。出力は暫定）。
+debug-errors *args:
+    uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug errors {{quote(args)}}
+
+# レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）。
+debug-review-id *args:
+    uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug review-id {{quote(args)}}
+
 # 依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）。
 [no-quiet]
 setup:
     uv sync --locked
+    uv run --locked python scripts/grammar_bundle_cache.py seed
     uv run --locked python -m jigane.languages.fetch_main fetch
     uv run --locked python scripts/fetch_example_grammars.py
+    uv run --locked python scripts/grammar_bundle_cache.py save
     uv run --locked python scripts/gate_stamp.py install-hook
 
 # 作業ツリーが setup 済みかを、通信せずに確かめる（.venv と文法の置き場のファイルの有無だけ。setup は走らせない。無ければ一行の案内を出して止まる）。

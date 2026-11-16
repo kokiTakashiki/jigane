@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fakes import RECORD, FakeInvoke, MicroFake, d_finding, settings_for, with_budget
 from pydantic import BaseModel, ConfigDict
+from review_fakes import current_form_findings
 from shard_prompt_support import shard_prompt
 
 from jigane.commands import main
@@ -389,7 +390,9 @@ def _write_macro_concern(review: Review) -> None:
     )
     nit = {"id": "F1", "claim": reason.claim, "nit_reason": reason.to_json()}
     raw = {"last_number": 1, "groups": {"macro": [nit]}}
-    (review.id.directory() / "findings.json").write_text(json.dumps(raw), encoding="utf-8")
+    (review.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(raw)), encoding="utf-8"
+    )
 
 
 def _discovery_rows(review: Review) -> list[dict[str, Any]]:
@@ -593,7 +596,7 @@ def test_prompt_and_record_are_built_from_the_same_shard_concerns(project: Path)
     stored["groups"]["macro"].append(
         {"id": "F2", "claim": vague.claim, "nit_reason": vague.to_json()}
     )
-    path.write_text(json.dumps(stored), encoding="utf-8")
+    path.write_text(json.dumps(current_form_findings(stored)), encoding="utf-8")
     prompts: dict[int, str] = {}
 
     class Recording(DiscoveryFake):

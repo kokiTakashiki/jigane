@@ -98,8 +98,8 @@ def test_body_of_unwraps_decorated_definition() -> None:
     assert draw.node.type == "decorated_definition"
     assert draw.body is not None
     assert draw.body.type == "block"
-    assert adapter.body_of(draw.node) == draw.body
-    assert adapter.body_of(_member("pkg.shapes.Point", "x").node) is None
+    assert adapter.body_node_of(draw.node) == draw.body
+    assert adapter.body_node_of(_member("pkg.shapes.Point", "x").node) is None
 
 
 def test_index_matches_declarations() -> None:

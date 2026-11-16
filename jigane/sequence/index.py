@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -9,9 +11,9 @@ from tree_sitter import Node, Tree
 
 from jigane.git.tree_files import read_tree_bytes
 from jigane.languages.base import (
-    Argument,
+    CallArgument,
     Declaration,
-    MarkupBindingAdapter,
+    MarkupEventHandlerExtractor,
     MemberDecl,
     ParameterDecl,
     SequenceAdapter,
@@ -110,8 +112,8 @@ class Member:
         return bound
 
     def bind(
-        self, arguments: Sequence[Argument], *, positional_labels: bool
-    ) -> list[tuple[Parameter, Argument]]:
+        self, arguments: Sequence[CallArgument], *, positional_labels: bool
+    ) -> list[tuple[Parameter, CallArgument]]:
         """引数と対応する仮引数の組。bind_positions の引数の位置を引数に引き直したもの。"""
         pairs = self.bind_positions(
             [a.name for a in arguments], positional_labels=positional_labels
@@ -182,10 +184,15 @@ class Index:
         """型の同一性から、図の名前を作る。閉じる型はファイル名を挿す。"""
         qualified = key.qualified_name
         if key.file is not None:
-            prefix = next(
-                p
-                for p in self._file_scoped[key.file]
-                if qualified == p or qualified.startswith(p + ".")
+            prefix = required(
+                next(
+                    (
+                        p
+                        for p in self._file_scoped[key.file]
+                        if qualified == p or qualified.startswith(p + ".")
+                    ),
+                    None,
+                )
             )
             qualified = prefix + self._file_marks[key.file] + qualified[len(prefix) :]
         return qualified
@@ -335,10 +342,47 @@ class Index:
         return None, 0
 
 
+_IndexKey = tuple[Path, tuple[str, ...], str]
+
+# shared_indexes の範囲の中でだけ、作った索引を持つ。範囲の外では None
+_shared: ContextVar[dict[_IndexKey, "Index"] | None] = ContextVar("shared_indexes", default=None)
+
+
+@contextmanager
+def shared_indexes() -> Iterator[None]:
+    """この範囲の中の build_index は、同じ root、paths、言語の索引を一度だけ作って使い回す。
+
+    一回の diagrams の呼び出しの中で、木は変わらない。入れ子で開いたときは外側の範囲を使う。
+    索引は作った後に書き換えないので、使い回しても読み手に影響しない。
+    """
+    if _shared.get() is not None:
+        yield
+        return
+    token = _shared.set({})
+    try:
+        yield
+    finally:
+        _shared.reset(token)
+
+
 def build_index(root: Path, paths: Iterable[str], adapter: SequenceAdapter) -> Index:
-    """paths のうち adapter の拡張子のファイルを、root からの相対パスの順に読んで索引にする。"""
+    """paths のうち adapter の拡張子のファイルを、root からの相対パスの順に読んで索引にする。
+
+    `shared_indexes` の範囲の中では、同じ引数の二度目からは作らず、最初の索引を返す。
+    """
+    ordered = tuple(sorted(paths))
+    shared = _shared.get()
+    if shared is None:
+        return _build_index(root, ordered, adapter)
+    key = (root, ordered, adapter.name)
+    if key not in shared:
+        shared[key] = _build_index(root, ordered, adapter)
+    return shared[key]
+
+
+def _build_index(root: Path, paths: Sequence[str], adapter: SequenceAdapter) -> Index:
     index = Index(adapter)
-    for path in sorted(paths):
+    for path in paths:
         if Path(path).suffix not in adapter.suffixes:
             continue
         source = read_tree_bytes(root, path)
@@ -347,11 +391,11 @@ def build_index(root: Path, paths: Iterable[str], adapter: SequenceAdapter) -> I
             continue
         tree = parse(adapter, source)
         index.trees[path] = tree
-        index.imported[path] = adapter.imported_names(tree.root_node, source, path)
-        if isinstance(adapter, MarkupBindingAdapter):
-            markup = _read_markup(root, adapter.markup_path(path))
+        index.imported[path] = adapter.imported_name_origins(tree.root_node, source, path)
+        if isinstance(adapter, MarkupEventHandlerExtractor):
+            markup = _read_markup(root, adapter.paired_markup_path(path))
             if markup is not None:
-                index.markup_called[path] = adapter.markup_handlers(markup)
+                index.markup_called[path] = adapter.handler_names_in_markup(markup)
         declarations = {
             (d.qualified_name, d.span.start_line): d
             for d in adapter.declarations(tree.root_node, source)
@@ -367,10 +411,10 @@ def build_index(root: Path, paths: Iterable[str], adapter: SequenceAdapter) -> I
     return index
 
 
-def _read_markup(root: Path, markup_path: str | None) -> str | None:
-    if markup_path is None:
+def _read_markup(root: Path, paired_markup_path: str | None) -> str | None:
+    if paired_markup_path is None:
         return None
-    data = read_tree_bytes(root, markup_path)
+    data = read_tree_bytes(root, paired_markup_path)
     return None if data is None else data.decode("utf-8", errors="replace")
 
 

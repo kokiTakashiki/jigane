@@ -6,7 +6,7 @@ from jigane.languages import concurrency_core as core
 from jigane.languages.base import (
     AwaitCall,
     BlockingWait,
-    Body,
+    ConcurrencyBody,
     ConcurrencyStep,
     ContinueOn,
     Isolation,
@@ -218,20 +218,20 @@ def _blocking(receiver: str | None, name: str | None, receiver_node: Node | None
     return f"{receiver}.GetResult" if name == "GetResult" and is_awaiter else None
 
 
-def _body(x: Extractor[None], argument: Node, domain: Isolation) -> Body:
-    return Body(domain, tuple(x.lambda_steps(argument, domain)))
+def _body(x: Extractor[None], argument: Node, domain: Isolation) -> ConcurrencyBody:
+    return ConcurrencyBody(domain, tuple(x.lambda_steps(argument, domain)))
 
 
-def _branch(x: Extractor[None], argument: Node) -> Body:
+def _branch(x: Extractor[None], argument: Node) -> ConcurrencyBody:
     """Task.WhenAll に渡された呼び出し一つを、枝の本体にする。"""
     if argument.type != "invocation_expression":
-        return Body(x.domain, ())
+        return ConcurrencyBody(x.domain, ())
     site = x.sites.get(argument.id)
     # 枝ごとに走査器を分け、枝の中の ConfigureAwait(false) の切り替えを隣の枝へ残さない
     steps = x.derive(x.domain).walk(argument)
     if site is not None:
         steps.append(AwaitCall(site, site.line))
-    return Body(x.domain, tuple(steps))
+    return ConcurrencyBody(x.domain, tuple(steps))
 
 
 def _continuation(
@@ -288,7 +288,11 @@ def _thread_start(x: Extractor[None], creation: Node, line: int) -> ConcurrencyS
         inner = _positional(argument)
         argument = inner[0] if inner else None
     # メソッド参照は呼び先を決められないので、本体は空
-    body = _body(x, argument, _THREAD_POOL) if argument is not None else Body(_THREAD_POOL, ())
+    body = (
+        _body(x, argument, _THREAD_POOL)
+        if argument is not None
+        else ConcurrencyBody(_THREAD_POOL, ())
+    )
     return UnstructuredTask(TaskKind.TASK, body, line)
 
 

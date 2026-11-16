@@ -6,12 +6,13 @@ from fakes import MicroFake
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.unreadable_notice import occurrence_text, unreadable_text
+from jigane.gates.construct_kind import ConstructKind
 from jigane.gates.tree_side import TreeSide
 from jigane.judgment_map.unreadable_constructs import (
-    ConstructKind,
     Occurrence,
     UnreadableConstructs,
 )
+from jigane.judgment_map.unreadable_wording import SYNTAX_ERROR_WORDING
 from jigane.languages import registry
 from jigane.languages.base import parse
 from jigane.languages.swift_nodes import IdentifierName, OperatorName, function_name_of
@@ -163,11 +164,11 @@ def test_estimate_prints_the_notice_and_keeps_stdout(
 
 def test_occurrence_marks_before_tree_and_strips_control_characters() -> None:
     syntax = ConstructKind.SYNTAX_ERROR
-    assert occurrence_text(Occurrence(syntax, "a/B.swift", 3, TreeSide.BEFORE, "")) == (
-        "変更前 a/B.swift:3"
-    )
+    assert occurrence_text(
+        Occurrence(syntax, "a/B.swift", 3, TreeSide.BEFORE, "", SYNTAX_ERROR_WORDING)
+    ) == ("変更前 a/B.swift:3")
     assert "\x1b" not in occurrence_text(
-        Occurrence(syntax, "a/\x1b[31mB.swift", 3, TreeSide.AFTER, "")
+        Occurrence(syntax, "a/\x1b[31mB.swift", 3, TreeSide.AFTER, "", SYNTAX_ERROR_WORDING)
     )
 
 

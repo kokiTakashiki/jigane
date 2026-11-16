@@ -955,8 +955,8 @@ def store_accesses(sources: Mapping[str, str]) -> list[StoreAccess]:
                 continue
             paired = owner is not None and function.name in (_WRITE_METHODS | _READ_METHODS)
             names = _store_names(function, path, vocab)
-            has_custom = any(side.kind is StoreFormat.CUSTOM for side in sides)
-            has_labels = any(side.labels for side in sides)
+            has_custom = any(side.format is StoreFormat.CUSTOM for side in sides)
+            has_labels = any(side.key_vocabulary_names for side in sides)
             for file in opened:
                 if file.target is None:
                     continue

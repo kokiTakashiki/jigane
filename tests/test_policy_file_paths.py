@@ -4,7 +4,7 @@ from review_fakes import make_review
 from test_policy_classes import feature_review, whole
 
 from jigane.figures.models import FigureKind, RowChange, TableFigure
-from jigane.skills import macro, policy_file_paths
+from jigane.skills import macro, policy_figures, policy_file_paths
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import REGISTRY, diagrams_of
 from jigane.storage.store import ReviewKind
@@ -74,7 +74,9 @@ def test_registered_and_reaches_prompt_and_diagrams(tmp_path: Path) -> None:
     review = feature_review(tmp_path, "r.py", SOURCE)
     placed = next(p for p in diagrams_of(review).figures if p.key == "file_paths")
     assert placed.to_json()["kind"] == "table"
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert "{prefix}_{index:03d}" in text
 
 

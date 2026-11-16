@@ -8,7 +8,7 @@ from typing import assert_never
 
 from jigane.gates.explanation import GateExplanation
 from jigane.languages import registry
-from jigane.languages.base import RegexLiteral, RegexUse
+from jigane.languages.base import RegexLiteralSite, RegexUse
 from jigane.regex.metrics import RegexMetrics, measure
 from jigane.regex.syntax import Unreadable, parse
 
@@ -248,7 +248,7 @@ def _tags_for(metrics: RegexMetrics, use: RegexUse, *, in_test_file: bool) -> tu
     return tuple(tags)
 
 
-def judge(literal: RegexLiteral) -> RegexVerdict:
+def judge(literal: RegexLiteralSite) -> RegexVerdict:
     """正規表現一つを数えて札を付ける。読めない正規表現は数えず、理由だけを返す。"""
     tree = parse(literal.pattern, literal.dialect)
     if isinstance(tree, Unreadable):

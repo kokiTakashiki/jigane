@@ -13,6 +13,7 @@ from jigane.findings.records import (
     ScopeConclusion,
     judge_scope,
 )
+from jigane.judgment_map.classification import FilePair
 from jigane.reviews.catalog import scope_files
 from jigane.reviews.lifecycle import (
     DiffSource,
@@ -21,8 +22,9 @@ from jigane.reviews.lifecycle import (
     Review,
     create_feature_review,
 )
-from jigane.reviews.review_formats import PAIRS_FILE
+from jigane.reviews.review_formats import PAIRS_FILE, dump_pairs
 from jigane.skills.scope import InScope, OutOfScope, classify, conclusion_of
+from jigane.storage.store_format import OlderFormatError
 
 
 @pytest.fixture
@@ -45,8 +47,14 @@ def _diff_review(project: Path, paths: list[str]) -> Review:
 
 def test_diff_scope_collects_old_and_new_paths_including_deleted(project: Path) -> None:
     review = _diff_review(project, ["fallback"])
-    pairs = [["old/a.py", "new/a.py"], ["gone.py", None], [None, "added.py"]]
-    (review.id.directory() / PAIRS_FILE).write_text(json.dumps(pairs), encoding="utf-8")
+    pairs = [
+        FilePair("old/a.py", "new/a.py"),
+        FilePair("gone.py", None),
+        FilePair(None, "added.py"),
+    ]
+    (review.id.directory() / PAIRS_FILE).write_text(
+        json.dumps(dump_pairs(pairs)), encoding="utf-8"
+    )
     assert scope_files(review) == {"old/a.py", "new/a.py", "gone.py", "added.py"}
 
 
@@ -54,6 +62,20 @@ def test_diff_scope_without_pairs_falls_back_to_paths(project: Path) -> None:
     review = _diff_review(project, ["src/a.py"])
     (review.id.directory() / PAIRS_FILE).unlink(missing_ok=True)
     assert scope_files(review) == {"src/a.py"}
+
+
+@pytest.mark.parametrize(
+    "older",
+    [[["a.py", "a.py"]], {"format": 1, "pairs": [["a.py", "a.py"]]}],
+    ids=["array", "format-1"],
+)
+def test_diff_scope_with_an_older_pairs_file_stops_instead_of_using_paths(
+    project: Path, older: object
+) -> None:
+    review = _diff_review(project, ["src/a.py"])
+    (review.id.directory() / PAIRS_FILE).write_text(json.dumps(older), encoding="utf-8")
+    with pytest.raises(OlderFormatError, match="jigane new"):
+        scope_files(review)
 
 
 def test_feature_scope_is_given_paths(project: Path) -> None:

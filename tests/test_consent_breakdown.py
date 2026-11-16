@@ -10,6 +10,7 @@ from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import estimator
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
+from jigane.skills.launch_prompts import LaunchInput
 
 
 def never_invoked(_invocation: claude.Invocation) -> claude.InvocationResult:
@@ -31,7 +32,7 @@ def test_the_breakdown_takes_calls_and_verifier_from_the_selected_estimate(proje
 
     for group, has_verifier in ((MACRO, False), (MICRO, True), (SECURITY, True)):
         settings = settings_for(never_invoked)
-        estimate = estimator.estimate_of(assembly, group, budget=settings.budget)
+        estimate = estimator.estimate_of(LaunchInput(assembly, group, budget=settings.budget))
         plan = consent.launch_plan(
             estimate,
             GroupExpectation(0.2, 1.0, VerifierMultiplierSource.NO_VERIFIER),

@@ -29,6 +29,7 @@ from jigane.skills import macro, macro_principles_run, policy_principles
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimator import estimate_of
 from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
+from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import McpSelection, McpServer
 
 SKIPPING_OPTIONS = ("--yes", "--force", "--no-confirm", "--assume-yes", "-y", "-f")
@@ -572,10 +573,13 @@ def test_launch_plan_of_a_non_policy_group_does_not_estimate_the_policy(
     # 差し替えが estimator の読む名前に効くことを、方針の見積もりの呼び出しで確かめる
     with pytest.raises(AssertionError, match="方針の見積もりを呼んだ"):
         launch_plan(
-            estimate_of(assembly, MACRO, budget=settings.budget), EXPECTATION, MACRO, settings
+            estimate_of(LaunchInput(assembly, MACRO, budget=settings.budget)),
+            EXPECTATION,
+            MACRO,
+            settings,
         )
     for group in (MICRO, SECURITY):
-        estimate = estimate_of(assembly, group, budget=settings.budget)
+        estimate = estimate_of(LaunchInput(assembly, group, budget=settings.budget))
         assert launch_plan(estimate, EXPECTATION, group, settings).group == group
 
 

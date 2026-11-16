@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from tree_sitter import Node
 
-from jigane.languages.base import PublicName, PublicNameKind, Visibility
+from jigane.languages.base import AddedPublicName, PublicNameKind, Visibility
 from jigane.languages.csharp_nodes import (
     NAMESPACES,
     TYPE_KINDS,
@@ -282,5 +282,5 @@ def added_public_names_of(
     before: Mapping[str, str],
     after: Mapping[str, str],
     changed: Collection[str],
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     return added_public_names(before, after, changed, Rules(parse_source, _walk, _sites_of))

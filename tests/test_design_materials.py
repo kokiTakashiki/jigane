@@ -2,11 +2,16 @@ from pathlib import Path
 
 from design_materials_support import work
 
-from jigane.policy_materials.design_doc import (
-    NO_CURRENT_SHAPE_TEXT,
+from jigane.languages.kinds import LocationKind
+from jigane.policy_materials.design_doc import design_materials
+from jigane.policy_materials.design_doc_render import (
     NO_SELECTION_TEXT,
     NOT_RECOMMENDED_TEXT,
-    design_materials,
+)
+from jigane.policy_materials.design_doc_shape import (
+    LOCATION_LABELS,
+    NO_CURRENT_SHAPE_TEXT,
+    NON_DECLARATION_KINDS,
 )
 from jigane.policy_materials.missing import MissingMaterial
 from jigane.skills.macro_design import build_design_prompt
@@ -133,3 +138,9 @@ def test_same_input_gives_the_same_materials(tmp_path: Path) -> None:
     first = design_materials(root, "docs/d.md", DOCUMENT, ["shop/cart.py"])
     second = design_materials(root, "docs/d.md", DOCUMENT, ["shop/cart.py"])
     assert first == second
+
+
+def test_declaration_kinds_are_outside_the_labelled_location_kinds() -> None:
+    declarations = set(LocationKind) - NON_DECLARATION_KINDS
+    assert declarations
+    assert declarations.isdisjoint(LOCATION_LABELS)

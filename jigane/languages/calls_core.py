@@ -10,21 +10,21 @@ from typing import Protocol
 from tree_sitter import Node, Query, QueryCursor
 
 from jigane.languages.base import (
-    Argument,
-    Call,
+    CallArgument,
     CallParts,
+    CallReceiver,
     CallSite,
-    Creation,
+    CreationReceiver,
     DeferredSite,
     Locals,
     LocalVariable,
-    Member,
-    Name,
-    Paren,
+    MemberReceiver,
+    NameReceiver,
+    ParenReceiver,
     ReceiverKind,
-    Self,
-    Super,
-    Unknown,
+    SelfReceiver,
+    SuperReceiver,
+    UnknownReceiver,
 )
 from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
@@ -87,7 +87,7 @@ class ReceiverRules(Protocol):
         """呼び出しの式の分解。"""
         ...
 
-    def arguments(self, node: Node) -> tuple[Argument, ...]:
+    def arguments(self, node: Node) -> tuple[CallArgument, ...]:
         """生成の式の引数。"""
         ...
 
@@ -162,50 +162,50 @@ def call_sites(
         site = rules.call_site(captures)
         if site is not None:
             found[captures["call"][0].id] = site
-    ordered_calls = sorted(found.values(), key=lambda c: (c.end, c.line))
+    ordered_calls = sorted(found.values(), key=lambda c: (c.end_byte, c.line))
     inline = [c for c in ordered_calls if not _inside_deferred(c.node, body, rules)]
-    deferred: list[tuple[int, DeferredSite]] = []
+    deferred: list[DeferredSite] = []
     for _, captures in QueryCursor(queries["lambdas"]).matches(body):
         node = captures["lambda"][0]
         if _inside_deferred(node, body, rules):
             # 入れ子のラムダは外側のラムダの calls に含まれる
             continue
         inner = tuple(c for c in ordered_calls if within(c.node, node))
-        deferred.append((node.end_byte, DeferredSite(node, "", None, "lambda", inner)))
+        deferred.append(DeferredSite(node, "", None, "lambda", inner))
     seen: set[int] = set()
     for _, captures in QueryCursor(queries["method_groups"]).matches(body):
         node = captures["method_group"][0]
         if node.id in seen or _inside_deferred(node, body, rules):
             continue
         seen.add(node.id)
-        deferred.append((node.end_byte, rules.method_group(captures)))
-    deferred.sort(key=lambda pair: pair[0])
-    sites: list[CallSite | DeferredSite] = [*inline, *(d for _, d in deferred)]
-    return sorted(sites, key=lambda s: s.end)
+        deferred.append(rules.method_group(captures))
+    deferred.sort(key=lambda site: site.end_byte)
+    sites: list[CallSite | DeferredSite] = [*inline, *deferred]
+    return sorted(sites, key=lambda s: s.end_byte)
 
 
 def _name_receiver(expression: Node, rules: ReceiverRules) -> ReceiverKind | None:
     """名前そのものを表す式の受け手。名前の式でなければ None。"""
     kind = expression.type
     if kind in rules.self_types:
-        return Self()
+        return SelfReceiver()
     if kind in rules.super_types:
-        return Super()
+        return SuperReceiver()
     if kind in rules.name_types:
         text = text_of(expression)
-        return Self() if text in rules.self_names else Name(text)
+        return SelfReceiver() if text in rules.self_names else NameReceiver(text)
     if kind in rules.generic_name_types:
-        return Name(text_of(required(expression.children[0])))
+        return NameReceiver(text_of(required(expression.children[0])))
     return None
 
 
 def _member_receiver(expression: Node, rules: ReceiverRules) -> ReceiverKind:
-    """メンバ参照の受け手。基点か名前が取れなければ Unknown。"""
+    """メンバ参照の受け手。基点か名前が取れなければ UnknownReceiver。"""
     base = expression.child_by_field_name(rules.member_base_field)
     name = rules.member_name(expression)
     if base is None or name is None:
-        return Unknown()
-    return Member(base, text_of(name))
+        return UnknownReceiver()
+    return MemberReceiver(base, text_of(name))
 
 
 def _call_receiver(expression: Node, rules: ReceiverRules) -> ReceiverKind:
@@ -216,18 +216,18 @@ def _call_receiver(expression: Node, rules: ReceiverRules) -> ReceiverKind:
         and function.type in rules.name_types
         and text_of(function) in rules.super_call_names
     ):
-        return Super()
+        return SuperReceiver()
     parts = rules.call_parts(expression)
     created = rules.creation_name(parts)
     if created is not None:
-        return Creation(created, parts.arguments, parts.text)
-    return Call(parts)
+        return CreationReceiver(created, parts.arguments, parts.text)
+    return CallReceiver(parts)
 
 
 def receiver_of(expression: Node, rules: ReceiverRules) -> ReceiverKind:
     wrapped = rules.wrapped(expression)
     if wrapped is not None:
-        return Paren(wrapped)
+        return ParenReceiver(wrapped)
     named = _name_receiver(expression, rules)
     if named is not None:
         return named
@@ -238,12 +238,12 @@ def receiver_of(expression: Node, rules: ReceiverRules) -> ReceiverKind:
         return _call_receiver(expression, rules)
     if kind in rules.creation_types:
         type_node = expression.child_by_field_name(rules.creation_type_field)
-        return Creation(
+        return CreationReceiver(
             text_of(type_node) if type_node is not None else None,
             rules.arguments(expression),
             text_of(expression),
         )
-    return Unknown()
+    return UnknownReceiver()
 
 
 def locals_of(body: Node, rules: LocalsRules) -> Locals:

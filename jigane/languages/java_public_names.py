@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from tree_sitter import Node
 
-from jigane.languages.base import PublicName, PublicNameKind, Visibility
+from jigane.languages.base import AddedPublicName, PublicNameKind, Visibility
 from jigane.languages.java_nodes import METHOD_NODES, TYPE_NODES, declared_visibility
 from jigane.languages.node_text import text_or_empty
 from jigane.languages.public_names_core import (
@@ -276,6 +276,6 @@ def added_public_names_of(
     before: Mapping[str, str],
     after: Mapping[str, str],
     changed: Collection[str],
-) -> list[PublicName]:
+) -> list[AddedPublicName]:
     """足した名前を、定義の出現順に返す。"""
     return added_public_names(before, after, changed, Rules(parse_source, _walk, _sites_of))

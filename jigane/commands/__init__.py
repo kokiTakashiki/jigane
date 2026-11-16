@@ -18,9 +18,11 @@ from jigane import __version__
 from jigane.commands import failures, subcommands
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_INTERRUPTED, EXIT_PROCESSING_FAILURE
+from jigane.commands.language_guidance import detail_with_guidance
 from jigane.commands.output import install_warning_handler
 from jigane.languages import registry
 from jigane.llm_runs import claude
+from jigane.storage.store import data_home, require_private_data_home
 
 
 class _StrictParser(argparse.ArgumentParser):
@@ -59,6 +61,36 @@ def _wants_machine_output(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "json", False)) or getattr(args, "format", None) == "json"
 
 
+# データの置き場へ書かないと確かめた副コマンド。ここに無い副コマンドは書くものとして、
+# 根の権限を検査する。debug は run が群を走らせて書くので入れない
+READ_ONLY_COMMANDS = frozenset(
+    {
+        "show",
+        "list",
+        "usage",
+        "estimate",
+        "export-reply",
+        "export-report",
+        "templates",
+        "technology-list",
+        "sequence",
+        "diagrams",
+        "flaky",
+        "languages",
+        "design",
+    }
+)
+
+
+def _require_private_home_for_write(command: str) -> None:
+    if command in READ_ONLY_COMMANDS:
+        return  # 読み取りは根の権限が広くても止めない
+    home = data_home()
+    # 根を作る副作用は持たせない。無ければ検査せず、書く側が作る
+    if home.exists():
+        require_private_data_home(home)
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -81,7 +113,8 @@ def main(
         else:
             # 言語を使わない副コマンドも止める。登録は副コマンドの中のどこからでも引かれ、
             # 使うかどうかを副コマンドごとに見分ける手段が無いため、壊れた状態を一律に先に知らせる
-            registry.require_ready()
+            registry.require_ready(detail_with_guidance)
+        _require_private_home_for_write(args.command)
         context = Context(invoke=invoke)
         if is_terminal is not None:
             context = replace(context, is_terminal=is_terminal)

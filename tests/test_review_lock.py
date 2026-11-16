@@ -123,15 +123,9 @@ def test_lock_held_by_crashed_process_is_released(tmp_path: Path) -> None:
         # finally を走らせずに落とす。OS が持ち主の終了でロックを外す
         holder.kill()
         holder.wait()
-        # wait が返った時点で OS はロックを外している。待たずに取れるので期限は偽の時計で測る
-        released_elapsed = [0.0]
-
-        def advance_released(seconds: float) -> None:
-            released_elapsed[0] += seconds
-
-        with review_lock(
-            tmp_path, timeout=2, sleep=advance_released, clock=lambda: released_elapsed[0]
-        ):
+        # Windows は持ち主の終了の後、ロックを非同期に外す。wait が返っても外れているとは限らない
+        # ので、偽の時計にせず本物の時計で、取れるまで既定の上限まで待つ
+        with review_lock(tmp_path):
             pass
     finally:
         holder.kill()

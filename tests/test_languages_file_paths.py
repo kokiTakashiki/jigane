@@ -1,18 +1,18 @@
 from fakes import NoSequenceAdapter
 
 from jigane.languages.base import (
-    FilePathAdapter,
-    FilePathPattern,
+    FilePathExpression,
+    FilePathExpressionExtractor,
     FileUsage,
     parse,
 )
 from jigane.languages.python import PythonAdapter
 
 
-def patterns(code: str) -> list[FilePathPattern]:
+def patterns(code: str) -> list[FilePathExpression]:
     python = PythonAdapter()
     source = code.encode()
-    return python.file_path_patterns(parse(python, source).root_node, source, "r.py")
+    return python.file_path_expressions(parse(python, source).root_node, source, "r.py")
 
 
 def pairs(code: str) -> list[tuple[str, FileUsage]]:
@@ -39,7 +39,7 @@ def test_path_methods_use_receiver() -> None:
         '    Path("y.log").open("w")\n'
     )
     result = patterns(code)
-    assert [(p.function, p.usage) for p in result] == [
+    assert [(p.function_qualified_name, p.usage) for p in result] == [
         ("f", FileUsage.WRITE),
         ("f", FileUsage.READ),
         ("f", FileUsage.WRITE),
@@ -84,7 +84,7 @@ def test_outermost_path_expression_only_once() -> None:
 
 def test_language_without_the_reader_does_not_offer_it() -> None:
     # 読み口を持たない言語は口を持たない。該当なし（空の一覧）と区別するため
-    assert not isinstance(NoSequenceAdapter(), FilePathAdapter)
+    assert not isinstance(NoSequenceAdapter(), FilePathExpressionExtractor)
 
 
 def test_wrapper_read_text_keeps_whole_call() -> None:

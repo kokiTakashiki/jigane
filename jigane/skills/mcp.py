@@ -15,6 +15,12 @@ from typing import Any
 from jigane.git.process import is_windows
 from jigane.llm_runs import claude
 from jigane.storage.store import data_home
+from jigane.text.json_input import (
+    SETTINGS_NESTING_LIMIT,
+    JsonTooDeepError,
+    loads_bounded,
+    settings_too_deep_message,
+)
 
 LOGGER = logging.getLogger(__name__)
 MCP_CONFIG_FILE = "mcp.json"
@@ -51,7 +57,8 @@ def read_guide(path: Path, names: tuple[str, ...]) -> dict[str, str]:
     """--mcp-guide のファイルを読み、形と、名前の集合が --mcps と同じことを確かめる。"""
     try:
         document = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+    # 深い入れ子は tomllib が RecursionError で拒む。TOML として読めないものと同じに扱う
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, RecursionError) as error:
         raise SecurityConfigError(
             f"--mcp-guide の {path} を TOML として読めません: {error}"
         ) from error
@@ -115,12 +122,16 @@ class McpSelection:
                 '{"mcpServers": {...}} の形で起動の設定を書いてください'
             )
         warn_if_broadly_accessible(path)
+        shape_error = SecurityConfigError(f"{path} が mcpServers を持つ JSON の形ではありません")
         try:
-            available = json.loads(path.read_text(encoding="utf-8")).get("mcpServers")
-        except (json.JSONDecodeError, AttributeError) as error:
-            raise SecurityConfigError(
-                f"{path} が mcpServers を持つ JSON の形ではありません"
-            ) from error
+            document = loads_bounded(path.read_text(encoding="utf-8"), SETTINGS_NESTING_LIMIT)
+        except JsonTooDeepError as error:
+            raise SecurityConfigError(settings_too_deep_message(path, error)) from error
+        except ValueError as error:
+            raise shape_error from error
+        if not isinstance(document, dict):
+            raise shape_error
+        available = document.get("mcpServers")
         if not isinstance(available, dict):
             raise SecurityConfigError(f"{path} に mcpServers がありません")
         missing = [name for name in names if name not in available]

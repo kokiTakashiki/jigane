@@ -7,8 +7,8 @@ from tree_sitter import Node
 from jigane.languages.base import (
     ComparisonKind,
     DefinitionKind,
-    StringComparison,
-    ValueSet,
+    StringLiteralComparison,
+    StringLiteralSet,
 )
 
 # 短い語だけを値とみなす。長い文字列は文章であり、閉じた値の集合の要素ではない
@@ -59,10 +59,12 @@ def plain_string(node: Node, content_types: Iterable[str]) -> str | None:
 
 def ordered_value_sets(
     found: Iterable[tuple[frozenset[str], int, str | None, bool]], path: str
-) -> list[ValueSet]:
-    """見つけた（値の集合, 行, 名前, 宣言か代入の中か）を、定義の行の順の `ValueSet` にする。"""
+) -> list[StringLiteralSet]:
+    """見つけた（値の集合, 行, 名前, 宣言か代入の中か）を、行の順の `StringLiteralSet` にする。"""
     return [
-        ValueSet(values, path, line, name, definition_kind(name, in_definition=in_definition))
+        StringLiteralSet(
+            values, path, line, name, definition_kind(name, in_definition=in_definition)
+        )
         for values, line, name, in_definition in sorted(found, key=lambda f: f[1])
     ]
 
@@ -130,9 +132,9 @@ def literal_strings(values: Sequence[str | None]) -> list[str] | None:
 
 def ordered_comparisons(
     found: Iterable[tuple[str, ComparisonKind, int]], path: str
-) -> list[StringComparison]:
-    """見つけた（値, 種類, 行）を、行の順の `StringComparison` にする。"""
+) -> list[StringLiteralComparison]:
+    """見つけた（値, 種類, 行）を、行の順の `StringLiteralComparison` にする。"""
     return [
-        StringComparison(value, kind, path, line)
+        StringLiteralComparison(value, kind, path, line)
         for value, kind, line in sorted(found, key=lambda f: f[2])
     ]

@@ -3,8 +3,10 @@ from pathlib import Path
 import pytest
 
 from jigane.flaky.catalog import Item, load_catalog
+from jigane.flaky.checks import _swift_methods
 from jigane.flaky.detector import detect_source
 from jigane.gates.line_scope import AllLines
+from jigane.languages.base import parse
 from jigane.languages.swift import SwiftAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures" / "flaky" / "swift"
@@ -64,3 +66,18 @@ def test_xctest_expectation_and_confirmation_are_not_async_wait() -> None:
         _detect("final class FooTests {\n    func testA() { wait(for: [e], timeout: 1) }\n}\n")
         == []
     )
+
+
+def test_operator_function_is_not_a_test_function() -> None:
+    # 演算子関数は名前を持たないものと同じく、名前からテスト関数とは見なさない
+    head = "final class FooTests {\n    static var n = 0\n"
+    operator = head + "    static func + (a: Self, b: Self) -> Self { n = 1 }\n}\n"
+    named = head + "    func testA() { n = 1 }\n}\n"
+    assert "FLK-ORDER-DEPENDENCY" not in {i for i, _ in _detect(operator)}
+    assert "FLK-ORDER-DEPENDENCY" in {i for i, _ in _detect(named)}
+
+
+def test_single_expression_methods_skip_operator_functions() -> None:
+    source = b"func f() -> Int { 1 }\nfunc + (a: Int) -> Int { 2 }\nfunc g() { return 3 }\n"
+    root = parse(ADAPTER, source).root_node
+    assert [name for name, _ in _swift_methods(root)] == ["f", "g"]

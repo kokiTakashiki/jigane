@@ -3,8 +3,8 @@
 import re
 from datetime import datetime
 
-from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_reviews
-from jigane.reviews.lifecycle import RangeOrigin, Review
+from jigane.reviews.catalog import ARCHIVED_INCLUDE, ReviewSummary, list_review_summaries
+from jigane.reviews.lifecycle import RangeOrigin, Review, ReviewOrigin
 from jigane.reviews.range_head import split_range
 from jigane.storage.store import ReviewKind
 
@@ -16,15 +16,14 @@ def series_of(name: str) -> str:
     return _TRAILING_DIGITS.sub("", name) or name
 
 
-def _range_head(review: Review) -> str | None:
-    origin = review.origin
+def _range_head(origin: ReviewOrigin) -> str | None:
     if not isinstance(origin, RangeOrigin):
         # 範囲の文字列は範囲の出所だけが持つ
         return None
     return split_range(origin.range.range_text).head
 
 
-def is_related(current: Review, other: Review) -> bool:
+def is_related(current: Review, other: ReviewSummary) -> bool:
     """other が current の関連するレビューか。関連の規則はここだけに置く。
 
     同じ owner と repo と種類で、current より前に作られたもの。PR は番号が同じなら同じ
@@ -40,11 +39,13 @@ def is_related(current: Review, other: Review) -> bool:
         return False
     if series_of(a.key) == series_of(b.key):
         return True
-    head = _range_head(current)
-    return head is not None and head == _range_head(other)
+    head = _range_head(current.origin)
+    return head is not None and head == _range_head(other.origin)
 
 
-def related_reviews(review: Review) -> list[Review]:
+def related_reviews(review: Review) -> list[ReviewSummary]:
     """関連するレビューを、新しいものから順に返す。アーカイブ済みも含む。"""
-    found = [other for other in list_reviews(ARCHIVED_INCLUDE) if is_related(review, other)]
+    found = [
+        other for other in list_review_summaries(ARCHIVED_INCLUDE) if is_related(review, other)
+    ]
     return sorted(found, key=lambda other: datetime.fromisoformat(other.created_at), reverse=True)

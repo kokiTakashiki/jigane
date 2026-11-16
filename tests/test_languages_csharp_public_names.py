@@ -1,4 +1,4 @@
-from jigane.languages.base import PublicName, PublicNameKind, PublicNameReader
+from jigane.languages.base import AddedPublicName, AddedPublicNameFinder, PublicNameKind
 from jigane.languages.csharp import CSharpAdapter
 
 _ADAPTER = CSharpAdapter()
@@ -6,17 +6,17 @@ _ADAPTER = CSharpAdapter()
 
 def _names(
     before: dict[str, str], after: dict[str, str], changed: set[str] | None = None
-) -> dict[str, PublicName]:
+) -> dict[str, AddedPublicName]:
     found = _ADAPTER.added_public_names(before, after, set(after) if changed is None else changed)
     return {n.name: n for n in found}
 
 
-def _added(source: str, others: dict[str, str] | None = None) -> dict[str, PublicName]:
+def _added(source: str, others: dict[str, str] | None = None) -> dict[str, AddedPublicName]:
     return _names({}, {"A.cs": source, **(others or {})}, {"A.cs"})
 
 
 def test_csharp_adapter_is_a_public_name_reader() -> None:
-    assert isinstance(_ADAPTER, PublicNameReader)
+    assert isinstance(_ADAPTER, AddedPublicNameFinder)
 
 
 def test_each_kind_is_defined_with_a_qualified_name() -> None:

@@ -12,7 +12,7 @@ class ApiVersion:
     minor: int
 
 
-PLUGIN_API_VERSION = ApiVersion(1, 0)
+PLUGIN_API_VERSION = ApiVersion(2, 0)
 
 
 @dataclass(frozen=True)

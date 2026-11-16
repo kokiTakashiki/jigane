@@ -20,6 +20,7 @@ from jigane.skills.group_expectation import (
     VerifierMultiplierSource,
     read_expectation,
 )
+from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import NO_MCP
 
 
@@ -51,7 +52,7 @@ def _restamp(root: Path, name: str, stamp: pipeline.EstimateStamp) -> None:
 def _expectation(root: Path) -> GroupExpectation:
     review = create_feature_review(root, ["src"], name="reader")
     budget = settings_for(MicroFake({1: []})).budget
-    estimate = estimate_of(AssemblyInput.load(review), MICRO, budget=budget)
+    estimate = estimate_of(LaunchInput(AssemblyInput.load(review), MICRO, budget=budget))
     return read_expectation(estimate, budget, root, MICRO)
 
 

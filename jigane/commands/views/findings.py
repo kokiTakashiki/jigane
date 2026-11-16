@@ -10,7 +10,6 @@ from jigane.findings.discard import (
     concern_with_places,
     places_line,
 )
-from jigane.findings.discarded_nits import selection_note_of
 from jigane.findings.records import (
     Adjudication,
     Alternative,
@@ -166,10 +165,8 @@ def finding_lines(finding: TriagedFinding, marks: dict[str, str]) -> list[str]:
             places = [f"      {line}"]
     # 捨てた候補から写した nit の観点は印であり、利用者には見せない
     viewpoint = "" if body.viewpoint == DISCARDED_VIEWPOINT else body.viewpoint
-    note = selection_note_of(body.id)
-    note_mark = "" if note is None else f" [{note}]"
     return [
-        f"  {body.id}{mark} {body.severity} {viewpoint} {claim}{note_mark}",
+        f"  {body.id}{mark} {body.severity} {viewpoint} {claim}",
         *places,
         # 捨てた候補から写した指摘は根拠の位置を持たない
         *([f"      根拠: {', '.join(location(item) for item in evidence)}"] if evidence else []),

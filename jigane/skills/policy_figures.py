@@ -18,21 +18,24 @@ from jigane.figures.models import (
 )
 from jigane.languages import registry
 from jigane.languages.base import (
-    CommandArgumentAdapter,
+    AddedPublicNameFinder,
+    CommandArgumentExtractor,
     ConcurrencyAdapter,
-    DiscriminatorReader,
-    FilePathAdapter,
-    PublicNameReader,
-    RegexAdapter,
+    DiscriminatorBranchExtractor,
+    FilePathExpressionExtractor,
+    LanguageAdapter,
+    RegexSiteExtractor,
     SequenceAdapter,
-    StoreAccessReader,
-    TypeFieldReader,
-    ValueSetReader,
+    StoreAccessExtractor,
+    StringLiteralComparisonExtractor,
+    StringLiteralSetExtractor,
+    TypeFieldNameExtractor,
 )
 from jigane.policy_materials import changed_files, classes, discriminators, er
 from jigane.policy_materials.changed_files import PrebuiltSection
 from jigane.reviews.lifecycle import Review
 from jigane.sequence import review_diagrams
+from jigane.sequence.index import shared_indexes
 from jigane.skills import (
     policy_callers,
     policy_cochange,
@@ -41,10 +44,13 @@ from jigane.skills import (
     policy_field_copies,
     policy_file_paths,
     policy_regex,
+    policy_repeats,
     policy_stores,
+    policy_tree,
     policy_value_sets,
 )
 from jigane.skills.assembly import AssemblyInput
+from jigane.technology_list import materials as technology_materials
 
 
 class FigureSlot(StrEnum):
@@ -111,7 +117,8 @@ class PolicyFigure:
     # クラス図、ER、判別子、読み手は、型と項目の宣言を SequenceAdapter の索引（build_index）から
     # 引くので、口は SequenceAdapter になる。ツリーとシグネチャは言語の口に依らないので
     # LANGUAGE_AGNOSTIC。既定値は持たず、図ごとに必ず書く
-    interface: type | LanguageAgnostic
+    # 複数の口を並べた組は、その全部を実装した言語だけが描ける
+    interface: type | tuple[type, ...] | LanguageAgnostic
     # 同じ読み込みを組み立ての中で共有したい図だけが持つ。
     # プロンプトの資料の組み立てが build の代わりに使う
     build_of: Callable[[AssemblyInput], Figure | None] | None = None
@@ -158,7 +165,7 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         discriminators.SECTION_DISCRIMINATORS,
         discriminators.discriminator_diagram,
         FigureSlot.AFTER_TREE,
-        interface=DiscriminatorReader,
+        interface=DiscriminatorBranchExtractor,
     ),
     PolicyFigure(
         "readers",
@@ -172,21 +179,21 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_commands.SECTION_COMMANDS,
         policy_commands.command_table,
         FigureSlot.AFTER_TREE,
-        interface=CommandArgumentAdapter,
+        interface=CommandArgumentExtractor,
     ),
     PolicyFigure(
         "file_paths",
         policy_file_paths.SECTION_FILE_PATHS,
         policy_file_paths.file_path_table,
         FigureSlot.AFTER_TREE,
-        interface=FilePathAdapter,
+        interface=FilePathExpressionExtractor,
     ),
     PolicyFigure(
         "stores",
         policy_stores.SECTION_STORES,
         policy_stores.store_table,
         FigureSlot.AFTER_TREE,
-        interface=StoreAccessReader,
+        interface=StoreAccessExtractor,
     ),
     PolicyFigure(
         "signatures",
@@ -207,14 +214,14 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_regex.SECTION_REGEX,
         policy_regex.regex_table,
         FigureSlot.AFTER_REGIONS,
-        interface=RegexAdapter,
+        interface=RegexSiteExtractor,
     ),
     PolicyFigure(
         "value_sets",
         policy_value_sets.SECTION_VALUE_SETS,
         policy_value_sets.value_set_table,
         FigureSlot.AFTER_REGIONS,
-        interface=ValueSetReader,
+        interface=(StringLiteralSetExtractor, StringLiteralComparisonExtractor),
         build_of=policy_value_sets.value_set_table_of,
     ),
     PolicyFigure(
@@ -222,14 +229,14 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_field_copies.SECTION_FIELD_COPIES,
         policy_field_copies.field_copy_table,
         FigureSlot.AFTER_REGIONS,
-        interface=TypeFieldReader,
+        interface=TypeFieldNameExtractor,
     ),
     PolicyFigure(
         "callers",
         policy_callers.SECTION_CALLERS,
         policy_callers.caller_table,
         FigureSlot.AFTER_REGIONS,
-        interface=PublicNameReader,
+        interface=AddedPublicNameFinder,
     ),
 )
 
@@ -245,6 +252,19 @@ class UnsupportedLanguage:
         return {"name": self.name, "builtin": self.builtin}
 
 
+def implements_interface(
+    adapter: LanguageAdapter, interface: type | tuple[type, ...] | LanguageAgnostic
+) -> bool:
+    """アダプタが図の口をすべて実装しているか。口を並べた組は、全部を実装して初めて真。
+
+    言語に依らない図は、どのアダプタでも真。
+    """
+    if isinstance(interface, LanguageAgnostic):
+        return True
+    interfaces = interface if isinstance(interface, tuple) else (interface,)
+    return all(isinstance(adapter, each) for each in interfaces)
+
+
 def unsupported_languages(review: Review, figure: PolicyFigure) -> list[UnsupportedLanguage]:
     """変更したファイルの言語のうち、図の口を持たない言語。対応外の判定はここだけが持つ。
 
@@ -256,7 +276,7 @@ def unsupported_languages(review: Review, figure: PolicyFigure) -> list[Unsuppor
     found: dict[str, UnsupportedLanguage] = {}
     for path in changed_files.file_changes(review):
         adapter = registry.adapter_for(path)
-        if adapter is not None and not isinstance(adapter, figure.interface):
+        if adapter is not None and not implements_interface(adapter, figure.interface):
             name = registry.label_for(adapter.name)
             found[name] = UnsupportedLanguage(name, registry.is_builtin(adapter.name))
     return [found[name] for name in sorted(found)]
@@ -279,10 +299,17 @@ def unsupported_note(languages: Sequence[UnsupportedLanguage]) -> str:
 
 
 def build_figure(figure: PolicyFigure, assembly: AssemblyInput) -> Figure | None:
-    """図を作る。図が共有の組み立てを持つときはそちらで、持たなければ build で作る。"""
-    if figure.build_of is not None:
-        return figure.build_of(assembly)
-    return figure.build(assembly.review)
+    """図を作る。図が共有の組み立てを持つときはそちらで、持たなければ build で作る。
+
+    同じ assembly の中では、同じ図を一度だけ組む。節の組み立てが図の鍵を絞って何度も呼ぶため。
+    """
+
+    def make() -> Figure | None:
+        if figure.build_of is not None:
+            return figure.build_of(assembly)
+        return figure.build(assembly.review)
+
+    return assembly.remember(("figure", figure.key), make)
 
 
 def section_texts(
@@ -424,4 +451,58 @@ class DiagramsResult:
 
 def diagrams_of(review: Review) -> DiagramsResult:
     """概要の画面と CLI の図。ツリー図もシーケンス図も、登録簿を回して作る。"""
-    return DiagramsResult(tuple(placed_figures(review)), tuple(unsupported_figures(review)))
+    # 各図が同じ木の索引を作り直さないよう、この呼び出しの間は索引を共有する
+    with shared_indexes():
+        figures = tuple(placed_figures(review))
+    return DiagramsResult(figures, tuple(unsupported_figures(review)))
+
+
+SECTION_REPEATS = "同じ形の箇所"
+
+
+@dataclass(frozen=True)
+class PolicySections:
+    """方針のプロンプトに載せる、事前に組んだ節。
+
+    図の節は `PrebuiltSection` で引く。同じ形の箇所と技術選定は置き場を持たず、図の後ろに続く。
+    """
+
+    figures: Mapping[changed_files.PrebuiltSection, str]
+    # 原則の起動の条件が、シーケンス図に流れがあるかを節の文でなく構造から読む
+    sequence: SequenceFigure
+    repeats: str
+    technology: str
+
+    @property
+    def figures_missing(self) -> bool:
+        """描ける図が一つも無いか。他の図はどれも変更したファイルから作るので、ツリー図の節で決まる。"""
+        return changed_files.tree_section_is_empty(
+            self.figures[changed_files.PrebuiltSection.TREE]
+        )
+
+
+def policy_sections(review: Review) -> PolicySections:
+    """方針のプロンプトの節を組む。重いので一回の実行で一度だけ作る。
+
+    外形だけに絞る。インターフェースは名前と位置、同じ形の箇所は短い塊だけ行の本文あり、技術選定は変化のあった技術だけ。
+    """
+    trees = policy_tree.trees_of(review)
+    sequence = review_diagrams.sequence_figure(review)
+    prebuilt = changed_files.materials_sections(review, sequence, folded=True)
+    return PolicySections(
+        figures=prebuilt,
+        sequence=sequence,
+        repeats=f"### {SECTION_REPEATS}\n\n"
+        + policy_repeats.repeats_text(
+            review, trees.after, line_limit=policy_repeats.POLICY_LINE_LIMIT
+        ),
+        technology=technology_materials.short_section_text(review),
+    )
+
+
+def shared_policy_sections(assembly: AssemblyInput) -> PolicySections:
+    """同じ assembly の中では方針のプロンプトの節を一度だけ組む。
+
+    見積もりは図の起動と原則の起動が同じ節を使う。
+    """
+    return assembly.remember("policy_sections", lambda: policy_sections(assembly.review))

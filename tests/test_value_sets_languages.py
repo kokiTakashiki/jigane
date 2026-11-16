@@ -4,8 +4,9 @@ from jigane.languages.base import (
     ComparisonKind,
     DefinitionKind,
     LanguageAdapter,
-    ValueSet,
-    ValueSetReader,
+    StringLiteralComparisonExtractor,
+    StringLiteralSet,
+    StringLiteralSetExtractor,
 )
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.java import JavaAdapter
@@ -16,17 +17,18 @@ from jigane.languages.value_set_core import MAX_VALUE_LENGTH
 LONG = "x" * (MAX_VALUE_LENGTH + 1)
 
 
-def _found(adapter: ValueSetReader, source: str) -> list[tuple[int, set[str]]]:
-    return [(v.line, set(v.values)) for v in adapter.value_sets(source, "m")]
+def _found(adapter: StringLiteralSetExtractor, source: str) -> list[tuple[int, set[str]]]:
+    return [(v.line, set(v.values)) for v in adapter.string_literal_sets(source, "m")]
 
 
-def _names(adapter: ValueSetReader, source: str) -> list[str | None]:
-    return [v.name for v in adapter.value_sets(source, "m")]
+def _names(adapter: StringLiteralSetExtractor, source: str) -> list[str | None]:
+    return [v.binding_name for v in adapter.string_literal_sets(source, "m")]
 
 
 @pytest.mark.parametrize("adapter", [JavaAdapter(), CSharpAdapter(), SwiftAdapter()])
 def test_adapter_satisfies_the_reader_protocol(adapter: LanguageAdapter) -> None:
-    assert isinstance(adapter, ValueSetReader)
+    assert isinstance(adapter, StringLiteralSetExtractor)
+    assert isinstance(adapter, StringLiteralComparisonExtractor)
 
 
 def test_java_collects_array_and_factory_literals() -> None:
@@ -174,8 +176,13 @@ def test_swift_skips_enums_without_string_values() -> None:
     assert _found(SwiftAdapter(), 'enum E: String { case a = "v1", b = "v2" }\n') == []
 
 
-def _comparisons(adapter: ValueSetReader, source: str) -> list[tuple[int, ComparisonKind, str]]:
-    return [(c.line, c.kind, c.value) for c in adapter.string_comparisons(source, "m")]
+def _comparisons(
+    adapter: StringLiteralComparisonExtractor, source: str
+) -> list[tuple[int, ComparisonKind, str]]:
+    return [
+        (c.line, c.comparison_kind, c.literal_value)
+        for c in adapter.string_literal_comparisons(source, "m")
+    ]
 
 
 def test_java_collects_the_four_comparison_shapes() -> None:
@@ -293,8 +300,8 @@ def test_swift_skips_non_constant_arguments_and_unresolved_names() -> None:
     assert _comparisons(SwiftAdapter(), source) == []
 
 
-def _kinds(adapter: ValueSetReader, source: str) -> list[DefinitionKind]:
-    return [v.kind for v in adapter.value_sets(source, "m")]
+def _kinds(adapter: StringLiteralSetExtractor, source: str) -> list[DefinitionKind]:
+    return [v.definition_kind for v in adapter.string_literal_sets(source, "m")]
 
 
 def test_python_marks_named_definitions_and_literals() -> None:
@@ -363,7 +370,9 @@ def test_python_kind_does_not_depend_on_the_spelling_of_the_name(name: str) -> N
 
 
 def test_value_set_kind_defaults_to_undetermined() -> None:
-    assert ValueSet(frozenset({"a"}), "m", 1).kind == DefinitionKind.UNDETERMINED
+    assert (
+        StringLiteralSet(frozenset({"a"}), "m", 1).definition_kind == DefinitionKind.UNDETERMINED
+    )
 
 
 # 十分に深い式。600 項は parse が通っても後段の再帰で落ち、20,000 項は parse 自身が落ちる
@@ -376,9 +385,9 @@ _DEEP_SOURCES = {
 
 @pytest.mark.parametrize("source", _DEEP_SOURCES.values(), ids=_DEEP_SOURCES.keys())
 def test_python_string_comparisons_skip_a_file_with_a_deep_expression(source: str) -> None:
-    assert PythonAdapter().string_comparisons(source, "deep.py") == []
+    assert PythonAdapter().string_literal_comparisons(source, "deep.py") == []
 
 
 @pytest.mark.parametrize("source", _DEEP_SOURCES.values(), ids=_DEEP_SOURCES.keys())
 def test_python_value_sets_skip_a_file_with_a_deep_expression(source: str) -> None:
-    assert PythonAdapter().value_sets(source, "deep.py") == []
+    assert PythonAdapter().string_literal_sets(source, "deep.py") == []

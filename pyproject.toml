@@ -1,6 +1,6 @@
 [project]
 name = "jigane"
-version = "0.1.8"
+version = "0.1.9"
 description = "GitHub の PR のレビューを助ける CLI"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -115,6 +115,7 @@ max-args = 7
 "pytest.skip" = { msg = "テストを条件付きで skip しない。実行できない前提なら失敗させる" }
 "pytest.xfail" = { msg = "テストを条件付きで skip しない。実行できない前提なら失敗させる" }
 "pytest.importorskip" = { msg = "テストを条件付きで skip しない。実行できない前提なら失敗させる" }
+"warnings" = { msg = "利用者に見える警告は logging の警告で出す。warnings だと書式と出所の行が「警告:」の経路と食い違う" }
 "scripts" = { msg = "配布物に入らない根の scripts を本体から import しない。必要なら本体の側へ移す" }
 "tests" = { msg = "配布物に入らない根の tests を本体から import しない。必要なら本体の側へ移す" }
 
@@ -141,10 +142,11 @@ max-args = 7
 # 開発の道具の起動の口。配布物に入らず、本体から import できない（import-linter の契約「本体（jigane/）は開発の道具の起動口（scripts/dev_launch）を読まない」）。
 "scripts/dev_launch.py" = ["TID251", "S603"]
 "jigane/llm_runs/claude.py" = ["TID251", "S607"]
-# OS の判定を読むのは store、locking、atomic_write の三つ。ホームの読み出しは store だけ。
+# OS の判定を読むのは store、locking、atomic_write、symlink_guard の四つ。ホームの読み出しは store だけ。
 "jigane/storage/store.py" = ["TID251"]
 "jigane/storage/locking.py" = ["TID251"]
 "jigane/storage/atomic_write.py" = ["TID251"]
+"jigane/storage/symlink_guard.py" = ["TID251"]
 # 実物の git を起動して作り物のリポジトリを組み立てる。
 "tests/test_bots.py" = ["TID251", "S607"]
 # 見張りが効くことを、子の pytest を起こして確かめる。
@@ -204,6 +206,15 @@ source_modules = ["jigane"]
 # dev_launch は scripts/ を sys.path に載せた形、scripts は `from scripts import dev_launch` の形を止める。
 forbidden_modules = ["dev_launch", "scripts"]
 
+# tree_sitter_language_pack は署名の無い配布物を取得し、取得の要否を決めるときに置き場の共有ライブラリを読み込む。
+# 照合してから読み込む順序と取得の失敗の扱いを一か所で守るため、呼べるのは境界の grammars だけにする。
+[[tool.importlinter.contracts]]
+name = "文法のパック（tree_sitter_language_pack）を読むのは languages/grammars だけ"
+type = "forbidden"
+source_modules = ["jigane"]
+forbidden_modules = ["tree_sitter_language_pack"]
+ignore_imports = ["jigane.languages.grammars -> tree_sitter_language_pack"]
+
 [[tool.importlinter.contracts]]
 name = "上の層は下の層を読み、下の層は上の層を読まない（cli > feature > core）"
 type = "layers"
@@ -211,7 +222,7 @@ containers = ["jigane"]
 # 上の層から順に並べる。同じ層の中の兄弟は `:` で繋ぎ、互いの依存を禁じない（`|` は互いを禁じる）。
 layers = [
     "commands",
-    "design : flaky : judgment_map : llm_runs : policy_materials : pull_request_context : regex : reviews : sequence : skills : technology_list : publishing : static_analysis",
+    "design : flaky : judgment_map : llm_runs : policy_materials : pull_request_context : regex : reviews : sequence : skills : technology_list : publishing : static_analysis : repository_docs",
     "storage : groups : git : preconditions : gates : markdown : findings : languages : figures : text",
 ]
 # 層の契約に入っていないサブパッケージを落とす。足したサブパッケージはどれかの層に入れる。
@@ -232,7 +243,7 @@ exhaustive_ignores = ["__main__"]
 [tool.jigane.allowed_sibling_imports]
 # キーは import する側のサブパッケージ、値は import してよい同じ層の兄弟。書いていないサブパッケージは兄弟を import しない。
 figures = ["markdown"]
-findings = ["storage", "groups"]
+findings = ["storage", "groups", "preconditions"]
 languages = ["storage", "preconditions", "text"]
 design = ["judgment_map", "reviews", "sequence"]
 flaky = ["judgment_map", "regex"]
@@ -240,9 +251,10 @@ policy_materials = ["design", "judgment_map", "reviews", "sequence"]
 publishing = ["reviews"]
 pull_request_context = ["judgment_map"]
 regex = ["judgment_map"]
+repository_docs = ["llm_runs"]
 reviews = ["flaky", "judgment_map", "pull_request_context", "static_analysis"]
 sequence = ["judgment_map", "reviews"]
-skills = ["design", "judgment_map", "llm_runs", "policy_materials", "pull_request_context", "regex", "reviews", "sequence", "technology_list"]
+skills = ["design", "judgment_map", "llm_runs", "policy_materials", "pull_request_context", "regex", "repository_docs", "reviews", "sequence", "technology_list"]
 static_analysis = ["judgment_map"]
 technology_list = ["reviews"]
 
@@ -356,7 +368,6 @@ type = "forbidden"
 source_modules = ["jigane.findings"]
 forbidden_modules = [
     "jigane.git",
-    "jigane.preconditions",
     "jigane.gates",
     "jigane.markdown",
     "jigane.languages",
@@ -426,6 +437,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -444,6 +456,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -464,6 +477,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -484,6 +498,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -500,6 +515,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -519,6 +535,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -538,6 +555,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -554,6 +572,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -572,6 +591,7 @@ forbidden_modules = [
     "jigane.technology_list",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -602,6 +622,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.publishing",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -621,6 +642,7 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.static_analysis",
+    "jigane.repository_docs",
 ]
 allow_indirect_imports = true
 
@@ -640,6 +662,27 @@ forbidden_modules = [
     "jigane.skills",
     "jigane.technology_list",
     "jigane.publishing",
+    "jigane.repository_docs",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "repository_docs は宣言した兄弟だけを読む"
+type = "forbidden"
+source_modules = ["jigane.repository_docs"]
+forbidden_modules = [
+    "jigane.design",
+    "jigane.flaky",
+    "jigane.judgment_map",
+    "jigane.policy_materials",
+    "jigane.pull_request_context",
+    "jigane.regex",
+    "jigane.reviews",
+    "jigane.sequence",
+    "jigane.skills",
+    "jigane.technology_list",
+    "jigane.publishing",
+    "jigane.static_analysis",
 ]
 allow_indirect_imports = true
 

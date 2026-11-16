@@ -1,9 +1,10 @@
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field, fields
 from enum import Enum, StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import NamedTuple, assert_never
 
 # GitHub の owner と repo に使える文字（英数字、-、_、.）に限る。先頭は . と - を除く。
@@ -29,14 +30,36 @@ def data_home() -> Path:
     return default_data_home()
 
 
-def ensure_data_home() -> Path:
-    """データの置き場の根が無ければ 0700 で作って返す。
+def require_private_data_home(home: Path) -> None:
+    """既にある根の権限が広すぎれば ReviewError で止める。
 
-    置き場には差分、PR の本文、Claude の出力が平文で入るため、他の利用者に読ませない。
+    根の所有者が実行ユーザーでない、または group か other に書き込み権限がある場合が対象。
+    読み取りの権限だけなら止めない。根が symlink のときは、その先を調べる。
+    Windows は ACL に任せ、検査しない。
+    """
+    if sys.platform == "win32":
+        # POSIX の所有者と mode を持たないため、権限は ACL に任せる
+        return
+    info = home.stat()
+    if info.st_uid != os.getuid():
+        # 所有者が違うと実行ユーザーでは chmod できないため、chmod の案内とは文面を分ける
+        raise ReviewError(
+            "データの置き場の所有者が実行ユーザーと違います。"
+            "所有者のユーザーで実行するか、置き場を自分の所有に移してください"
+        )
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise ReviewError("データの置き場の権限が広すぎます。chmod 700 で狭めてください")
+
+
+def ensure_data_home() -> Path:
+    """データの置き場の根が無ければ 0700 で作って返し、既にあれば権限を検査する。
+
+    置き場には差分、PR の本文、Claude の出力が平文で入るため、他の利用者に書かせない。
+    既にある根の権限は変えず、広すぎるときは require_private_data_home が止める。
     """
     home = data_home()
     if home.exists():
-        # 既にある根の権限は利用者の選んだものとして変えない
+        require_private_data_home(home)
         return home
     home.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -258,6 +281,11 @@ def _identifier_patterns() -> tuple[re.Pattern[str], re.Pattern[str]]:
 _FULL_PATTERN, _SHORT_PATTERN = _identifier_patterns()
 
 
+def full_identifier_pattern() -> re.Pattern[str]:
+    """完全な識別子の文法。キーの規則は種類ごとに違い、ここには含まれない。"""
+    return _FULL_PATTERN
+
+
 def _kind_of(text: str, separator: str, key: str) -> ReviewKind:
     """区切りから種類を引き、その種類のキーの規則で検査する。規則は種類ごとに違い、文法の正規表現では絞れない。"""
     kind = ReviewKind.from_separator(separator)
@@ -314,6 +342,28 @@ class ReviewId:
         return f"{self.owner}/{self.repo}{self.kind.separator}{self.key}"
 
 
+def review_name_of_directory(directory: Path) -> str:
+    """保存先 owner/repo/<接頭辞><キー> から、ReviewId.parse が読める完全な識別子の文字列を組む。
+
+    directory_prefix の逆向きの対応。接頭辞が無いときは、数字のキーは外部が採番する種類、
+    それ以外は名前で作る種類。
+    データの置き場の下に無い保存先は、保存先の文字列をそのまま返す。
+    """
+    try:
+        owner, repo, name = directory.relative_to(data_home()).parts
+    except ValueError:
+        return str(directory)
+    # 接頭辞を持つ種類は接頭辞で決まる。持たない種類は、キーを外部が採番するか（数字か）で決まる
+    for kind in ReviewKind:
+        prefix = kind.directory_prefix
+        if prefix and name.startswith(prefix):
+            return f"{owner}/{repo}{kind.separator}{name[len(prefix) :]}"
+    for kind in ReviewKind:
+        if not kind.directory_prefix and kind.externally_numbered == name.isdigit():
+            return f"{owner}/{repo}{kind.separator}{name}"
+    return str(directory)
+
+
 def _review_path(review_id: ReviewId) -> Path:
     """識別子が指す保存先。値からの計算だけで、ファイルシステムは引かない。"""
     home = data_home()
@@ -325,15 +375,64 @@ def _review_path(review_id: ReviewId) -> Path:
     )
 
 
+def _is_plain_part(name: str) -> bool:
+    """パスの一つの部分として、解決した祖先の後ろへそのまま付けてよい名前か。
+
+    ..、.、空の部分、区切り、ドライブや根（POSIX と Windows のどちらの形も）を含めば偽。
+    付けた後の正規化で、.. が解決した祖先より上へ出る経路を作らないため
+    """
+    if name in ("", ".", ".."):
+        return False
+    for pure in (PurePosixPath, PureWindowsPath):
+        parsed = pure(name)
+        if parsed.anchor or len(parsed.parts) != 1:
+            return False
+    return True
+
+
+def _resolve_existing_part(path: Path) -> Path | None:
+    """存在する最も近い祖先だけを strict で解決し、まだ無い部分をそのまま後ろに付ける。
+
+    非 strict の resolve は、Windows で途中の部分が並行して作られると、最初と二度目の失敗の
+    理由が食い違い、長いパスの前置きを残した形を返す。前置きの付いた形は置き場の下と比べられない。
+    まだ無い部分に _is_plain_part を満たさないもの、または宛先の無いリンクがあれば None を返す
+    """
+    missing: list[str] = []
+    current = path
+    while True:
+        try:
+            resolved = current.resolve(strict=True)
+        except FileNotFoundError:
+            if current.is_symlink() or current.is_junction():
+                # 宛先の無いリンク。宛先を辿れないので比べられない。並行して作られた
+                # ディレクトリはリンクでないので、まだ無い部分として後ろに付けてよい
+                return None
+            if current.parent == current:
+                # 根まで無い（Windows の無いドライブなど）。解決できる祖先が無いので比べられない
+                return None
+            missing.append(current.name)
+            current = current.parent
+            continue
+        if not all(_is_plain_part(name) for name in missing):
+            return None
+        return resolved.joinpath(*reversed(missing))
+
+
 def _reject_outside_home(path: Path) -> None:
     """各部分の検査を通っていても、シンボリックリンクで外へ出る場合を拒む二重の守り。
 
     末尾は作成の競合で改名されうるので、親を解決し、末尾はリンクのときだけ解決する。
-    Windows のジャンクションは is_symlink が偽を返すので、リンクとして別に見る
+    Windows のジャンクションは is_symlink が偽を返すので、リンクとして別に見る。
+    まだ無い部分を付けられない形は、比べずに外と見なす
     """
     is_link = path.is_symlink() or path.is_junction()
-    resolved = path.resolve() if is_link else path.parent.resolve() / path.name
-    if not resolved.is_relative_to(data_home().resolve()):
+    if is_link:
+        resolved = _resolve_existing_part(path)
+    else:
+        parent = _resolve_existing_part(path.parent)
+        resolved = parent / path.name if parent is not None and _is_plain_part(path.name) else None
+    home = _resolve_existing_part(data_home())
+    if resolved is None or home is None or not resolved.is_relative_to(home):
         raise ValueError(f"レビューの置き場がデータの場所の外にあります: {path}")
 
 

@@ -1,8 +1,8 @@
 import argparse
-import json
 from pathlib import Path
 
 import pytest
+from runs_support import write_runs_json
 
 from jigane.commands import build_parser
 from jigane.commands.subcommands.show import OVERVIEW
@@ -69,7 +69,7 @@ def test_show_view_choices_are_made_from_the_group_id_values() -> None:
 
 
 def test_stored_runs_are_keyed_by_group_id_when_read(tmp_path: Path) -> None:
-    (tmp_path / "runs.json").write_text(json.dumps({"micro": {"discovered": 1}}), encoding="utf-8")
+    write_runs_json(tmp_path, {"micro": {"discovered": 1}})
 
     (key,) = read_runs(tmp_path)
 

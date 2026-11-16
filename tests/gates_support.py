@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from jigane.gates.entry import NumberLedger
+from jigane.gates.entry import GATES_FORMAT, NumberLedger
 
 
 def write_gates_file(directory: Path, state: dict[str, Any]) -> None:
-    """state に台帳の鍵が無ければ空の台帳の鍵を補って gates.json に書く。"""
+    """state に台帳の鍵と版が無ければ、空の台帳の鍵と現行の版を補って gates.json に書く。"""
     (directory / "gates.json").write_text(
-        json.dumps({**NumberLedger().to_json(), **state}), encoding="utf-8"
+        json.dumps({**NumberLedger().to_json(), "format": GATES_FORMAT, **state}), encoding="utf-8"
     )

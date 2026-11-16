@@ -8,7 +8,9 @@ from test_policy_classes import feature_review, whole
 from jigane.figures.models import FigureKind, TableFigure
 from jigane.findings.discard import ShardConcerns
 from jigane.groups.definitions import GroupId
+from jigane.judgment_map.classification import FilePair
 from jigane.reviews.lifecycle import Review
+from jigane.reviews.review_formats import PAIRS_FILE, dump_pairs
 from jigane.skills import policy_regex, sharded
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import REGISTRY, FigureSlot, diagrams_of
@@ -87,7 +89,9 @@ def moved_review(tmp_path: Path, before: str, after: str) -> Review:
     )
     directory = review.id.directory()
     directory.mkdir(parents=True)
-    (directory / "pairs.json").write_text(json.dumps([["old/r.py", "new/r.py"]]), encoding="utf-8")
+    (directory / PAIRS_FILE).write_text(
+        json.dumps(dump_pairs([FilePair("old/r.py", "new/r.py")])), encoding="utf-8"
+    )
     return review
 
 
@@ -117,9 +121,8 @@ def test_an_added_file_selects_its_regexes_even_when_another_file_moved(tmp_path
         'import re\nre.compile(r"a")\nre.compile(c)\n', encoding="utf-8"
     )
     directory = review.id.directory()
-    (directory / "pairs.json").write_text(
-        json.dumps([["old/r.py", "new/r.py"], [None, "n.py"]]), encoding="utf-8"
-    )
+    pairs = [FilePair("old/r.py", "new/r.py"), FilePair(None, "n.py")]
+    (directory / PAIRS_FILE).write_text(json.dumps(dump_pairs(pairs)), encoding="utf-8")
     added = whole("n.py", 3) | {"old_path": None, "old_span": None, "old_line_count": 0}
     stored = review.map_kind.to_dict()
     review = with_map(review, {**stored, "segments": [*stored["segments"], added]})

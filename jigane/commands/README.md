@@ -42,7 +42,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`static_analysis`、`storage`、`technology_list`、`text`
+読むサブパッケージ：`design`、`figures`、`findings`、`flaky`、`gates`、`git`、`groups`、`judgment_map`、`languages`、`llm_runs`、`markdown`、`publishing`、`pull_request_context`、`reviews`、`sequence`、`skills`、`static_analysis`、`storage`、`technology_list`、`text`
 
 読まれるサブパッケージ：なし
 

@@ -5,10 +5,9 @@ from tree_sitter import Node
 
 from jigane.languages import calls_core, python_concurrency, type_names
 from jigane.languages.base import (
-    Argument,
+    AddedPublicName,
     BodyBounds,
-    Branch,
-    BranchArm,
+    CallArgument,
     CallParts,
     CallSite,
     CommandArgument,
@@ -16,8 +15,12 @@ from jigane.languages.base import (
     Declaration,
     DeclarationKind,
     DeferredSite,
-    FilePathPattern,
-    Import,
+    FilePathExpression,
+    FlowBranch,
+    FlowBranchArm,
+    FlowReturn,
+    FlowStep,
+    ImportedModule,
     Isolation,
     IsolationContext,
     Locals,
@@ -25,19 +28,16 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
-    PublicName,
     ReceiverKind,
-    RegexScan,
-    Return,
+    RegexSites,
     Sharing,
-    Step,
     StoreAccess,
-    StringComparison,
-    StringConstant,
+    StringLiteralComparison,
+    StringLiteralSet,
+    TopLevelStringConstant,
     TypeDecl,
-    TypeFields,
+    TypeFieldNames,
     TypeKind,
-    ValueSet,
     Visibility,
     import_nodes,
     leading_components,
@@ -46,16 +46,18 @@ from jigane.languages.base import (
 from jigane.languages.calls_core import Captures
 from jigane.languages.node_text import text_of
 from jigane.languages.python_arguments import command_arguments as _command_arguments
-from jigane.languages.python_constants import string_constants as _string_constants
-from jigane.languages.python_file_paths import file_path_patterns as _file_path_patterns
+from jigane.languages.python_constants import (
+    top_level_string_constants as _top_level_string_constants,
+)
+from jigane.languages.python_file_paths import file_path_expressions as _file_path_expressions
 from jigane.languages.python_public_names import added_public_names as _added_public_names
 from jigane.languages.python_regex import regex_scan as _regex_scan
 from jigane.languages.python_stores import store_accesses as _store_accesses
 from jigane.languages.python_string_comparisons import (
-    string_comparisons as _string_comparisons,
+    string_literal_comparisons as _string_literal_comparisons,
 )
 from jigane.languages.python_type_fields import type_fields_of as _type_fields_of
-from jigane.languages.python_value_sets import value_sets as _value_sets
+from jigane.languages.python_value_sets import string_literal_sets as _string_literal_sets
 from jigane.languages.queries import load_queries
 from jigane.preconditions.required import required
 
@@ -230,20 +232,20 @@ _DEFERRED_SCOPES = frozenset({"function_definition", "class_definition", "lambda
 _SELF_NAMES = frozenset({"self", "cls"})
 
 
-def _arguments(call: Node) -> tuple[Argument, ...]:
+def _arguments(call: Node) -> tuple[CallArgument, ...]:
     arguments = call.child_by_field_name("arguments")
     if arguments is None or arguments.type != "argument_list":
         return ()
-    result: list[Argument] = []
+    result: list[CallArgument] = []
     for argument in arguments.named_children:
         if argument.type == "comment":
             continue
         if argument.type == "keyword_argument":
             name = required(argument.child_by_field_name("name"))
             value = required(argument.child_by_field_name("value"))
-            result.append(Argument(value, text_of(name)))
+            result.append(CallArgument(value, text_of(name)))
         else:
-            result.append(Argument(argument, None))
+            result.append(CallArgument(argument, None))
     return tuple(result)
 
 
@@ -280,7 +282,7 @@ def _call_site(captures: Captures) -> CallSite | None:
         receiver,
         _arguments(node),
         is_creation=False,
-        end=node.end_byte,
+        end_byte=node.end_byte,
         line=callee.start_point.row + 1,
     )
 
@@ -318,17 +320,17 @@ def _assignment_of(statement: Node) -> Node | None:
     return None
 
 
-def _steps(block: Node) -> list[Step]:
-    steps: list[Step] = []
+def _steps(block: Node) -> list[FlowStep]:
+    steps: list[FlowStep] = []
     for statement in block.named_children:
         if statement.type == "return_statement":
             expression = statement.named_children[0] if statement.named_children else None
             member = expression is not None and expression.type == "attribute"
             steps.append(
-                Return(text_of(expression) if expression is not None and member else None)
+                FlowReturn(text_of(expression) if expression is not None and member else None)
             )
         elif statement.type == "raise_statement":
-            steps.append(Return(None))
+            steps.append(FlowReturn(None))
         elif statement.type == "if_statement":
             steps.append(_if_chain([statement, *_later_clauses(statement)]))
         elif statement.type == "match_statement":
@@ -340,35 +342,35 @@ def _later_clauses(statement: Node) -> list[Node]:
     return [c for c in statement.named_children if c.type in ("elif_clause", "else_clause")]
 
 
-def _if_chain(clauses: list[Node]) -> Branch:
+def _if_chain(clauses: list[Node]) -> FlowBranch:
     """if か elif の節から後ろを一つの分岐にする。後ろの elif と else は偽の腕へ入れ子にする。"""
     head, rest = clauses[0], clauses[1:]
     condition = head.child_by_field_name("condition")
     consequence = head.child_by_field_name("consequence")
-    arms = [BranchArm("yes", tuple(_steps(consequence)) if consequence else ())]
+    arms = [FlowBranchArm("yes", tuple(_steps(consequence)) if consequence else ())]
     text = text_of(condition) if condition else "?"
     if not rest:
-        return Branch(text, tuple(arms), "no")
+        return FlowBranch(text, tuple(arms), "no")
     if rest[0].type == "elif_clause":
-        arms.append(BranchArm("no", (_if_chain(rest),)))
+        arms.append(FlowBranchArm("no", (_if_chain(rest),)))
     else:
         body = rest[0].child_by_field_name("body")
-        arms.append(BranchArm("no", tuple(_steps(body)) if body else ()))
-    return Branch(text, tuple(arms), None)
+        arms.append(FlowBranchArm("no", tuple(_steps(body)) if body else ()))
+    return FlowBranch(text, tuple(arms), None)
 
 
-def _match_branch(statement: Node) -> Branch:
+def _match_branch(statement: Node) -> FlowBranch:
     subject = statement.child_by_field_name("subject")
     body = statement.child_by_field_name("body")
-    arms: list[BranchArm] = []
+    arms: list[FlowBranchArm] = []
     for clause in body.named_children if body else []:
         if clause.type != "case_clause":
             continue
         pattern = next((c for c in clause.named_children if c.type == "case_pattern"), None)
         block = next((c for c in clause.named_children if c.type == "block"), None)
         label = "case " + (text_of(pattern) if pattern else "_")
-        arms.append(BranchArm(label, tuple(_steps(block)) if block else ()))
-    return Branch(f"match {text_of(subject)}" if subject else "match", tuple(arms), None)
+        arms.append(FlowBranchArm(label, tuple(_steps(block)) if block else ()))
+    return FlowBranch(f"match {text_of(subject)}" if subject else "match", tuple(arms), None)
 
 
 class _PythonRules(calls_core.RuleDefaults):
@@ -394,7 +396,7 @@ class _PythonRules(calls_core.RuleDefaults):
     def call_parts(self, call: Node) -> CallParts:
         return _call_parts(call)
 
-    def arguments(self, node: Node) -> tuple[Argument, ...]:
+    def arguments(self, node: Node) -> tuple[CallArgument, ...]:
         return _arguments(node)
 
     def function_name(self, node: Node) -> str | None:
@@ -466,8 +468,8 @@ class PythonAdapter:
         # 無名クラスを型の名前で持たない言語
         return None
 
-    def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
-        found: list[Import] = []
+    def imported_modules(self, root_node: Node, _source: bytes, /) -> list[ImportedModule]:
+        found: list[ImportedModule] = []
         for node in import_nodes(self, root_node):
             if node.type == "import_statement":
                 for name in node.children_by_field_name("name"):
@@ -476,19 +478,21 @@ class PythonAdapter:
                         name.child_by_field_name("name") if name.type == "aliased_import" else name
                     )
                     if target is not None:
-                        found.append(Import(text_of(target), target.start_point.row + 1))
+                        found.append(ImportedModule(text_of(target), target.start_point.row + 1))
             else:
                 module = node.child_by_field_name("module_name")
                 if module is not None:
-                    found.append(Import(text_of(module), module.start_point.row + 1))
+                    found.append(ImportedModule(text_of(module), module.start_point.row + 1))
                 elif node.type == "future_import_statement":
-                    found.append(Import("__future__", node.start_point.row + 1))
+                    found.append(ImportedModule("__future__", node.start_point.row + 1))
         return found
 
-    def technology_of(self, module: str) -> str:
+    def technology_name_of(self, module: str) -> str:
         return leading_components(module, 1)
 
-    def imported_names(self, root_node: Node, _source: bytes, path: str, /) -> dict[str, str]:
+    def imported_name_origins(
+        self, root_node: Node, _source: bytes, path: str, /
+    ) -> dict[str, str]:
         return self._imported_names(root_node, path, absolute_only=False)
 
     def _imported_names(
@@ -533,10 +537,10 @@ class PythonAdapter:
     ) -> list[CommandArgument]:
         return _command_arguments(root_node, path)
 
-    def file_path_patterns(
+    def file_path_expressions(
         self, root_node: Node, _source: bytes, path: str, /
-    ) -> list[FilePathPattern]:
-        return _file_path_patterns(root_node, path)
+    ) -> list[FilePathExpression]:
+        return _file_path_expressions(root_node, path)
 
     def added_public_names(
         self,
@@ -544,25 +548,27 @@ class PythonAdapter:
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         return _added_public_names(before, after, changed)
 
     def store_accesses(self, sources: Mapping[str, str]) -> list[StoreAccess]:
         return _store_accesses(sources)
 
-    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
-        return _value_sets(source, path)
+    def string_literal_sets(self, source: str, path: str, /) -> list[StringLiteralSet]:
+        return _string_literal_sets(source, path)
 
-    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
-        return _string_comparisons(source, path)
+    def string_literal_comparisons(
+        self, source: str, path: str, /
+    ) -> list[StringLiteralComparison]:
+        return _string_literal_comparisons(source, path)
 
-    def string_constants(self, source: str, /) -> list[StringConstant]:
-        return _string_constants(source)
+    def top_level_string_constants(self, source: str, /) -> list[TopLevelStringConstant]:
+        return _top_level_string_constants(source)
 
-    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+    def type_field_names(self, text: str, path: str, /) -> list[TypeFieldNames]:
         return _type_fields_of(text, path)
 
-    def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
+    def regex_sites(self, root_node: Node, _source: bytes, path: str, /) -> RegexSites:
         return _regex_scan(root_node, path)
 
     def declarations(self, root_node: Node, _source: bytes, /) -> list[Declaration]:
@@ -573,7 +579,7 @@ class PythonAdapter:
     def call_sites(self, body_node: Node, _source: bytes, /) -> list[CallSite | DeferredSite]:
         return calls_core.call_sites(body_node, load_queries(self.grammar), _RULES)
 
-    def receiver_of(self, expression: Node) -> ReceiverKind:
+    def receiver_kind_of(self, expression: Node) -> ReceiverKind:
         return calls_core.receiver_of(expression, _RULES)
 
     def locals_of(self, body_node: Node) -> Locals:
@@ -607,7 +613,7 @@ class PythonAdapter:
                 body = definition.child_by_field_name("body")
                 body = required(body)
                 # 定義は : を必ず持つ（欠ければ MISSING の節点で補われる）
-                colon = next(c for c in definition.children if c.type == ":")
+                colon = required(next((c for c in definition.children if c.type == ":"), None))
                 spans = split_declaration(outer, BodyBounds(colon, body))
             elif statement.type == "assignment":
                 target = statement.child_by_field_name("left")
@@ -645,7 +651,7 @@ class PythonAdapter:
         self._collect_members(root_node, module, module, path, imported, result)
         return result
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+    def discriminator_flow_steps(self, body_node: Node, _source: bytes, /) -> list[FlowStep]:
         return _steps(body_node)
 
     def isolation_of(
@@ -675,7 +681,7 @@ class PythonAdapter:
         # asyncio の値の共有は型の宣言から確かめられないので、札は出さない
         return Sharing.UNKNOWN
 
-    def body_of(self, member_node: Node) -> Node | None:
+    def body_node_of(self, member_node: Node) -> Node | None:
         definition, _ = _unwrap(member_node)
         if definition.type != "function_definition":
             return None

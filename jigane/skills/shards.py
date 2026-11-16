@@ -23,6 +23,7 @@ from jigane.judgment_map.changes import (
 from jigane.judgment_map.classification import is_whole_deletion, matches_any
 from jigane.judgment_map.configuration import load_config
 from jigane.llm_runs import claude
+from jigane.markdown.fence import fence, one_line
 from jigane.policy_materials.design_doc import shard_materials
 from jigane.preconditions.required import required
 from jigane.reviews.attachments import AttachmentContent, VersionDrift
@@ -32,7 +33,6 @@ from jigane.reviews.lifecycle import (
     PullRequestOrigin,
     RangeOrigin,
     Review,
-    ReviewError,
     ReviewOrigin,
 )
 from jigane.reviews.stored_pairs import load_pairs
@@ -225,7 +225,7 @@ def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]
         lines = file_change(base_tree, root, pair, config)
         if lines[-1] in _OMITTED_MARKERS:
             continue
-        units.append(_unit(new_path, "\n".join(lines) + "\n"))
+        units.append(_unit(new_path, fence("\n".join(lines)) + "\n"))
     return units
 
 
@@ -254,7 +254,7 @@ def _file_units(review: Review, root: Path, withheld: list[str]) -> list[Unit]:
         except UnicodeDecodeError:
             # バイナリは行を読めないため、実装の対象にしない。
             continue
-        units.append(_unit(path, f"=== {path} ===\n{body}\n"))
+        units.append(_unit(path, f"=== {one_line(path)} ===\n{fence(body)}\n"))
     return units
 
 
@@ -287,10 +287,7 @@ def _design_shards(
     review: Review, origin: DesignDocOrigin, units: list[Unit], limit: int
 ) -> tuple[list[Shard], tuple[VersionDrift, ...]]:
     root = Path(review.repository_root)
-    document = root / origin.document_path
-    if not document.is_file():
-        raise ReviewError(f"設計書がありません: {origin.document_path}")
-    read = read_document(document)
+    read = read_document(root, origin.document_path, "設計書")
     materials = shard_materials(
         root,
         origin.document_path,

@@ -3,6 +3,7 @@ from typing import Protocol
 
 import pytest
 
+from jigane.judgment_map import declaration as declaration_module
 from jigane.judgment_map.declaration import (
     DECLARATION_TEXT_LIMIT,
     EMPTY_BODY_WARNING,
@@ -49,6 +50,24 @@ def test_design_doc_section_mentioning_file_and_public_name(tmp_path: Path) -> N
     assert [e.text for e in excerpts] == ["## Two\n\ncalls build_widget here"]
     assert excerpts[0].path == "docs/design.md"
     assert excerpts[0].start_line == 7
+
+
+def test_design_doc_with_uppercase_suffix_is_collected(tmp_path: Path) -> None:
+    _write(tmp_path, "a.py", "x = 1\n")
+    _write(tmp_path, "docs/Design.MD", "# Design\n\n## Two\n\ncalls a.py here\n")
+    excerpts = extract_declaration(tmp_path, ["a.py"]).excerpts
+    assert [e.path for e in excerpts] == ["docs/Design.MD"]
+
+
+def test_markdown_files_accepts_backslash_separated_paths_and_skips_other_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        declaration_module,
+        "walk_tree_files",
+        lambda _root, _start: ["docs\\Guide.MD", "docs\\notes.txt", "docs\\.md", "a.py"],
+    )
+    assert declaration_module._markdown_files(tmp_path) == ["docs\\Guide.MD"]
 
 
 def test_short_names_do_not_match(tmp_path: Path) -> None:

@@ -1,8 +1,10 @@
+import contextlib
 import os
 import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -63,12 +65,15 @@ def test_open_with_different_owner_spelling_is_refused(repo: Path) -> None:
 
 
 _CLAIM_HOLDER = (
-    "import os, sys, time\n"
+    "import os, sys\n"
     "from jigane.storage import locking\n"
     "descriptor = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR)\n"
     "assert locking.try_lock(descriptor)\n"
     "print('locked', flush=True)\n"
-    "time.sleep(60)\n"
+    "if sys.stdin.readline().strip() == 'release':\n"
+    "    locking.unlock(descriptor)\n"
+    "    os.close(descriptor)\n"
+    "    print('released', flush=True)\n"
 )
 
 
@@ -85,6 +90,7 @@ def _start_claim_holder(lock_path: Path) -> subprocess.Popen[str]:
         [sys.executable, "-c", _CLAIM_HOLDER, str(lock_path)],
         # 子が import する jigane を、この試験を動かしている親と同じ木に固定する
         env={**os.environ, "PYTHONPATH": str(Path(store_module.__file__).resolve().parents[2])},
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -93,12 +99,40 @@ def _start_claim_holder(lock_path: Path) -> subprocess.Popen[str]:
     return holder
 
 
+def _close_pipes(holder: subprocess.Popen[str]) -> None:
+    assert holder.stdin is not None
+    assert holder.stdout is not None
+    holder.stdout.close()
+    # 持ち主が先に落ちていると、書き残しの吐き出しで BrokenPipeError が出る。元の失敗を覆わない
+    with contextlib.suppress(OSError):
+        holder.stdin.close()
+
+
 def _stop(holder: subprocess.Popen[str]) -> None:
     """finally を走らせずに落とす。OS が持ち主の終了で錠を外す。"""
     holder.kill()
     holder.wait()
+    _close_pipes(holder)
+
+
+def _release(holder: subprocess.Popen[str]) -> None:
+    """持ち主自身に錠を外させ、外した応答を受けてから終わりを待つ。
+
+    kill で止めると、Windows は錠を非同期に外すため、直後の操作が錠を握られていると見ることがある。
+    """
+    assert holder.stdin is not None
     assert holder.stdout is not None
-    holder.stdout.close()
+    try:
+        holder.stdin.write("release\n")
+        holder.stdin.flush()
+        assert holder.stdout.readline().strip() == "released"
+        holder.wait()
+    finally:
+        if holder.poll() is None:
+            # 応答の確かめに失敗した。持ち主を残さないよう落とす
+            holder.kill()
+            holder.wait()
+        _close_pipes(holder)
 
 
 def test_create_is_refused_with_reason_while_another_process_holds_the_claim(repo: Path) -> None:
@@ -109,12 +143,14 @@ def test_create_is_refused_with_reason_while_another_process_holds_the_claim(rep
             with pytest.raises(ReviewExistsError, match="進行中です"):
                 create_range_review(repo, "main..feature", name)
     finally:
-        _stop(holder)
+        _release(holder)
 
 
 def test_create_succeeds_after_the_claim_holder_is_killed(repo: Path) -> None:
-    holder = _start_claim_holder(_claim_lock_path())
+    lock_path = _claim_lock_path()
+    holder = _start_claim_holder(lock_path)
     _stop(holder)
+    _wait_until_claim_lock_is_free(lock_path)
     review = create_range_review(repo, "main..feature", "mine")
     assert (review.id.directory() / "review.json").is_file()
 
@@ -202,6 +238,13 @@ def _claim_lock_is_free(lock_path: Path) -> bool:
         os.close(descriptor)
 
 
+def _wait_until_claim_lock_is_free(lock_path: Path) -> None:
+    """落ちた持ち主の錠を OS が外すことの確かめ。外れるまで待つ。"""
+    while not _claim_lock_is_free(lock_path):
+        # jigane: allow-flaky FLK-ASYNC-WAIT -- 条件の待ちの試行の間隔で、待ちの上限ではない
+        time.sleep(0.01)
+
+
 def test_claim_is_released_after_a_successful_create(repo: Path) -> None:
     create_range_review(repo, "main..feature", "mine")
     assert _claim_lock_is_free(_claim_lock_path())
@@ -270,7 +313,7 @@ def test_remove_claim_lock_keeps_the_file_while_a_creation_holds_it() -> None:
         assert creation_module.remove_claim_lock(review_id) is False
         assert lock_path.is_file()
     finally:
-        _stop(holder)
+        _release(holder)
     assert creation_module.remove_claim_lock(review_id) is True
     assert not lock_path.exists()
 

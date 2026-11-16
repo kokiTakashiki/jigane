@@ -1,28 +1,28 @@
 import pytest
 
-from jigane.languages.base import RegexAdapter, RegexDialect, RegexScan, RegexUse, parse
+from jigane.languages.base import RegexDialect, RegexSiteExtractor, RegexSites, RegexUse, parse
 from jigane.languages.swift import SwiftAdapter
 
 ADAPTER = SwiftAdapter()
 
 
-def scan(source_text: str) -> RegexScan:
+def scan(source_text: str) -> RegexSites:
     source = source_text.encode()
     tree = parse(ADAPTER, source)
-    return ADAPTER.regex_literals(tree.root_node, source, "A.swift")
+    return ADAPTER.regex_sites(tree.root_node, source, "A.swift")
 
 
 def patterns(source_text: str) -> list[tuple[str, str]]:
-    return [(literal.call, literal.pattern) for literal in scan(source_text).literals]
+    return [(literal.call_name, literal.pattern) for literal in scan(source_text).literal_sites]
 
 
 def test_adapter_satisfies_regex_protocol() -> None:
-    assert isinstance(ADAPTER, RegexAdapter)
+    assert isinstance(ADAPTER, RegexSiteExtractor)
 
 
 def test_regex_values() -> None:
     result = scan("let a = /a+\\d/\nlet b = #/x\\/y/#\n")
-    assert [(r.call, r.pattern, r.dialect, r.line) for r in result.literals] == [
+    assert [(r.call_name, r.pattern, r.dialect, r.line) for r in result.literal_sites] == [
         ("/.../", "a+\\d", RegexDialect.SWIFT, 1),
         ("/.../", "x\\/y", RegexDialect.SWIFT, 2),
     ]
@@ -49,8 +49,8 @@ def test_composed_sites() -> None:
         'let a = Regex(name)\nlet b = try NSRegularExpression(pattern: "a\\(x)")\n'
         'let c = Regex("a" + x)\nlet d = Regex(String(format: "%@", x))\n'
     )
-    assert result.literals == ()
-    assert [(c.call, c.line) for c in result.composed] == [
+    assert result.literal_sites == ()
+    assert [(c.call_name, c.line) for c in result.composed_sites] == [
         ("Regex(...)", 1),
         ("NSRegularExpression", 2),
         ("Regex(...)", 3),
@@ -60,8 +60,8 @@ def test_composed_sites() -> None:
 
 def test_document_order() -> None:
     result = scan("let a = Regex(x)\nlet b = /b/\nlet c = Regex(y)\n")
-    assert [c.line for c in result.composed] == [1, 3]
-    assert [r.line for r in result.literals] == [2]
+    assert [c.line for c in result.composed_sites] == [1, 3]
+    assert [r.line for r in result.literal_sites] == [2]
 
 
 def test_not_picked() -> None:
@@ -74,8 +74,8 @@ def test_not_picked() -> None:
         'print("a")\n'
     )
     result = scan(source)
-    assert result.literals == ()
-    assert result.composed == ()
+    assert result.literal_sites == ()
+    assert result.composed_sites == ()
 
 
 def test_string_escapes() -> None:
@@ -89,8 +89,8 @@ def test_extended_delimiter_string() -> None:
 
 def test_extended_delimiter_interpolation_is_composed() -> None:
     result = scan('let a = Regex(#"a\\#(x)"#)\n')
-    assert result.literals == ()
-    assert [c.call for c in result.composed] == ["Regex(...)"]
+    assert result.literal_sites == ()
+    assert [c.call_name for c in result.composed_sites] == ["Regex(...)"]
 
 
 def test_every_site_is_compile_use() -> None:
@@ -98,9 +98,9 @@ def test_every_site_is_compile_use() -> None:
         'let a = /a/\nlet b = Regex("b")\n'
         'let c = try NSRegularExpression(pattern: "c", options: [])\nlet d = Regex(x)\n'
     )
-    assert {r.use for r in result.literals} == {RegexUse.COMPILE}
-    assert {r.use for r in result.composed} == {RegexUse.COMPILE}
-    assert len(result.literals) == 3
+    assert {r.use for r in result.literal_sites} == {RegexUse.COMPILE}
+    assert {r.use for r in result.composed_sites} == {RegexUse.COMPILE}
+    assert len(result.literal_sites) == 3
 
 
 def test_multiline_string_strips_closing_indent() -> None:
@@ -125,15 +125,15 @@ def test_multiline_interpolation_is_composed() -> None:
         'let a = Regex("""\n    a\\(x)\n    """)\nlet b = Regex(#"""\n    a\\#(x)\n    """#)\n'
     )
     result = scan(source)
-    assert result.literals == ()
-    assert [c.line for c in result.composed] == [1, 4]
+    assert result.literal_sites == ()
+    assert [c.line for c in result.composed_sites] == [1, 4]
 
 
 def test_multiline_with_broken_grammar_is_composed() -> None:
     # `\d` は Swift では不正なエスケープで、文法が ERROR 節点を出す
     result = scan('let a = Regex("""\n    a+\\d\n    """)\n')
-    assert result.literals == ()
-    assert len(result.composed) == 1
+    assert result.literal_sites == ()
+    assert len(result.composed_sites) == 1
 
 
 def test_module_qualified_calls() -> None:
@@ -149,17 +149,17 @@ def test_local_constant_is_followed_one_step() -> None:
         'func f() {\n  let p = "a+" + "b"\n  _ = Regex(p)\n  var q = "c"\n'
         "  _ = try NSRegularExpression(pattern: q)\n}\n"
     )
-    assert [(x.call, x.pattern) for x in found.literals] == [
+    assert [(x.call_name, x.pattern) for x in found.literal_sites] == [
         ("Regex(...)", "a+b"),
         ("NSRegularExpression", "c"),
     ]
-    assert found.composed == ()
+    assert found.composed_sites == ()
 
 
 def test_local_constant_is_not_followed_across_two_steps() -> None:
     found = scan('func f() {\n  let p = "a"\n  let q = p\n  _ = Regex(q)\n}\n')
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 @pytest.mark.parametrize(
@@ -175,20 +175,20 @@ def test_local_constant_is_not_followed_across_two_steps() -> None:
 )
 def test_local_constant_is_not_followed(body: str) -> None:
     found = scan(f"func f() {{\n  {body}\n}}\n")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_parameter_is_not_followed() -> None:
     found = scan("func f(p: String) {\n  _ = Regex(p)\n}\n")
-    assert found.literals == ()
-    assert len(found.composed) == 1
+    assert found.literal_sites == ()
+    assert len(found.composed_sites) == 1
 
 
 def test_call_without_argument_list_is_not_a_site() -> None:
     result = scan("let c = Regex { x }\n")
-    assert result.composed == ()
-    assert result.literals == ()
+    assert result.composed_sites == ()
+    assert result.literal_sites == ()
 
 
 def test_constant_shapes_are_pinned() -> None:
@@ -198,8 +198,8 @@ def test_constant_shapes_are_pinned() -> None:
         'let d = NSRegularExpression(pattern: ("p"))\n'
     )
     result = scan(source)
-    assert [(r.call, r.pattern) for r in result.literals] == [
+    assert [(r.call_name, r.pattern) for r in result.literal_sites] == [
         ("Regex(...)", "a"),
         ("NSRegularExpression", "p"),
     ]
-    assert [c.line for c in result.composed] == [2]
+    assert [c.line for c in result.composed_sites] == [2]

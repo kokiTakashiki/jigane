@@ -1,14 +1,14 @@
 from jigane.languages.base import (
-    Call,
+    CallReceiver,
     CallSite,
-    Creation,
+    CreationReceiver,
     DeferredSite,
-    Member,
-    Name,
-    Paren,
+    MemberReceiver,
+    NameReceiver,
+    ParenReceiver,
     ReceiverKind,
-    Self,
-    Super,
+    SelfReceiver,
+    SuperReceiver,
     parse,
 )
 from jigane.languages.swift import SwiftAdapter
@@ -43,7 +43,7 @@ def _sites() -> list[CallSite | DeferredSite]:
     root = parse(adapter, SOURCE).root_node
     declarations = adapter.type_members(root, SOURCE, "A.swift")
     node = next(d.node for d in declarations if d.name == "f" and hasattr(d, "owner"))
-    body = adapter.body_of(node)
+    body = adapter.body_node_of(node)
     assert body is not None
     return adapter.call_sites(body, SOURCE)
 
@@ -57,7 +57,7 @@ def _call(name: str) -> CallSite:
 
 
 def _kind(site: CallSite) -> ReceiverKind:
-    return adapter.receiver_of(required(site.receiver))
+    return adapter.receiver_kind_of(required(site.receiver))
 
 
 def test_labels_are_carried_by_arguments_and_name_is_the_base_name() -> None:
@@ -73,14 +73,14 @@ def test_trailing_closures_count_as_arguments_with_their_labels() -> None:
 
 def test_implicit_self_and_explicit_self() -> None:
     assert _call("foo").receiver is None
-    assert isinstance(_kind(_call("bar")), Self)
-    assert isinstance(_kind(_call("setup")), Super)
+    assert isinstance(_kind(_call("bar")), SelfReceiver)
+    assert isinstance(_kind(_call("setup")), SuperReceiver)
 
 
 def test_type_name_variable_and_member_receivers() -> None:
-    assert _kind(_call("baz")) == Name("B")
+    assert _kind(_call("baz")) == NameReceiver("B")
     member = _kind(_call("e"))
-    assert isinstance(member, Member)
+    assert isinstance(member, MemberReceiver)
     assert member.name == "d"
 
 
@@ -88,20 +88,20 @@ def test_creation_by_call_and_by_init() -> None:
     calls = _calls()
     constructed = next(c for c in calls if c.name == "T" and not c.is_creation)
     assert constructed.receiver is None
-    assert isinstance(adapter.receiver_of(constructed.node), Call)
+    assert isinstance(adapter.receiver_kind_of(constructed.node), CallReceiver)
     init = next(c for c in calls if c.is_creation)
     assert init.name == "T"
     assert init.receiver is None
-    kind = adapter.receiver_of(init.node)
-    assert isinstance(kind, Creation)
+    kind = adapter.receiver_kind_of(init.node)
+    assert isinstance(kind, CreationReceiver)
     assert kind.type_text == "T"
 
 
 def test_optional_and_forced_chaining() -> None:
-    assert _kind(_call("b")) == Name("a")
+    assert _kind(_call("b")) == NameReceiver("a")
     forced = _kind(_call("c"))
-    assert isinstance(forced, Paren)
-    assert adapter.receiver_of(forced.inner) == Name("a")
+    assert isinstance(forced, ParenReceiver)
+    assert adapter.receiver_kind_of(forced.inner) == NameReceiver("a")
 
 
 def test_argument_closure_calls_are_calls_of_the_declaration() -> None:
@@ -145,7 +145,7 @@ def _swiftui_names() -> list[str]:
     root = parse(adapter, SWIFTUI_SOURCE).root_node
     declarations = adapter.type_members(root, SWIFTUI_SOURCE, "TimerView.swift")
     node = next(d.node for d in declarations if d.name == "body" and hasattr(d, "owner"))
-    body = adapter.body_of(node)
+    body = adapter.body_node_of(node)
     assert body is not None
     sites = adapter.call_sites(body, SWIFTUI_SOURCE)
     assert all(isinstance(s, CallSite) for s in sites)
@@ -163,5 +163,5 @@ def test_stored_closure_stays_deferred() -> None:
     root = parse(adapter, source).root_node
     declarations = adapter.type_members(root, source, "A.swift")
     node = next(d.node for d in declarations if d.name == "f" and hasattr(d, "owner"))
-    sites = adapter.call_sites(required(adapter.body_of(node)), source)
+    sites = adapter.call_sites(required(adapter.body_node_of(node)), source)
     assert [s.kind for s in sites if isinstance(s, DeferredSite)] == ["lambda"]

@@ -161,7 +161,7 @@ def test_diagrams_output_carries_the_policy_figures_in_registry_order(tmp_path: 
     assert discriminators.panels[0].title.startswith("m.decide m.py:")
     assert "range_text" in _figure_of(result, "readers").panels[0].mermaid
     # 資料の本文と同じ関数の出力で、写しではない
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     material = macro.diagram_materials_text(AssemblyInput.load(review), sections)
     for placed in result.figures:
         figure = placed.figure

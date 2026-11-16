@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from pr_support import URL, grow_head
+from review_fakes import current_form_findings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
@@ -66,7 +67,9 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
         "groups": {"micro": [_finding(1)]},
         "themes": [],
     }
-    (created.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (created.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return created
 
 
@@ -91,7 +94,9 @@ def pr_review(
         "groups": {"micro": [finding]},
         "themes": [],
     }
-    (created.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (created.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return created
 
 

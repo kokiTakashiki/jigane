@@ -39,6 +39,7 @@ from jigane.llm_runs.launch_failure import (
     StoredInvocation,
 )
 from jigane.llm_runs.prompt_stamp import PromptStamp
+from jigane.markdown.fence import one_line, path_bullets
 from jigane.policy_materials.design_doc import (
     SECTION_DOCUMENT,
     SECTION_MAIN_DOCUMENT,
@@ -69,9 +70,13 @@ from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import ShardedEstimate
 from jigane.skills.mcp import NO_MCP, McpSelection
 from jigane.skills.shards import Shard
+from jigane.text.prompt_labels import MCP_AVAILABLE_LABEL
 
 DIFF_INTRO = macro.DIFF_CHANGES_INTRO
-FEATURE_INTRO = "変更前は空。各ファイルの本文を `=== パス ===` の見出しの下に載せる。"
+FEATURE_INTRO = (
+    "変更前は空。各ファイルの本文を `=== パス ===` の見出しの下に、"
+    "バッククォートの柵で囲んで載せる。"
+)
 # 設計書の計画の導入文。受け持ちの表の行は群の名前で引き、文は群によらず同じ一か所に置く
 DOCUMENT_SHARD_INTRO = (
     "設計書のレビューの設計書のシャードである。担当のファイルは設計書そのもので、"
@@ -317,8 +322,9 @@ def mcp_note(mcp: McpSelection) -> str:
     """プロンプトの $mcp_note に差し込む、MCP の有無の説明。置き場の無い雛形では使われない。"""
     if mcp.servers:
         return (
-            f"次の MCP が使える: {', '.join(mcp.names)}。体系の項目はこれらの MCP の道具で引いて"
-            "本文を読み、確かめた識別子を references に書く。記憶だけで書かない。"
+            f"{MCP_AVAILABLE_LABEL.text}{', '.join(one_line(name) for name in mcp.names)}。"
+            "体系の項目はこれらの MCP の道具で引いて本文を読み、"
+            "確かめた識別子を references に書く。記憶だけで書かない。"
         )
     return (
         "MCP は渡されていない。体系の識別子は知識から書いてよいが、確かめられない項目は書かない。"
@@ -328,11 +334,25 @@ def mcp_note(mcp: McpSelection) -> str:
 
 def mcp_guide_note(mcp: McpSelection) -> str:
     """プロンプトの $mcp_guide に差し込む、MCP の使い分けの節。無ければ空で、行も残さない。"""
-    # load が全てに入れるか全て None にするので、先頭を見れば足りる
-    if not mcp.servers or mcp.servers[0].use_for is None:
+    # load が全てに入れるか全て None にするので、一つでも None なら使い分けは渡されていない
+    entries = [(server.name, server.use_for) for server in mcp.servers]
+    if not entries or any(use_for is None for _, use_for in entries):
         return ""
-    lines = "\n".join(f"- {server.name}: {server.use_for}" for server in mcp.servers)
+    # read_guide が use_for を改行の無い一行に限るので、残る制御文字だけを見える形にすれば足りる
+    lines = "\n".join(
+        f"- {one_line(name)}: {one_line(use_for)}"
+        for name, use_for in entries
+        if use_for is not None
+    )
     return f"\n\n### MCP の使い分け\n\n{lines}"
+
+
+def _one_line_concerns(concerns: ShardConcerns) -> ShardConcerns:
+    """プロンプトに並べる懸念の文だけを一行にする。runs.json へ記録する値は変えない。"""
+    return replace(
+        concerns,
+        passed=tuple(replace(item, text=one_line(item.text)) for item in concerns.passed),
+    )
 
 
 def shard_concerns(group: GroupId, review: Review, shard: Shard) -> ShardConcerns:
@@ -372,12 +392,12 @@ def build_shard_prompt(
         mode=review.mode,
         shard_number=number,
         shard_total=total,
-        shard_files="\n".join(f"- {path}" for path in shard.paths),
+        shard_files=path_bullets(shard.paths),
         shard_intro=_shard_intro(shard, group),
         shard_content=content,
         shard_checks=policy_regex.shard_checks(prompt_name, review, shard.paths),
         design=_design_insert(shard),
-        macro_concerns=concerns_section(concerns),
+        macro_concerns=concerns_section(_one_line_concerns(concerns)),
         history=_history_text(group, assembly, shard),
         mcp_note=mcp_note(mcp),
         mcp_guide=mcp_guide_note(mcp),

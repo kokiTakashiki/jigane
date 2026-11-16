@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 import pytest
-from review_fakes import write_fake_review
+from review_fakes import current_form_findings, write_fake_review
+from runs_support import write_runs_json
 
 from jigane.groups.definitions import MACRO, MICRO
 from jigane.reviews.catalog import (
@@ -75,6 +76,7 @@ ROW = {
     "is_error": False,
     "terminal_reason": None,
     "permission_denials": 0,
+    "started_at": "2026-11-01T00:00:00+00:00",
     "max_budget_usd": 0.5,
     "cost_usd": 0.25,
     "cost_source": "measured",
@@ -88,7 +90,7 @@ def test_read_group_run_reads_typed_values(tmp_path: Path) -> None:
         "discarded": [{"source": "S1", "reason": "r"}],
     }
     located = located_in(tmp_path)
-    (located.directory / "runs.json").write_text(json.dumps({"macro": run}), encoding="utf-8")
+    write_runs_json(located.directory, {"macro": run})
 
     stored = read_group_run(located, MACRO)
 
@@ -143,7 +145,9 @@ def make_source(tmp_path: Path) -> Path:
     write_fake_review(source, source / "tree")
     (source / "findings.json").write_text(
         json.dumps(
-            {"last_number": 2, "groups": {"macro": [_stored("F1")], "micro": [_stored("F2")]}}
+            current_form_findings(
+                {"last_number": 2, "groups": {"macro": [_stored("F1")], "micro": [_stored("F2")]}}
+            )
         ),
         encoding="utf-8",
     )

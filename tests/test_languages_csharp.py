@@ -270,7 +270,7 @@ def test_locals_of_skips_a_declarator_without_a_name() -> None:
     source = b"class C { void M() { A.B (x) = 1; int a = 1; } }"
     root = parse(adapter, source).root_node
     member = next(d for d in adapter.type_members(root, source, "C.cs") if d.name == "M")
-    body = required(adapter.body_of(member.node))
+    body = required(adapter.body_node_of(member.node))
     assert [v.name for v in adapter.locals_of(body).variables] == ["a"]
 
 

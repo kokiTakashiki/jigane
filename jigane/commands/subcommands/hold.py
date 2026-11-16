@@ -12,9 +12,15 @@ from jigane.reviews.resolution import resolve_review
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
-    selecting = subparsers.add_parser("hold", help="指摘（F、B の番号）を保留にします")
+    selecting = subparsers.add_parser(
+        "hold",
+        help="指摘（F、B の番号）を保留にします。--reason で理由を残せます（任意）",
+    )
     selecting.add_argument("review")
     selecting.add_argument("findings", nargs="+", metavar="finding")
+    selecting.add_argument(
+        "--reason", default=selection_module.NO_HOLD_REASON, help="保留の理由（任意）"
+    )
     selecting.add_argument("--json", action="store_true")
     selecting.set_defaults(handler=run)
 
@@ -23,7 +29,9 @@ def run(args: argparse.Namespace, context: Context) -> int:
     del context
     review = load_review(resolve_review(args.review))
     directory = review.id.directory()
-    _, lost = selection_module.hold(directory, args.findings, past_round_reader(directory))
+    _, lost = selection_module.hold(
+        directory, args.findings, past_round_reader(directory), args.reason
+    )
     print_lost_reasons(lost)
     print_selection(
         review, as_json=args.json, heading=f"保留にしました: {' '.join(args.findings)}"

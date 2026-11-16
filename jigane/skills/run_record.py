@@ -5,12 +5,11 @@
 どちらも `runs.json` とは別のファイルで、前の回の結果を上書きしない。
 """
 
-import copy
 import json
 import os
 import signal
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -25,7 +24,7 @@ from jigane.llm_runs.cost import total_by_source
 from jigane.reviews.lifecycle import Review
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
-from jigane.storage.store_format import upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 STOPPED_FILE = "stopped_runs.json"
 
@@ -235,65 +234,14 @@ def process_presence(pid: int) -> ProcessPresence:
 
 
 # run_in_progress.json と stopped_runs.json の形の版。保存物の形を変えたら一つ上げ、
-# それぞれの _UPGRADES に前の版からの移しを足す
+# 古い版は読まずに止める
 IN_PROGRESS_FORMAT = 2
 STOPPED_FORMAT = 3
 
 
-def _drop_cost_usd(record: dict[str, Any]) -> None:
-    # 実行の金額を記録の行に持っていた時代の鍵。今の版は金額を持たず、読み口も無い
-    record.pop("cost_usd", None)
-
-
-def _upgrade_in_progress_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の run_in_progress.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    for record in upgraded.values():
-        _drop_cost_usd(record)
-    return upgraded
-
-
-def _upgrade_stopped_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の stopped_runs.json を次の版へ移す。
-
-    種類の欄が無い行は、止めた時刻の有無から決める。時刻が無いのは強制終了だけだった。
-    """
-    upgraded = copy.deepcopy(dict(raw))
-    for records in upgraded.values():
-        for record in records:
-            _drop_cost_usd(record)
-            if "kind" not in record:
-                record["kind"] = (
-                    StopKind.VANISHED if record["stopped_at"] is None else StopKind.INTERRUPT
-                ).value
-    return upgraded
-
-
-def _upgrade_stopped_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の stopped_runs.json を次の版へ移す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    for records in upgraded.values():
-        for record in records:
-            # 和は completed_invocation_costs から数え直すので、書いてあった値は読まない
-            record.pop("completed_cost_usd", None)
-    return upgraded
-
-
-# 保存された版から次の版への移し。それぞれの読む境が今の版まで順に回す
-_IN_PROGRESS_UPGRADES: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
-    1: _upgrade_in_progress_v1
-}
-_STOPPED_UPGRADES: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
-    1: _upgrade_stopped_v1,
-    2: _upgrade_stopped_v2,
-}
-
-
 def load_in_progress(raw: Mapping[str, Any]) -> dict[GroupId, RunInProgress]:
-    """run_in_progress.json を読む境の一か所。今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(
-        IN_PROGRESS_FILE, raw, current=IN_PROGRESS_FORMAT, upgrades=_IN_PROGRESS_UPGRADES
-    )
+    """run_in_progress.json を読む境の一か所。今の版以外は止め、今の版の型へ読む。"""
+    stored = require_current_version(IN_PROGRESS_FILE, raw, current=IN_PROGRESS_FORMAT)
     return {GroupId(group): RunInProgress.from_json(record) for group, record in stored.items()}
 
 
@@ -303,8 +251,8 @@ def dump_in_progress(runs: Mapping[GroupId, RunInProgress]) -> dict[str, Any]:
 
 
 def load_stopped(raw: Mapping[str, Any]) -> dict[GroupId, list[StoppedRun]]:
-    """stopped_runs.json を読む境の一か所。今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(STOPPED_FILE, raw, current=STOPPED_FORMAT, upgrades=_STOPPED_UPGRADES)
+    """stopped_runs.json を読む境の一か所。今の版以外は止め、今の版の型へ読む。"""
+    stored = require_current_version(STOPPED_FILE, raw, current=STOPPED_FORMAT)
     return {
         GroupId(group): [StoppedRun.from_json(record) for record in records]
         for group, records in stored.items()

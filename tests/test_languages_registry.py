@@ -1,3 +1,6 @@
+from typing import get_args
+
+from jigane.languages.base import VALUE_KINDS, MemberKind
 from jigane.languages.registry import (
     adapter_for,
     adapters,
@@ -45,3 +48,8 @@ def test_build_paths() -> None:
     assert not is_build_path(".github/CODEOWNERS", registered)
     assert not is_build_path("docs/Makefile.md", registered)
     assert not is_build_path("src/a.py", registered)
+
+
+def test_value_kinds_are_member_kinds_without_callables() -> None:
+    assert set(VALUE_KINDS) <= set(get_args(MemberKind))
+    assert not set(VALUE_KINDS) & {"method", "constructor"}

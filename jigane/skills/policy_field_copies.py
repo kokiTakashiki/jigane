@@ -6,7 +6,7 @@ from pathlib import Path
 from jigane.figures.models import RowChange, TableFigure, TableRow
 from jigane.git.tree_files import read_tree_text, work_files
 from jigane.languages import registry
-from jigane.languages.base import TypeFieldReader, TypeFields
+from jigane.languages.base import TypeFieldNameExtractor, TypeFieldNames
 from jigane.policy_materials import changed_files
 from jigane.reviews.lifecycle import Review
 
@@ -28,15 +28,15 @@ HEADER = (
 MIN_COMMON = 2
 
 
-def _types_of(root: Path, path: str) -> list[TypeFields]:
+def _types_of(root: Path, path: str) -> list[TypeFieldNames]:
     """言語アダプタの口で読んだファイルのトップレベルの型。口を持たない言語と読めないファイルは空。"""
     adapter = registry.adapter_for(path)
-    if not isinstance(adapter, TypeFieldReader):
+    if not isinstance(adapter, TypeFieldNameExtractor):
         return []
     text = read_tree_text(root, path)
     if text is None:
         return []
-    return adapter.type_fields(text, path)
+    return adapter.type_field_names(text, path)
 
 
 def _public(fields: tuple[str, ...]) -> frozenset[str]:
@@ -45,8 +45,8 @@ def _public(fields: tuple[str, ...]) -> frozenset[str]:
 
 @dataclass(frozen=True)
 class _Copy:
-    added: TypeFields
-    other: TypeFields
+    added: TypeFieldNames
+    other: TypeFieldNames
     common: tuple[str, ...]
 
 
@@ -62,26 +62,26 @@ def _copies(review: Review) -> list[_Copy]:
     before: dict[tuple[str, str], frozenset[str]] = {}
     for path in changed_files.file_changes(review, before=True):
         for item in _types_of(base_root, path):
-            before[(item.path, item.name)] = _public(item.fields)
+            before[(item.path, item.type_name)] = _public(item.field_names)
     # 比べる相手は、変更後の木の追跡されたファイルすべての型
     everything = [item for path in work_files(root).files for item in _types_of(root, path)]
     copies: list[_Copy] = []
     for path in after_changed:
         for item in _types_of(root, path):
-            mine = _public(item.fields)
-            if not mine or before.get((item.path, item.name)) == mine:
+            mine = _public(item.field_names)
+            if not mine or before.get((item.path, item.type_name)) == mine:
                 continue
             for other in everything:
-                if (other.path, other.name) == (item.path, item.name):
+                if (other.path, other.type_name) == (item.path, item.type_name):
                     continue
-                shared = mine & _public(other.fields)
-                common = tuple(name for name in item.fields if name in shared)
+                shared = mine & _public(other.field_names)
+                common = tuple(name for name in item.field_names if name in shared)
                 if len(common) >= MIN_COMMON:
                     copies.append(_Copy(item, other, common))
     return copies
 
 
-def _place(item: TypeFields) -> str:
+def _place(item: TypeFieldNames) -> str:
     return f"{item.path}:{item.line}"
 
 
@@ -93,9 +93,9 @@ def field_copy_table(review: Review) -> TableFigure | None:
     rows = tuple(
         TableRow(
             (
-                f"`{copy.added.name}`",
+                f"`{copy.added.type_name}`",
                 _place(copy.added),
-                f"`{copy.other.name}`",
+                f"`{copy.other.type_name}`",
                 _place(copy.other),
                 "、".join(f"`{name}`" for name in copy.common),
                 str(len(copy.common)),

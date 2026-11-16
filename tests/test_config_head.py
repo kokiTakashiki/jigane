@@ -64,7 +64,7 @@ def test_diff_shard_with_justfile_gets_the_set_lines(review: Review) -> None:
         1,
         concerns=ShardConcerns(),
     )
-    assert "=== justfile （冒頭の設定） ===\nset unstable\nset lists" in prompt
+    assert "=== justfile （冒頭の設定） ===\n```\nset unstable\nset lists" in prompt
 
 
 def test_diff_shard_with_python_gets_no_head(review: Review) -> None:
@@ -96,7 +96,7 @@ def test_rebuttal_changes_carry_the_head(review: Review, monkeypatch: pytest.Mon
     plan = ShardPlan(ShardPlanKind.DIFF, (unit("justfile"), unit("src/a.py")), ())
     changes = sharded._changes_with_config_heads(review, plan)
     assert changes.startswith("### 変更\n\ndiff")
-    assert "=== justfile （冒頭の設定） ===\nset unstable\nset lists" in changes
+    assert "=== justfile （冒頭の設定） ===\n```\nset unstable\nset lists" in changes
     only_python = ShardPlan(ShardPlanKind.DIFF, (unit("src/a.py"),), ())
     assert sharded._changes_with_config_heads(review, only_python) == "### 変更\n\ndiff"
     rendered = adversarial.render_prompt("rebuttal", changes, candidates_json=[])

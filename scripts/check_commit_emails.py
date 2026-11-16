@@ -14,13 +14,14 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from jigane.git.process import run_command
+from jigane.git import process
 
 NOREPLY_DOMAIN = "users.noreply.github.com"
 ADDRESS_PARTS = 2  # ローカル部とドメイン
 # 区切りは改行やアドレスに現れない制御文字にする
 SEPARATOR = "\x1f"
-LOG_FORMAT = SEPARATOR.join(["%h", "%ae", "%ce"])
+# SEPARATOR で %h・%ae・%ce を区切る整形指定。check_egress が定数と見なせるよう 1 つの文字列にする
+LOG_FORMAT_ARGUMENT = "--format=%h\x1f%ae\x1f%ce"
 
 
 def is_noreply(address: str) -> bool:
@@ -38,8 +39,8 @@ def is_noreply(address: str) -> bool:
 
 
 def find_offenders(root: Path, revision_range: str) -> list[str]:
-    log = run_command(
-        ["git", "log", f"--format={LOG_FORMAT}", "--end-of-options", revision_range, "--"],
+    log = process.run_command(
+        ["git", "log", LOG_FORMAT_ARGUMENT, "--end-of-options", revision_range, "--"],
         cwd=root,
     )
     offenders: list[str] = []

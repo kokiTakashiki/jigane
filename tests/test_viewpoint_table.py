@@ -20,8 +20,8 @@ from jigane.groups.viewpoints import (
 from jigane.skills import macro, micro, security, shared_rules
 from jigane.skills.policy_principles import principle_text
 
-HEADER = "uuid,group,kind,number,legacy_number,name,question,design_question\n"
-ROW = "{uuid},macro,policy,{number},{legacy},,,\n"
+HEADER = "uuid,group,kind,number,name,question,design_question\n"
+ROW = "{uuid},macro,policy,{number},,,\n"
 UUID_A = "11111111-1111-4111-8111-111111111111"
 UUID_B = "22222222-2222-4222-8222-222222222222"
 
@@ -35,6 +35,19 @@ def test_numbers_match_each_group_in_code() -> None:
     assert _numbers(GroupId.MICRO) == micro.VIEWPOINTS
     assert _numbers(GroupId.SECURITY) == (*security.VIEWPOINTS, *asvs)
     assert _numbers(GroupId.MACRO) == macro.VIEWPOINTS
+
+
+def test_viewpoint_kinds_match_the_kinds_in_the_table() -> None:
+    assert {kind.value for kind in ViewpointKind} == {
+        viewpoint.kind.value for viewpoint in VIEWPOINTS
+    }
+
+
+def test_design_doc_viewpoint_ids_are_the_macro_rows_with_a_design_question() -> None:
+    # M5（指摘への対応）と M7（単純さ）は表の design_question が空なので、設計書の形には入らない。
+    # division.VIEWPOINTS が `if row.design_question` で引く規則と同じ
+    expected = {row.number for row in of_group(GroupId.MACRO) if row.design_question}
+    assert {item.value for item in division.ViewpointId} == expected
 
 
 def test_rendered_prompts_list_every_question() -> None:
@@ -79,28 +92,22 @@ def test_design_prompt_lists_every_design_question() -> None:
         assert line in inserted.split("\n"), viewpoint.number
 
 
-def _write_table(tmp_path: Path, *rows: tuple[str, str, str]) -> Path:
+def _write_table(tmp_path: Path, *rows: tuple[str, str]) -> Path:
     table = tmp_path / "v.csv"
-    body = "".join(ROW.format(uuid=u, number=n, legacy=g) for u, n, g in rows)
+    body = "".join(ROW.format(uuid=u, number=n) for u, n in rows)
     table.write_text(HEADER + body, encoding="utf-8")
     return table
 
 
 def test_duplicate_uuid_is_rejected(tmp_path: Path) -> None:
-    table = _write_table(tmp_path, (UUID_A, "M0", "M0"), (UUID_A, "M1", "M1"))
+    table = _write_table(tmp_path, (UUID_A, "M0"), (UUID_A, "M1"))
     with pytest.raises(ValueError, match="uuid"):
         load_viewpoints(table)
 
 
 def test_duplicate_number_is_rejected(tmp_path: Path) -> None:
-    table = _write_table(tmp_path, (UUID_A, "M0", "A"), (UUID_B, "M0", "B"))
+    table = _write_table(tmp_path, (UUID_A, "M0"), (UUID_B, "M0"))
     with pytest.raises(ValueError, match="number"):
-        load_viewpoints(table)
-
-
-def test_duplicate_legacy_number_is_rejected(tmp_path: Path) -> None:
-    table = _write_table(tmp_path, (UUID_A, "M0", "A"), (UUID_B, "M1", "A"))
-    with pytest.raises(ValueError, match="legacy_number"):
         load_viewpoints(table)
 
 

@@ -20,7 +20,6 @@ from jigane.findings.discard import (
     discard_summary,
     summary_of_counts,
 )
-from jigane.findings.discarded_nits import LEGACY_NOT_SELECTABLE
 from jigane.findings.records import (
     HISTORY_FILE,
     GroupResult,
@@ -30,9 +29,7 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import MACRO
 from jigane.groups.viewpoints import by_number
-from jigane.publishing.rendering import build_context
 from jigane.reviews.lifecycle import Review, create_feature_review
-from jigane.reviews.selection import Picked, current_findings, load_selection, save_selection
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 
@@ -344,7 +341,8 @@ def _finding() -> dict[str, Any]:
 
 def test_history_rounds_without_counts_are_read_as_unrecorded(tmp_path: Path) -> None:
     (tmp_path / HISTORY_FILE).write_text(
-        json.dumps({"groups": {"macro": [{"ran_at": "t", "findings": []}]}}), encoding="utf-8"
+        json.dumps({"format": 4, "groups": {"macro": [{"ran_at": "t", "findings": []}]}}),
+        encoding="utf-8",
     )
     (round_,) = history_rounds(tmp_path, MACRO)
     assert round_.discard == DiscardSummary(DiscardState.UNRECORDED)
@@ -366,66 +364,7 @@ def test_macro_findings_drop_from_concern_with_a_warning(
     assert "from_concern" in caplog.text
 
 
-def _as_old_record(review: Review) -> None:
-    """写した nit を指摘から外し、runs.json の considered だけが捨てた候補を持つ古い記録にする。"""
-    path = review.id.directory() / "findings.json"
-    state = json.loads(path.read_text("utf-8"))
-    state["groups"]["macro"] = [
-        f for f in state["groups"]["macro"] if f["viewpoint"] != "discarded"
-    ]
-    path.write_text(json.dumps(state), encoding="utf-8")
-
-
-def test_old_record_shows_discarded_candidates_as_nit_lines_without_the_reason(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    review = create_feature_review(project, ["src"], "p")
-    fake = _fake_with_discarded([discovered("M2")])
-    assert main(["run", "shop:p", "macro"], invoke=fake) == EXIT_OK
-    _as_old_record(review)
-    capsys.readouterr()
-    assert main(["show", "shop:p", "macro"]) == EXIT_OK
-    text = capsys.readouterr().out
-    assert text.count(f" nit  {NO_CONCERN_CLAIM}") == 2
-    assert "図に現れていない呼び出しに頼る" not in text
-    # nit の行が並ぶ結果を「指摘なし」と読ませず、捨てた件数も出さない
-    assert "指摘なし" not in text
-    assert "捨てた" not in text
-    assert main(["show", "shop:p", "macro", "--json"]) == EXIT_OK
-    nits = [
-        f for f in json.loads(capsys.readouterr().out)["findings"] if f["viewpoint"] == "discarded"
-    ]
-    assert [f["id"] for f in nits] == ["D-S1", "D-S2"]
-    assert [f["claim"] for f in nits] == [NO_CONCERN_CLAIM] * 2
-    assert all(f["severity"] == "nit" and f["in_reply"] is False for f in nits)
-    assert all(f["selection_note"] == LEGACY_NOT_SELECTABLE for f in nits)
-    # 保存物は書き換えない
-    stored = json.loads((review.id.directory() / "findings.json").read_text("utf-8"))
-    assert all(f["viewpoint"] != "discarded" for f in stored["groups"]["macro"])
-
-
-def _old_record_review(project: Path) -> Review:
-    review = create_feature_review(project, ["src"], "p")
-    assert (
-        main(["run", "shop:p", "macro"], invoke=_fake_with_discarded([discovered("M2")]))
-        == EXIT_OK
-    )
-    _as_old_record(review)
-    return review
-
-
-def test_old_record_nit_lines_carry_the_not_selectable_mark(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _old_record_review(project)
-    capsys.readouterr()
-    assert main(["show", "shop:p", "macro"]) == EXIT_OK
-    lines = [x for x in capsys.readouterr().out.splitlines() if "D-S" in x]
-    assert len(lines) == 2
-    assert all(line.endswith(f"[{LEGACY_NOT_SELECTABLE}]") for line in lines)
-
-
-def test_other_findings_have_a_null_selection_note(
+def test_show_json_findings_carry_neither_in_reply_nor_selection_note(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     create_feature_review(project, ["src"], "p")
@@ -437,64 +376,7 @@ def test_other_findings_have_a_null_selection_note(
     assert main(["show", "shop:p", "macro", "--json"]) == EXIT_OK
     findings = json.loads(capsys.readouterr().out)["findings"]
     assert findings
-    assert all(f["selection_note"] is None and f["in_reply"] is True for f in findings)
-
-
-@pytest.mark.parametrize("command", ["pick", "unpick", "hold"])
-def test_selecting_an_old_record_nit_fails_with_the_not_selectable_message(
-    project: Path, capsys: pytest.CaptureFixture[str], command: str
-) -> None:
-    _old_record_review(project)
-    capsys.readouterr()
-    assert main([command, "shop:p", "D-S1"]) != EXIT_OK
-    err = capsys.readouterr().err
-    assert LEGACY_NOT_SELECTABLE in err
-    assert "知らない指摘の番号です" not in err
-
-
-def test_report_context_leaves_out_old_record_nits(project: Path) -> None:
-    review = _old_record_review(project)
-    directory = review.id.directory()
-    kept = [f.finding.id for f in current_findings(directory).values()]
-    assert kept
-    selection = load_selection(directory)
-    selection.verdicts = {n: Picked() for n in kept}
-    save_selection(directory, selection)
-    context, _ = build_context(review)
-    assert [f["number"] for f in context["findings"]] == sorted(kept)
-    assert not any(f["number"].startswith("D-") for f in context["findings"])
-
-
-def test_mixed_legacy_and_unknown_numbers_report_both(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _old_record_review(project)
-    capsys.readouterr()
-    assert main(["pick", "shop:p", "D-S1", "F99"]) != EXIT_OK
-    err = capsys.readouterr().err
-    assert f"{LEGACY_NOT_SELECTABLE}: D-S1。知らない指摘の番号です: F99" in err
-
-
-def test_unobject_an_old_record_nit_fails_with_the_not_selectable_message(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _old_record_review(project)
-    capsys.readouterr()
-    assert main(["unobject", "shop:p", "D-S1"]) != EXIT_OK
-    err = capsys.readouterr().err
-    assert LEGACY_NOT_SELECTABLE in err
-    assert "知らない指摘の番号です" not in err
-
-
-def test_object_an_old_record_nit_fails_with_the_not_selectable_message(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _old_record_review(project)
-    capsys.readouterr()
-    assert main(["object", "shop:p", "D-S1", "--reason", "x"]) != EXIT_OK
-    err = capsys.readouterr().err
-    assert LEGACY_NOT_SELECTABLE in err
-    assert "知らない指摘の番号です" not in err
+    assert all("selection_note" not in f and "in_reply" not in f for f in findings)
 
 
 def test_show_json_carries_the_viewpoint_id_next_to_the_number(

@@ -3,12 +3,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from store_format_support import check_upgrades
+from review_fakes import current_form_findings
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
-from jigane.reviews.lifecycle import Review, ReviewError, create_feature_review
-from jigane.reviews.selection import _UPGRADES, SELECTION_FILE, SELECTION_FORMAT, load_selection
+from jigane.reviews.lifecycle import Review, create_feature_review
+from jigane.reviews.selection import SELECTION_FILE, SELECTION_FORMAT, load_selection
+from jigane.storage.store_format import OlderFormatError
 
 
 def finding(number: int, verdict: str = "kept", theme: str | None = None) -> dict[str, Any]:
@@ -56,7 +57,9 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
             }
         ],
     }
-    (created.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (created.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return created
 
 
@@ -73,7 +76,12 @@ def test_pick_expands_theme_and_clears_hold(review: Review) -> None:
     assert run("hold", name, "F2") == EXIT_OK
     assert selection_of(review)["held"] == ["F2"]
     assert run("pick", name, "B1", "F1") == EXIT_OK
-    assert selection_of(review) == {"picked": ["F1", "F2"], "held": [], "objections": {}}
+    assert selection_of(review) == {
+        "picked": ["F1", "F2"],
+        "held": [],
+        "objections": {},
+        "hold_reasons": {},
+    }
 
 
 def test_hold_removes_from_picked(review: Review) -> None:
@@ -101,7 +109,12 @@ def test_unknown_number_changes_nothing(
     for command in ("pick", "unpick", "hold"):
         assert run(command, name, "F2", "F99") == EXIT_PROCESSING_FAILURE
     assert run("pick", name, "B9") == EXIT_PROCESSING_FAILURE
-    assert selection_of(review) == {"picked": ["F1"], "held": [], "objections": {}}
+    assert selection_of(review) == {
+        "picked": ["F1"],
+        "held": [],
+        "objections": {},
+        "hold_reasons": {},
+    }
     assert "F99" in capsys.readouterr().err
 
 
@@ -144,7 +157,7 @@ def test_stale_selection_is_shown(review: Review, capsys: pytest.CaptureFixture[
     state = json.loads(findings_path.read_text("utf-8"))
     state["groups"]["micro"] = [finding(7)]
     state["themes"] = []
-    findings_path.write_text(json.dumps(state), encoding="utf-8")
+    findings_path.write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
     capsys.readouterr()
     assert run("show", name) == EXIT_OK
     out = capsys.readouterr().out
@@ -190,36 +203,52 @@ def test_show_json_fills_missing_triage(
         item["group"] = "macro"
         item["triage"] = None
     state["groups"]["macro"] = macro
-    path.write_text(json.dumps(state), encoding="utf-8")
+    path.write_text(json.dumps(current_form_findings(state)), encoding="utf-8")
     capsys.readouterr()
     assert run("show", str(review.id), "macro", "--json") == EXIT_OK
     shown = json.loads(capsys.readouterr().out)
     assert [f["triage"] for f in shown["findings"]] == ["must_read", "rejected"]
 
 
-def test_upgrade_table_has_every_step() -> None:
-    check_upgrades(SELECTION_FILE, SELECTION_FORMAT, _UPGRADES)
-
-
 def test_each_operation_replaces_the_previous_verdict(review: Review) -> None:
     name = str(review.id)
     run("hold", name, "F1")
     run("pick", name, "F1")
-    assert selection_of(review) == {"picked": ["F1"], "held": [], "objections": {}}
+    assert selection_of(review) == {
+        "picked": ["F1"],
+        "held": [],
+        "objections": {},
+        "hold_reasons": {},
+    }
     run("object", name, "F1", "--reason", "誤り")
-    assert selection_of(review) == {"picked": [], "held": [], "objections": {"F1": "誤り"}}
+    assert selection_of(review) == {
+        "picked": [],
+        "held": [],
+        "objections": {"F1": "誤り"},
+        "hold_reasons": {},
+    }
     run("hold", name, "F1")
-    assert selection_of(review) == {"picked": [], "held": ["F1"], "objections": {}}
+    assert selection_of(review) == {
+        "picked": [],
+        "held": ["F1"],
+        "objections": {},
+        "hold_reasons": {},
+    }
     run("pick", name, "F1")
     run("hold", name, "F1")
-    assert selection_of(review) == {"picked": [], "held": ["F1"], "objections": {}}
+    assert selection_of(review) == {
+        "picked": [],
+        "held": ["F1"],
+        "objections": {},
+        "hold_reasons": {},
+    }
 
 
 def test_unhold_removes_only_held(review: Review, capsys: pytest.CaptureFixture[str]) -> None:
     name = str(review.id)
     run("hold", name, "F1")
     assert run("unhold", name, "F1") == EXIT_OK
-    assert selection_of(review) == {"picked": [], "held": [], "objections": {}}
+    assert selection_of(review) == {"picked": [], "held": [], "objections": {}, "hold_reasons": {}}
     capsys.readouterr()
     assert run("unhold", name, "F1") == EXIT_PROCESSING_FAILURE
     assert "held" in capsys.readouterr().err
@@ -249,20 +278,25 @@ def test_undo_with_a_different_verdict_fails_and_keeps_it(
     assert selection_of(review) == before
 
 
-def test_selection_v2_with_overlap_fails_to_read(review: Review) -> None:
+def test_selection_v2_fails_to_read_as_an_older_version(review: Review) -> None:
     path = review.id.directory() / SELECTION_FILE
     path.write_text(
         json.dumps({"format": 2, "picked": ["F1"], "held": ["F1"], "objections": {}}),
         encoding="utf-8",
     )
-    with pytest.raises(ReviewError, match="F1 が複数の扱いに入っています"):
+    with pytest.raises(OlderFormatError, match="jigane new"):
         load_selection(review.id.directory())
 
 
 def test_json_keys_are_unchanged(review: Review, capsys: pytest.CaptureFixture[str]) -> None:
     capsys.readouterr()
     run("pick", str(review.id), "F1", "--json")
-    assert set(json.loads(capsys.readouterr().out)) >= {"picked", "held", "objections"}
+    assert set(json.loads(capsys.readouterr().out)) >= {
+        "picked",
+        "held",
+        "objections",
+        "hold_reasons",
+    }
 
 
 def test_selection_subcommands_are_registered() -> None:
@@ -312,7 +346,7 @@ def test_undo_by_theme_json_keeps_stdout_shape(
     capsys.readouterr()
     assert run("unpick", name, "B1", "--json") == EXIT_OK
     captured = capsys.readouterr()
-    assert set(json.loads(captured.out)) >= {"picked", "held", "objections"}
+    assert set(json.loads(captured.out)) >= {"picked", "held", "objections", "hold_reasons"}
     assert "扱いが違うため外さなかった指摘: F2" in captured.err
 
 
@@ -354,7 +388,7 @@ def test_replacing_an_objection_prints_the_lost_reason(
     assert "消えた理由: これは誤りです" in captured.err
     assert len(captured.err.strip().splitlines()) == 1
     if flags:
-        assert set(json.loads(captured.out)) >= {"picked", "held", "objections"}
+        assert set(json.loads(captured.out)) >= {"picked", "held", "objections", "hold_reasons"}
 
 
 def test_replacing_a_non_objection_prints_nothing(
@@ -365,3 +399,136 @@ def test_replacing_a_non_objection_prints_nothing(
     run("hold", name, "F1")
     run("pick", name, "F1")
     assert "消えた理由" not in capsys.readouterr().err
+
+
+def test_hold_with_reason_records_the_same_reason_for_every_finding(review: Review) -> None:
+    name = str(review.id)
+    assert run("hold", name, "F1", "F3", "--reason", "後で直す") == EXIT_OK
+    selection = selection_of(review)
+    assert selection["held"] == ["F1", "F3"]
+    assert selection["hold_reasons"] == {"F1": "後で直す", "F3": "後で直す"}
+    stored = json.loads((review.id.directory() / SELECTION_FILE).read_text(encoding="utf-8"))
+    assert stored["verdicts"]["F1"]["reason"] == "後で直す"
+    assert stored["format"] == SELECTION_FORMAT
+
+
+def test_hold_without_reason_keeps_the_previous_behaviour(review: Review) -> None:
+    assert run("hold", str(review.id), "F1") == EXIT_OK
+    selection = selection_of(review)
+    assert selection["held"] == ["F1"]
+    assert selection["hold_reasons"] == {}
+    stored = json.loads((review.id.directory() / SELECTION_FILE).read_text(encoding="utf-8"))
+    assert "reason" not in stored["verdicts"]["F1"]
+
+
+def test_hold_with_blank_reason_fails_and_records_nothing(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("hold", str(review.id), "F1", "--reason", "  ") == EXIT_PROCESSING_FAILURE
+    assert (
+        "保留の理由が空です。理由を書くか、--reason を付けずに実行してください。"
+        in capsys.readouterr().err
+    )
+    assert selection_of(review)["held"] == []
+
+
+def test_a_held_record_without_reason_reads_as_no_reason(review: Review) -> None:
+    held = {"kind": "held", "round": None}
+    (review.id.directory() / SELECTION_FILE).write_text(
+        json.dumps({"format": SELECTION_FORMAT, "verdicts": {"F1": held}}), encoding="utf-8"
+    )
+    selection = selection_of(review)
+    assert selection["held"] == ["F1"]
+    assert selection["hold_reasons"] == {}
+
+
+def test_hold_reasons_only_list_held_findings_with_a_reason(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "理由")
+    run("hold", name, "F2")
+    capsys.readouterr()
+    assert run("show", name, "--json") == EXIT_OK
+    shown = json.loads(capsys.readouterr().out)["selection"]
+    assert shown["held"] == ["F1", "F2"]
+    assert shown["hold_reasons"] == {"F1": "理由"}
+    assert run("pick", name, "F3", "--json") == EXIT_OK
+    operated = json.loads(capsys.readouterr().out)
+    assert operated["held"] == ["F1", "F2"]
+    assert operated["hold_reasons"] == {"F1": "理由"}
+
+
+def test_unhold_drops_the_reason(review: Review) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "理由")
+    assert run("unhold", name, "F1") == EXIT_OK
+    selection = selection_of(review)
+    assert selection["held"] == []
+    assert selection["hold_reasons"] == {}
+
+
+@pytest.mark.parametrize("replace", [["pick"], ["hold", "--reason", "別の理由"]])
+def test_replacing_a_hold_prints_the_lost_reason(
+    review: Review, capsys: pytest.CaptureFixture[str], replace: list[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "後で直す")
+    capsys.readouterr()
+    assert run(replace[0], name, "F1", *replace[1:]) == EXIT_OK
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == ["注: F1 の保留を置き換えました。消えた理由: 後で直す"]
+
+
+def test_replacing_an_objection_with_a_hold_names_the_objection(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("object", name, "F1", "--reason", "誤り")
+    capsys.readouterr()
+    assert run("hold", name, "F1", "--reason", "保留の理由") == EXIT_OK
+    assert "注: F1 の異議を置き換えました。消えた理由: 誤り" in capsys.readouterr().err
+    assert selection_of(review)["hold_reasons"] == {"F1": "保留の理由"}
+
+
+def test_replacing_a_hold_without_reason_prints_nothing(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1")
+    capsys.readouterr()
+    assert run("pick", name, "F1") == EXIT_OK
+    assert "消えた理由" not in capsys.readouterr().err
+
+
+def test_holding_again_without_reason_keeps_the_reason_and_prints_nothing(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "後で直す")
+    capsys.readouterr()
+    assert run("hold", name, "F1") == EXIT_OK
+    assert capsys.readouterr().err == ""
+    assert selection_of(review)["hold_reasons"] == {"F1": "後で直す"}
+
+
+def test_holding_again_with_the_same_reason_prints_nothing(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "後で直す")
+    capsys.readouterr()
+    assert run("hold", name, "F1", "--reason", "後で直す") == EXIT_OK
+    assert capsys.readouterr().err == ""
+    assert selection_of(review)["hold_reasons"] == {"F1": "後で直す"}
+
+
+def test_holding_with_another_reason_rewrites_it_and_prints_the_old_one(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    name = str(review.id)
+    run("hold", name, "F1", "--reason", "前の理由")
+    capsys.readouterr()
+    assert run("hold", name, "F1", "--reason", "新しい理由") == EXIT_OK
+    assert capsys.readouterr().err.strip() == "注: F1 の保留を置き換えました。消えた理由: 前の理由"
+    assert selection_of(review)["hold_reasons"] == {"F1": "新しい理由"}

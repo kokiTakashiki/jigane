@@ -14,6 +14,7 @@ from jigane.git.process import (
     run_command,
     run_resolved,
 )
+from jigane.llm_runs.claude import claude_binary
 
 # 列の先頭に "claude" の文字列を書くと ast-grep の規則が落とす。試験では名前を経由する
 CLAUDE = "claude"
@@ -136,3 +137,32 @@ def test_llm_runs_entrance_launches_claude(
     assert Path(version[0]).parent == tmp_path
     assert version[1:] == ["--version"]
     assert launch == [version[0], "-p"]
+
+
+def test_relative_claude_binary_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JIGANE_CLAUDE_BINARY", "bin/claude")
+    with pytest.raises(CommandError, match="絶対パス"):
+        claude_binary()
+    monkeypatch.setenv("JIGANE_CLAUDE_BINARY", str(Path("/opt/claude").absolute()))
+    assert claude_binary() == str(Path("/opt/claude").absolute())
+
+
+@pytest.mark.parametrize(
+    ("windows", "value", "accepted"),
+    [
+        (False, "/opt/claude", True),
+        (False, "C:\\bin\\claude.exe", False),
+        (True, "C:\\bin\\claude.exe", True),
+        (True, "/opt/claude", False),
+    ],
+)
+def test_claude_binary_follows_the_current_os_absolute_rule(
+    monkeypatch: pytest.MonkeyPatch, *, windows: bool, value: str, accepted: bool
+) -> None:
+    monkeypatch.setattr("jigane.llm_runs.claude.is_windows", lambda: windows)
+    monkeypatch.setenv("JIGANE_CLAUDE_BINARY", value)
+    if accepted:
+        assert claude_binary() == value
+        return
+    with pytest.raises(CommandError, match="絶対パス"):
+        claude_binary()

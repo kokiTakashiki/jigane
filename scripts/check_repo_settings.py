@@ -15,7 +15,8 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from jigane.git.process import CommandError, run_command
+from jigane.git import process
+from jigane.git.process import CommandError
 
 SETTINGS_PATH = Path(__file__).resolve().parent.parent / ".github" / "repository-settings.json"
 
@@ -34,7 +35,7 @@ class ResponseShapeError(ValueError):
 
 
 def read_gh(endpoint: str) -> object:
-    output = run_command(["gh", "api", endpoint])
+    output = process.run_command(["gh", "api", endpoint])
     if not output.strip() and endpoint.endswith(ALERTS_SUFFIX):
         # vulnerability-alerts だけは、有効のとき 204 で本文が空になる。
         # 404 は CommandError で別に出る。
@@ -45,7 +46,7 @@ def read_gh(endpoint: str) -> object:
 
 def read_gh_pages(endpoint: str) -> object:
     """全ページを読み、ページごとの配列を並べた配列で返す。"""
-    return json.loads(run_command(["gh", "api", "--paginate", "--slurp", endpoint]))
+    return json.loads(process.run_command(["gh", "api", "--paginate", "--slurp", endpoint]))
 
 
 def list_rulesets(repo: str, read_pages: ReadApi) -> list[dict[str, object]]:

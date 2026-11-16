@@ -5,14 +5,15 @@ from typing import Any
 import pytest
 from fakes import run_command_stub
 from pr_support import clone_bare, git
-from store_format_support import check_upgrades
 
 from jigane.git import process
-from jigane.pull_request_context import bots
-from jigane.pull_request_context.bots import _UPGRADES, BOT_COMMENTS_FILE, BOT_COMMENTS_FORMAT
+from jigane.pull_request_context import bots, gh
+from jigane.pull_request_context.bots import BOT_COMMENTS_FORMAT
 from jigane.storage.review_error import ReviewError
+from jigane.storage.store_format import OlderFormatError
 
-V1_COMMENTS = {
+STORED_COMMENTS = {
+    "format": BOT_COMMENTS_FORMAT,
     "comments": [
         {
             "id": 1,
@@ -28,22 +29,36 @@ V1_COMMENTS = {
             "region_keys": ["a.py:f"],
         }
     ],
-    "unavailable": 0,
 }
 
+# 読めない gh の出力の文は、何が起きたかとどうすればよいかの両方を持つ
+UNREADABLE_OUTPUT = (
+    "JSON として読めませんでした。構文に誤りがあるか、入れ子が深すぎます。"
+    "gh を新しいバージョンに更新してから"
+)
 
-def test_v1_comments_upgrade_to_current_keys() -> None:
-    stored = bots.load_bot_comments(V1_COMMENTS)
+
+def test_current_comments_round_trip() -> None:
+    stored = bots.load_bot_comments(STORED_COMMENTS)
     dumped = bots.dump_bot_comments(stored.analysis(), {1: ["a.py:f"]})
     assert set(dumped) == {"format", "comments"}
-    assert dumped["comments"] == V1_COMMENTS["comments"]
+    assert dumped["comments"] == STORED_COMMENTS["comments"]
     assert bots.load_bot_comments(dumped) == stored
+
+
+@pytest.mark.parametrize("format_entry", [{}, {"format": 1}, {"format": 2}])
+def test_older_comments_stop_with_the_rebuild_hint(format_entry: dict[str, int]) -> None:
+    raw = {key: item for key, item in STORED_COMMENTS.items() if key != "format"} | format_entry
+    with pytest.raises(OlderFormatError) as caught:
+        bots.load_bot_comments(raw)
+    assert "jigane new" in str(caught.value)
+    assert "引き継がれません" in str(caught.value)
 
 
 @pytest.mark.parametrize("version", [0, -1, 4, "2", True, 1.5])
 def test_bad_format_version_is_rejected(version: object) -> None:
-    with pytest.raises(ReviewError, match="形の版"):
-        bots.load_bot_comments({**V1_COMMENTS, "format": version})
+    with pytest.raises(ReviewError, match=r"形の版|JSON の構造のバージョン"):
+        bots.load_bot_comments({**STORED_COMMENTS, "format": version})
 
 
 def test_corrupt_comments_stop_the_read(tmp_path: Path) -> None:
@@ -254,20 +269,6 @@ def test_analyze_ignores_insertion_beyond_context(repo: dict[str, Any]) -> None:
     assert analysis.judgments[0].touched_lines == ()
 
 
-def test_upgrade_table_has_every_step() -> None:
-    check_upgrades(BOT_COMMENTS_FILE, BOT_COMMENTS_FORMAT, _UPGRADES)
-
-
-def test_v2_comments_drop_the_recountable_unavailable_count() -> None:
-    old = {**V1_COMMENTS, "format": 2, "unavailable": 5}
-    assert "unavailable" not in bots._UPGRADES[2](old)
-    stored = bots.load_bot_comments(old)
-    assert stored.unavailable_count == 0
-    assert "unavailable" not in bots.dump_bot_comments(stored.analysis())
-    # 入力は書き換えない
-    assert old["unavailable"] == 5
-
-
 def test_analyze_never_passes_a_dash_value_to_git(
     repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -299,6 +300,34 @@ def test_analyze_puts_the_sha_after_end_of_options(
     bots.analyze(repo["cache"], repo["head"], [comment_for(repo)])
     sha = repo["sha"]
     assert seen == [
-        ["git", "fetch", "--end-of-options", "origin", sha],
-        ["git", "show", "--end-of-options", f"{sha}:a.py"],
+        ["git", "fetch", "--upload-pack=git-upload-pack", "--end-of-options", "origin", sha],
+        ["git", "show", "--no-ext-diff", "--no-textconv", "--end-of-options", f"{sha}:a.py"],
     ]
+
+
+def _fake_gh_output(monkeypatch: pytest.MonkeyPatch, output: str) -> None:
+    monkeypatch.setattr(process, "run_command", run_command_stub(lambda _args: output))
+
+
+def test_fetch_rejects_too_deep_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    depth = gh.MAX_RESPONSE_NESTING + 1
+    _fake_gh_output(monkeypatch, "[" * depth + "]" * depth)
+    with pytest.raises(ReviewError, match=UNREADABLE_OUTPUT):
+        fetch()
+
+
+def test_fetch_rejects_unparsable_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    _fake_gh_output(monkeypatch, "[[ not json SECRET")
+    with pytest.raises(ReviewError, match=UNREADABLE_OUTPUT) as raised:
+        fetch()
+    assert "SECRET" not in str(raised.value)
+
+
+def test_fetch_converts_recursion_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def recursing(_text: str, **_options: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(json, "loads", recursing)
+    _fake_gh_output(monkeypatch, "[[]]")
+    with pytest.raises(ReviewError, match=UNREADABLE_OUTPUT):
+        fetch()

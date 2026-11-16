@@ -12,6 +12,7 @@ from jigane.findings.records import (
     read_stored_state,
 )
 from jigane.groups.definitions import MACRO, GroupId
+from jigane.markdown.fence import one_line
 from jigane.reviews.selection import Held, Objected, Selection, load_selection
 from jigane.skills.assembly import AssemblyInput
 
@@ -90,15 +91,15 @@ def round_lines(
         if not _listed(finding, paths):
             continue
         places = "、".join(
-            f"{e['path']}:{e['start_line']}" for e in finding.body.extra["evidence"][:2]
+            f"{one_line(e['path'])}:{e['start_line']}" for e in finding.body.extra["evidence"][:2]
         )
         line = (
             f"- {label} {finding.body.id} {finding.body.viewpoint} {finding.body.severity} "
-            f"{_attributes(group, finding)} {finding.body.claim}（{places}）"
+            f"{_attributes(group, finding)} {one_line(finding.body.claim)}（{places}）"
         )
         reason = objections.get(finding.body.id)
         if reason is not None:
-            line += f"（利用者の異議: {' '.join(reason.split())}）"
+            line += f"（利用者の異議: {one_line(' '.join(reason.split()))}）"
         lines.append(line)
     return lines
 
@@ -130,7 +131,7 @@ def _unresolved_lines(
         if not _listed(finding, paths):
             continue
         treatment = "hold" if isinstance(verdict, Held) else "object"
-        claim = " ".join(finding.body.claim.split())[:CLAIM_HEAD_CHARS]
+        claim = one_line(" ".join(finding.body.claim.split())[:CLAIM_HEAD_CHARS])
         lines.append(f"- {label} {finding.body.id} {treatment} {claim}")
     return lines
 

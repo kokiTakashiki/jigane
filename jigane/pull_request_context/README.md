@@ -15,7 +15,7 @@ PR の取得、変更の背景、レビューボットの指摘を受け持ち�
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`git`、`judgment_map`、`preconditions`、`storage`
+読むサブパッケージ：`git`、`judgment_map`、`preconditions`、`storage`、`text`
 
 読まれるサブパッケージ：`commands`、`reviews`、`skills`
 

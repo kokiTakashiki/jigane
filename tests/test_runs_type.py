@@ -30,6 +30,7 @@ ROW: dict[str, Any] = {
     "is_error": False,
     "terminal_reason": None,
     "permission_denials": 0,
+    "started_at": "2026-11-01T00:00:00+00:00",
     "max_budget_usd": 0.5,
     "cost_usd": 0.25,
     "cost_source": "measured",
@@ -128,6 +129,7 @@ def test_budget_outcome_comes_from_the_record_type() -> None:
         is_error=False,
         terminal_reason=None,
         permission_denials=0,
+        started_at="2026-11-01T00:00:00+00:00",
         max_budget_usd=0.5,
     )
     within = claude.InvocationRecord(
@@ -141,6 +143,7 @@ def test_budget_outcome_comes_from_the_record_type() -> None:
         is_error=False,
         terminal_reason=None,
         permission_denials=0,
+        started_at="2026-11-01T00:00:00+00:00",
         max_budget_usd=0.5,
     )
     assert exceeded.exceeded_after_success()

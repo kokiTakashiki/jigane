@@ -12,7 +12,7 @@ from tree_sitter import Node
 import jigane.languages
 from jigane.git.tree_files import read_tree_bytes
 from jigane.languages import registry
-from jigane.languages.base import ImportAdapter, LanguageAdapter, parse
+from jigane.languages.base import ImportedModuleExtractor, LanguageAdapter, parse
 from jigane.reviews.lifecycle import Review
 
 BRIDGES_DIR = Path(jigane.languages.__file__).parent / "bridges"
@@ -250,10 +250,10 @@ def _java(root: Node, path: str, table: dict[str, Entry]) -> list[dict[str, Any]
 
 
 def _python(
-    adapter: ImportAdapter, root: Node, source: bytes, path: str, table: dict[str, Entry]
+    adapter: ImportedModuleExtractor, root: Node, source: bytes, path: str, table: dict[str, Entry]
 ) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
-    for item in adapter.imports(root, source):
+    for item in adapter.imported_modules(root, source):
         if item.module.startswith("."):
             # 相対の import は同じリポジトリの中を指す
             continue
@@ -277,7 +277,7 @@ def _detect(
 ) -> list[dict[str, Any]]:
     if adapter.name in _DETECTORS:
         return _DETECTORS[adapter.name](root, path, table)
-    if isinstance(adapter, ImportAdapter):
+    if isinstance(adapter, ImportedModuleExtractor):
         # import で見つける言語。表の項目が import を見つけ方にするのはこの経路だけ
         return _python(adapter, root, source, path, table)
     return []

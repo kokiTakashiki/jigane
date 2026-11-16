@@ -1,16 +1,15 @@
 """ゲートの結果（違反 G と警告 W）の番号の割り当てと保存。"""
 
-import copy
 import difflib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
-from jigane.flaky.catalog import ANNOTATION_ID, Item, load_catalog
+from jigane.flaky.catalog import ANNOTATION_ID, Item
+from jigane.flaky.checks import Certainty
 from jigane.flaky.detector import AnnotationDetection, Detection, QueryDetection, detect
 from jigane.flaky.explanation import explain
-from jigane.flaky.gates_v1 import upgrade_v1
+from jigane.flaky.unreadable_explanation import explanation_of
 from jigane.gates.entry import (
     GATES_FORMAT,
     FlakyDetail,
@@ -19,16 +18,17 @@ from jigane.gates.entry import (
     Gates,
     GateSeverity,
     NumberLedger,
+    UnreadableDetail,
 )
 from jigane.gates.line_scope import AllLines, ChangedLines, LineScope
 from jigane.git.tree_files import read_tree_bytes
 from jigane.judgment_map.allow_annotation import split_rows
 from jigane.judgment_map.classification import Segment
-from jigane.judgment_map.unreadable_constructs import unreadable_constructs
-from jigane.judgment_map.unreadable_wording import ENTRY_IDS, unreadable_entry
+from jigane.judgment_map.unreadable_constructs import Occurrence, unreadable_constructs
 from jigane.regex.gate_tags import REGEX_ANNOTATION_ID, annotation_entry, detect_tags, regex_entry
 from jigane.storage.atomic_write import write_text_atomic
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.review_error import ReviewError
+from jigane.storage.store_format import require_current_version
 
 GATES_FILE = "gates.json"
 
@@ -97,9 +97,11 @@ def _entry(number: str, detection: Detection, by_id: dict[str, Item]) -> GateEnt
 
 def gate_kind(detection: Detection, by_id: Mapping[str, Item]) -> GateKind:
     """兆候の型と、宛先を確かめられない当たりは警告 W で、それ以外は違反 G。"""
-    if detection.item_id != ANNOTATION_ID and (
-        by_id[detection.item_id].confidence == "proxy" or detection.undetermined
-    ):
+    if detection.item_id == ANNOTATION_ID:
+        return GateKind.VIOLATION
+    is_proxy_item = by_id[detection.item_id].confidence == "proxy"
+    is_target_undetermined = detection.certainty is Certainty.UNDETERMINED
+    if is_proxy_item or is_target_undetermined:
         return GateKind.WARNING
     return GateKind.VIOLATION
 
@@ -140,28 +142,26 @@ def update_gates(  # noqa: PLR0913 -- 呼び側が揃える入力で、束ねる
         violations.append(annotation_entry(ledger.assign(base, GateKind.VIOLATION), annotation))
     # 読めない記述は行で絞らず、案内と同じ集合を警告 W として載せる。検出する区間は呼び側が渡す
     for item in unreadable_constructs(unreadable_segments, root, base_root).occurrences:
-        base = NumberLedger.base_key(
-            item.path, ENTRY_IDS[item.kind], f"{item.side}\0{item.excerpt}"
-        )
-        warnings.append(unreadable_entry(ledger.assign(base, GateKind.WARNING), item))
+        base = NumberLedger.base_key(item.path, item.kind.entry_id, f"{item.side}\0{item.excerpt}")
+        warnings.append(_unreadable_entry(ledger.assign(base, GateKind.WARNING), item))
     gates = Gates(tuple(violations), tuple(warnings), ledger.settle())
     text = json.dumps(gates.to_json(), ensure_ascii=False, indent=2)
     write_text_atomic(directory / GATES_FILE, text)
     return gates
 
 
-def _upgrade_gates_v1(state: dict[str, Any]) -> dict[str, Any]:
-    """目録は版 1 のファイルを読むときだけ引く。版 2 のファイルでは読み込まない。"""
-    return upgrade_v1(state, {item.id: item for item in load_catalog()})
-
-
-def _upgrade_gates_v2(state: dict[str, Any]) -> dict[str, Any]:
-    """版 2 は読めない記述の項目を持たないだけで、値は変えない。"""
-    return copy.deepcopy(state)
-
-
-# 保存された版から次の版への移し。load_gates が GATES_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_gates_v1, 2: _upgrade_gates_v2}
+def _unreadable_entry(number: str, item: Occurrence) -> GateEntry:
+    """一件の読めない記述から警告の GateEntry を組む。"""
+    return GateEntry(
+        number,
+        item.kind.entry_id,
+        item.path,
+        item.line,
+        item.excerpt,
+        explanation_of(item.wording).to_json(),
+        GateSeverity.UNREADABLE,
+        UnreadableDetail(item.kind, item.side),
+    )
 
 
 def load_gates(directory: Path) -> Gates | None:
@@ -169,6 +169,7 @@ def load_gates(directory: Path) -> Gates | None:
     if not path.is_file():
         return None
     raw = json.loads(path.read_text(encoding="utf-8"))
-    stored = upgrade_mapping(GATES_FILE, raw, current=GATES_FORMAT, upgrades=_UPGRADES)
-    # upgrade_mapping は format を外して返す。Gates.from_json は format を検査するため戻す
-    return Gates.from_json({**stored, "format": GATES_FORMAT})
+    if not isinstance(raw, dict):
+        raise ReviewError(f"{GATES_FILE} の最上位が辞書ではありません")
+    stored = require_current_version(GATES_FILE, raw, current=GATES_FORMAT)
+    return Gates.from_json(stored)

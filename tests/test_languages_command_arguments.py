@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from jigane.languages.base import CommandArgument, CommandArgumentAdapter, LanguageAdapter, parse
+from jigane.languages.base import CommandArgument, CommandArgumentExtractor, LanguageAdapter, parse
 from jigane.languages.csharp import CSharpAdapter
 from jigane.languages.java import JavaAdapter
 from jigane.languages.python import PythonAdapter
@@ -34,7 +34,7 @@ render.add_argument("rest", nargs="*")
 def test_arguments_are_split_by_subcommand() -> None:
     by_command: dict[str, list[tuple[str, ...]]] = {}
     for argument in arguments(TWO_COMMANDS):
-        by_command.setdefault(argument.command, []).append(argument.names)
+        by_command.setdefault(argument.subcommand_name, []).append(argument.option_names)
     assert by_command == {
         "": [("--verbose",)],
         "draft": [("--region", "-r"), ("--limit",)],
@@ -44,20 +44,25 @@ def test_arguments_are_split_by_subcommand() -> None:
 
 def test_top_level_parser_uses_empty_command() -> None:
     found = arguments(TWO_COMMANDS)[0]
-    assert (found.command, found.action) == ("", '"store_true"')
+    assert (found.subcommand_name, found.action_text) == ("", '"store_true"')
 
 
 def test_dest_default_required_are_original_text() -> None:
     found = arguments(TWO_COMMANDS)
     region = found[1]
-    assert region.dest == '"area"'
-    assert region.default == '"jp"'
+    assert region.dest_text == '"area"'
+    assert region.default_text == '"jp"'
     assert region.required_text == "True"
     assert region.required is True
-    assert region.help == '"region"'
+    assert region.help_text == '"region"'
     assert region.line == 7
     limit = found[2]
-    assert (limit.type, limit.default, limit.dest, limit.required) == ("int", "10", None, False)
+    assert (limit.type_text, limit.default_text, limit.dest_text, limit.required) == (
+        "int",
+        "10",
+        None,
+        False,
+    )
 
 
 def test_positional_arguments() -> None:
@@ -68,7 +73,7 @@ def test_positional_arguments() -> None:
 
 def test_default_is_not_evaluated() -> None:
     code = 'p = argparse.ArgumentParser()\np.add_argument("--a", default=os.environ["A"])\n'
-    assert arguments(code)[0].default == 'os.environ["A"]'
+    assert arguments(code)[0].default_text == 'os.environ["A"]'
 
 
 def test_parser_received_as_function_parameter() -> None:
@@ -82,7 +87,7 @@ def register(subparsers):
 def add_arguments(parser, extra=None):
     parser.add_argument("--region")
 """
-    found = sorted((a.command, a.names) for a in arguments(code))
+    found = sorted((a.subcommand_name, a.option_names) for a in arguments(code))
     assert found == [("draft", ("--region",)), ("render", ("--prefix",))]
 
 
@@ -95,7 +100,7 @@ def register(subparsers):
     q = subparsers.add_parser("b")
     add(p=q)
 """
-    assert [a.command for a in arguments(code)] == ["b"]
+    assert [a.subcommand_name for a in arguments(code)] == ["b"]
 
 
 def test_untraceable_forms_are_not_picked_up() -> None:
@@ -118,7 +123,7 @@ def a(subparsers, mystery):
 @pytest.mark.parametrize("adapter", [CSharpAdapter(), JavaAdapter(), SwiftAdapter()])
 def test_other_languages_do_not_offer_the_reader(adapter: LanguageAdapter) -> None:
     # 未対応の言語は口を持たない。該当なし（空の一覧）と区別するため
-    assert not isinstance(adapter, CommandArgumentAdapter)
+    assert not isinstance(adapter, CommandArgumentExtractor)
 
 
 GROUPS = """import argparse
@@ -136,7 +141,10 @@ files.add_argument("--d")
 
 
 def test_group_arguments_belong_to_the_receivers_command() -> None:
-    found = [(a.command, a.names[0], a.group, a.exclusive) for a in arguments(GROUPS)]
+    found = [
+        (a.subcommand_name, a.option_names[0], a.group_variable_name, a.group_exclusive)
+        for a in arguments(GROUPS)
+    ]
     assert found == [
         ("files", "--a", "either", True),
         ("files", "--b", "either", True),
@@ -151,7 +159,11 @@ def test_jigane_own_commands_pick_up_group_arguments() -> None:
     def grouped(name: str) -> int:
         source = (base / name).read_bytes()
         root = parse(python, source).root_node
-        return sum(1 for a in python.command_arguments(root, source, name) if a.group is not None)
+        return sum(
+            1
+            for a in python.command_arguments(root, source, name)
+            if a.group_variable_name is not None
+        )
 
     assert grouped("new.py") >= 4
     assert grouped("sequence.py") >= 2

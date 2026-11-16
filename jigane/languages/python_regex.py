@@ -5,7 +5,13 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.base import (
+    RegexComposedSite,
+    RegexDialect,
+    RegexLiteralSite,
+    RegexSites,
+    RegexUse,
+)
 from jigane.languages.node_text import text_of
 from jigane.languages.python_walk import call_arguments
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
@@ -213,10 +219,10 @@ def _function_name(call: Node, modules: set[str], functions: dict[str, str]) -> 
     return None
 
 
-def regex_scan(root: Node, path: str) -> RegexScan:
+def regex_scan(root: Node, path: str) -> RegexSites:
     modules, functions = _bindings(root)
-    literals: list[RegexLiteral] = []
-    composed: list[RegexComposed] = []
+    literals: list[RegexLiteralSite] = []
+    composed: list[RegexComposedSite] = []
     for node in _walk(root):
         if node.type != "call":
             continue
@@ -232,16 +238,16 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         line = node.start_point.row + 1
         value = _constant(argument)
         if value is None:
-            composed.append(RegexComposed(call=call, use=use, path=path, line=line))
+            composed.append(RegexComposedSite(call_name=call, use=use, path=path, line=line))
         else:
             literals.append(
-                RegexLiteral(
+                RegexLiteralSite(
                     pattern=value,
                     dialect=RegexDialect.PYTHON,
-                    call=call,
+                    call_name=call,
                     use=use,
                     path=path,
                     line=line,
                 )
             )
-    return RegexScan(literals=tuple(literals), composed=tuple(composed))
+    return RegexSites(literal_sites=tuple(literals), composed_sites=tuple(composed))

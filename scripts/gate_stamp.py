@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from jigane.git.process import CommandError, run_command
+from jigane.git import process
+from jigane.git.process import CommandError
 
 STAMP_NAME = "jigane-gate-passed"
 HOOKS_PATH = ".githooks"
@@ -75,7 +76,7 @@ def is_document(path: str) -> bool:
 
 def in_work_tree() -> bool:
     try:
-        return run_command(["git", "rev-parse", "--is-inside-work-tree"]).strip() == "true"
+        return process.run_command(["git", "rev-parse", "--is-inside-work-tree"]).strip() == "true"
     except CommandError:
         # git の作業木の外（公開の写しの木など）では、印も hook も要らない
         return False
@@ -83,12 +84,14 @@ def in_work_tree() -> bool:
 
 def stamp_path() -> Path:
     # --git-path は呼び出した場所からの相対で返すことがあるので、絶対にして返す
-    return Path(run_command(["git", "rev-parse", "--git-path", STAMP_NAME]).strip()).resolve()
+    return Path(
+        process.run_command(["git", "rev-parse", "--git-path", STAMP_NAME]).strip()
+    ).resolve()
 
 
 def dirty_entries() -> list[str]:
     # ignore された追跡外のファイルは出ない。出るものは、ゲートが見ていない入力になり得る
-    output = run_command(["git", "status", "--porcelain", "--untracked-files=all"])
+    output = process.run_command(["git", "status", "--porcelain", "--untracked-files=all"])
     return [line for line in output.splitlines() if line.strip()]
 
 
@@ -104,7 +107,7 @@ def write(gate: Gate) -> int:
         )
         print("\n".join(f"  {entry}" for entry in entries), file=sys.stderr)
         return 1
-    head = run_command(["git", "rev-parse", "HEAD"]).strip()
+    head = process.run_command(["git", "rev-parse", "HEAD"]).strip()
     stamp_path().write_text(f"{head} {gate}\n", encoding="utf-8")
     print(f"印を書いた: {head} {gate}", file=sys.stderr)
     return 0
@@ -113,7 +116,7 @@ def write(gate: Gate) -> int:
 def peel_to_commit(sha: str) -> str | None:
     # 注釈付きタグの SHA はタグのオブジェクトなので、指すコミットまで剥がす
     try:
-        return run_command(
+        return process.run_command(
             ["git", "rev-parse", "--verify", "--end-of-options", f"{sha}^{{commit}}"]
         ).strip()
     except CommandError:
@@ -138,7 +141,7 @@ def read_stamp() -> Stamp | None:
 
 def default_branch_tip() -> str | None:
     try:
-        return run_command(
+        return process.run_command(
             ["git", "rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"]
         ).strip()
     except CommandError:
@@ -149,7 +152,7 @@ def default_branch_tip() -> str | None:
 def base_commit(ref: PushedRef) -> str | None:
     if ref.has_remote_tip:
         try:
-            return run_command(
+            return process.run_command(
                 [
                     "git",
                     "rev-parse",
@@ -171,7 +174,7 @@ def required_gate(ref: PushedRef) -> Gate:
     try:
         # 改名は旧新どちらのパスも出す。文書から外へ動かした変更を文書だけと見誤らないため
         # -z は引用符と 8 進の逃がしを止め、日本語のパスを生の名前で返す
-        output = run_command(
+        output = process.run_command(
             [
                 "git",
                 "diff",
@@ -225,7 +228,7 @@ def install_hook() -> int:
     if not in_work_tree():
         print("git の作業木の外なので、hook を入れない", file=sys.stderr)
         return 0
-    run_command(["git", "config", "core.hooksPath", HOOKS_PATH])
+    process.run_command(["git", "config", "core.hooksPath", HOOKS_PATH])
     return 0
 
 

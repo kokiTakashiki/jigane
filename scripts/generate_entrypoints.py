@@ -445,6 +445,8 @@ class Facts:
 
 @dataclass(frozen=True)
 class Task:
+    # 真偽値の欄は entrypoints.toml の [[task]] の鍵と一対一で、TASK_FLAGS が鍵の名前を持つ。
+    # 鍵の形は定義ファイルの書き手への約束なので、区分を一つの値に寄せずこの形を保つ
     name: str
     description: str
     commands: tuple[str, ...]
@@ -463,8 +465,6 @@ class Task:
     # Makefile（macOS・Linux）にだけ、commands の後に続けて走らせるコマンド。
     # justfile（Windows）には出さない。POSIX の仕組みに頼る試験の置き場を走らせる
     posix_commands: tuple[str, ...] = ()
-    # 公開の写しの入口に出さない作業。生成に使わず、export_public.py が写しから外す
-    omit_from_public_copy: bool = False
 
     @property
     def uses_args(self) -> bool:
@@ -531,8 +531,6 @@ GUARD_FLAGS = (
 
 # 作業の真偽値の鍵。GUARD_FLAGS は先頭の確かめ、show_commands は本文の行の表示
 TASK_FLAGS = (*GUARD_FLAGS, "show_commands")
-# 公開の写しの入口に出さない作業の鍵。生成には使わず、export_public.py が読む
-OMIT_FROM_PUBLIC_COPY = "omit_from_public_copy"
 
 
 def _parse_tool(table: dict[str, Any], index: int) -> Tool:
@@ -584,7 +582,6 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
         "commands",
         "depends",
         "posix_commands",
-        OMIT_FROM_PUBLIC_COPY,
         *TASK_FLAGS,
     }
     if unknown:
@@ -593,7 +590,6 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
     if not isinstance(description, str):
         raise ValueError(f"{name}: description は文字列でなければならない")  # noqa: TRY004 宣言の誤りは ValueError に揃える
     flags = {flag: _bool_key(table, flag, name) for flag in TASK_FLAGS}
-    omit_from_public_copy = _bool_key(table, OMIT_FROM_PUBLIC_COPY, name)
     commands = _string_list(table, "commands", name)
     depends = _string_list(table, "depends", name)
     posix_commands = _posix_commands(table, name, commands)
@@ -612,7 +608,6 @@ def _parse_task(table: dict[str, Any], index: int) -> Task:
         commands,
         depends,
         posix_commands=posix_commands,
-        omit_from_public_copy=omit_from_public_copy,
         **flags,
     )
 

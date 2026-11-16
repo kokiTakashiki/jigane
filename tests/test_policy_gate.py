@@ -1,5 +1,4 @@
 import json
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +9,8 @@ from test_security import SecurityFake, s_finding, write_mcp
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
-from jigane.findings.records import Triage, load_findings_state, mark_stale, read_stored_state
-from jigane.groups.definitions import MACRO, GroupId
-from jigane.groups.viewpoints import by_uuid
+from jigane.findings.records import Triage, mark_stale, read_stored_state
+from jigane.groups.definitions import MACRO
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
@@ -136,20 +134,6 @@ def test_estimate_carries_notice(project: Path, capsys: pytest.CaptureFixture[st
     assert json.loads(capsys.readouterr().out)["policy_notice"] is None
 
 
-def test_old_deferred_findings_load_as_remaining(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p")
-    clear_policy(review)
-
-    def edit(raw: dict[str, Any]) -> None:
-        raw["groups"]["micro"] = [{"id": "F1", "triage": "deferred"}]
-        raw["themes"] = [{"id": "B1", "triage": "deferred", "finding_ids": ["F1"]}]
-
-    rewrite_raw_findings(review.id.directory(), edit)
-    loaded = load_findings_state(review.id.directory())
-    assert loaded.groups[GroupId("micro")][0].decision.triage == "remaining"
-    assert loaded.themes[0].triage == "remaining"
-
-
 @pytest.mark.parametrize(
     ("severity", "noticed"),
     [("warning", True), ("nit", False)],
@@ -163,7 +147,18 @@ def test_notice_follows_the_triage_filled_for_an_unreadable_name(
     rewrite_raw_findings(
         directory,
         lambda raw: raw["groups"].__setitem__(
-            "macro", [{"id": "F9", "triage": "bogus", "severity": severity, "adjudication": None}]
+            "macro",
+            [
+                {
+                    "id": "F9",
+                    "triage": "bogus",
+                    "severity": severity,
+                    "viewpoint": "",
+                    "claim": "",
+                    "theme": None,
+                    "adjudication": None,
+                }
+            ],
         ),
     )
     result = policy_notice(review)
@@ -182,9 +177,7 @@ def test_old_findings_without_triage_give_the_notice_and_show_the_same_triage(
 
     def edit(raw: dict[str, Any]) -> None:
         for finding in raw["groups"]["macro"]:
-            del finding["triage"]
-            # 版を外した書き換えは版 1 として読まれ、観点は旧い番号で読まれる
-            finding["viewpoint"] = by_uuid(uuid.UUID(finding["viewpoint"])).legacy_number
+            finding["triage"] = None
 
     rewrite_raw_findings(review.id.directory(), edit)
     # 区分の無い古い findings.json でも、読み込みで補われた必読が案内に出る
@@ -213,19 +206,6 @@ def test_no_notice_with_only_out_of_scope(project: Path) -> None:
     state = read_stored_state(review.id.directory())
     assert [f.triage for f in state.groups[MACRO]] == [Triage.OUT_OF_SCOPE]
     assert policy_notice(review) is None
-
-
-def test_old_findings_without_out_of_scope_still_load(project: Path) -> None:
-    review = create_feature_review(project, ["src"], "p")
-    clear_policy(review)
-    rewrite_raw_findings(
-        review.id.directory(),
-        lambda raw: raw["groups"].__setitem__(
-            "macro", [{"id": "F1", "severity": "warning", "adjudication": None}]
-        ),
-    )
-    loaded = load_findings_state(review.id.directory())
-    assert loaded.groups[GroupId("macro")][0].decision.triage == "must_read"
 
 
 def test_show_lists_out_of_scope_apart(project: Path, capsys: pytest.CaptureFixture[str]) -> None:

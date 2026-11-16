@@ -3,21 +3,20 @@
 書き出し（map.json の dict）と読み戻しは同じ型を通る。map.json の鍵はどちらの種類でも同じ。
 """
 
-import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, assert_never
 
-from jigane.judgment_map.classification import ChangeKind, JudgmentMap, Segment
-from jigane.judgment_map.kinds import SECTION_KIND_VALUES, StoredMode
+from jigane.judgment_map.classification import JudgmentMap, Segment
+from jigane.judgment_map.kinds import StoredMode
 from jigane.judgment_map.region_table import Region, RegionTable
 from jigane.storage.review_error import ReviewError
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 # 地図の保存物のファイル名。保存する側（reviews）と読む側がここから読む
 MAP_FILE = "map.json"
-# map.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
+# map.json の形の版。保存物の形を変えたら一つ上げる
 MAP_FORMAT = 4
 
 
@@ -155,7 +154,7 @@ def dump_map(kind: JudgmentMapKind) -> dict[str, Any]:
 
 
 def _read_map_kind(stored: Mapping[str, Any]) -> JudgmentMapKind:
-    """今の版（MAP_FORMAT）の map.json の dict を和へ読み戻す。古い版は load_map が先に移す。"""
+    """今の版（MAP_FORMAT）の map.json の dict を和へ読み戻す。古い版は load_map が止める。"""
     kind = map_kind_of_mode(stored["mode"])
     match kind:
         case MapKind.CODE:
@@ -166,86 +165,23 @@ def _read_map_kind(stored: Mapping[str, Any]) -> JudgmentMapKind:
             assert_never(kind)
 
 
-def _change_kind_from_spans(segment: Mapping[str, Any]) -> str:
-    """change_kind を持たない区間の種類を、範囲の有無から補う。
-
-    もとの値は宣言が変更の前後にあったかで決まるが、古い保存物にはその材料が残っていない。
-    変更前の範囲が無ければ追加、変更後の範囲が無ければ削除、両方あれば変更と読む。
-    """
-    if segment["old_span"] is None:
-        return ChangeKind.ADDED.value
-    if segment["new_span"] is None:
-        return ChangeKind.REMOVED.value
-    return ChangeKind.CHANGED.value
-
-
-def _upgrade_table_v1(table: dict[str, Any], *, code_vocabulary: bool) -> None:
-    """regions と line_counts の組を、今の版の鍵へ埋める。table は書き換える。
-
-    code_vocabulary が偽の表は節の表で、種類の語彙がコードの地図と違うため by_kind へ足さない。
-    """
-    for row in table["regions"]:
-        # judged は読み口の無いまま残った鍵で、今の版は書かない
-        row.pop("judged", None)
-        # 節の行は版 1 からこの二つを書いている。版 3 で外すので、ここで足すのはコードの行だけ
-        if row["kind"] not in SECTION_KIND_VALUES:
-            row.setdefault("bot_comment_ids", [])
-            row.setdefault("old_path", None)
-    by_kind = table["line_counts"].get("by_kind")
-    if code_vocabulary and by_kind is not None:
-        by_kind.setdefault("internal_interface", 0)
-
-
-def _upgrade_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の map.json を次の版へ移す。鍵の欠けは、移す前の読み口が使っていた値で埋める。"""
-    upgraded = copy.deepcopy(dict(raw))
-    for segment in upgraded["segments"]:
-        segment.setdefault("declaration_kind", None)
-        segment.setdefault("visibility", None)
-        segment.setdefault("bot_comment_ids", [])
-        if "change_kind" not in segment:
-            segment["change_kind"] = _change_kind_from_spans(segment)
-    # 設計書の地図の最上位の表は節の表で、コードの表は current_form の下にある
-    is_design_doc = "current_form" in upgraded
-    _upgrade_table_v1(upgraded, code_vocabulary=not is_design_doc)
-    if is_design_doc:
-        _upgrade_table_v1(upgraded["current_form"], code_vocabulary=True)
-    return upgraded
-
-
-def _drop_section_row_keys(table: dict[str, Any]) -> None:
-    for row in table["regions"]:
-        if row["kind"] in SECTION_KIND_VALUES:
-            # 読み口の無い空の値。コードの行と鍵をそろえるために書いていた
-            row.pop("bot_comment_ids", None)
-            row.pop("old_path", None)
-
-
-def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の map.json を次の版へ移す。節の行から、書くだけで読まれない二つの鍵を捨てる。"""
-    upgraded = copy.deepcopy(dict(raw))
-    # 節の行は設計書の地図の最上位の表にだけある。current_form の下はコードの表
-    if "current_form" in upgraded:
-        _drop_section_row_keys(upgraded)
-    return upgraded
-
-
-def _upgrade_v3(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 3 の map.json を次の版へ移す。区間に空の指摘の識別子を、集計に新しい種類の 0 を足す。"""
-    upgraded = copy.deepcopy(dict(raw))
-    for segment in upgraded["segments"]:
-        segment.setdefault("static_finding_ids", [])
-    # 設計書の地図の最上位の集計は節の語彙で、コードの語彙の集計は current_form の下にある
-    code_table = upgraded.get("current_form", upgraded)
-    code_table["line_counts"]["by_kind"].setdefault("static_finding", 0)
-    return upgraded
-
-
-# 保存された版から次の版への移し。load_map が MAP_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2, 3: _upgrade_v3}
-
-
 def load_map(raw: Mapping[str, Any]) -> JudgmentMapKind:
-    """map.json を読む境の一か所。保存された版から今の版まで移してから、今の版の型へ読む。"""
-    stored = upgrade_mapping(MAP_FILE, raw, current=MAP_FORMAT, upgrades=_UPGRADES)
+    """map.json を読む境の一か所。今の版でない保存物は止め、今の版の型へ読む。"""
+    stored = require_current_version(MAP_FILE, raw, current=MAP_FORMAT)
     return _read_map_kind(stored)
+
+
+def read_line_totals(raw: Mapping[str, Any]) -> tuple[int, int]:
+    """map.json から、判断が要る行と全体の行の数だけを読む。区間と箇所は復号しない。
+
+    版の検査は load_map と同じ。
+    設計書の地図の最上位の line_counts は節の集計で、load_map が返す table.line_counts と同じ。
+    """
+    require_current_version(MAP_FILE, raw, current=MAP_FORMAT)
+    by_level = raw["line_counts"]["by_level"]
+    if not all(
+        isinstance(count, int) and not isinstance(count, bool) for count in by_level.values()
+    ):
+        raise ReviewError(f"{MAP_FILE} の line_counts.by_level の値が整数ではありません")
+    # 全体の読みは by_level をそのまま持つ。required の鍵が無い集計は、判断が要る行 0 と数える
+    return by_level.get("required", 0), sum(by_level.values())

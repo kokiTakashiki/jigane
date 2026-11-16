@@ -16,7 +16,7 @@ from test_policy_input_limit import diagram_defaults, stops
 
 from jigane.policy_materials import cochange
 from jigane.reviews.lifecycle import LocalRange, RangeOrigin, Review
-from jigane.reviews.review_formats import PAIRS_FILE
+from jigane.reviews.review_formats import PAIRS_FILE, PAIRS_FORMAT
 from jigane.skills import policy_cochange, policy_value_sets
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_principles import principle_prompts
@@ -90,7 +90,8 @@ def _review(tmp_path: Path, repo: Path) -> Review:
     directory = review.id.directory()
     directory.mkdir(parents=True)
     (directory / PAIRS_FILE).write_text(
-        json.dumps([[path, path] for path in changed]), encoding="utf-8"
+        json.dumps({"format": PAIRS_FORMAT, "pairs": [[path, path] for path in changed]}),
+        encoding="utf-8",
     )
     diff = ""
     for path in changed:

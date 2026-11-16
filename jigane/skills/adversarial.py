@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 
 from jigane.findings.records import Adjudication, Verdict
+from jigane.git.tree_files import read_tree_file
 from jigane.groups import viewpoints
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
@@ -296,12 +297,14 @@ def _readable_lines(path: str, working_directory: Path) -> list[str] | None:
     # 示された名前でも symlink の先の名前でも、秘密のファイルは読まない。抜粋は外へ送る
     if claude.is_secret_file(path) or claude.is_secret_file(target.name):
         return None
-    # symlink が作業ディレクトリの外へ出る場合を除く。
-    if not target.is_relative_to(root) or not target.is_file():
+    # レビュー対象のリンクは辿らず、上限を超えるファイルは読まない。None なら呼ぶ側の _excerpt が
+    # その位置の抜粋を作らず、反証役の確かめた位置から外す
+    data = read_tree_file(root, path)
+    if data is None:
         return None
     try:
-        return target.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        return data.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
         return None
 
 

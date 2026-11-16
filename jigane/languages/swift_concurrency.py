@@ -10,8 +10,8 @@ from jigane.languages.base import (
     ActorDomain,
     AwaitCall,
     BlockingWait,
-    Body,
     CallSite,
+    ConcurrencyBody,
     ConcurrencyStep,
     GlobalActorDomain,
     Isolation,
@@ -381,13 +381,13 @@ def _walk(x: Extractor[_State], node: Node) -> list[ConcurrencyStep]:
 
 
 def _async_lets(x: Extractor[_State], group: list[Node]) -> StructuredConcurrency:
-    branches: list[Body] = []
+    branches: list[ConcurrencyBody] = []
     for declaration in group:
         value = declaration.child_by_field_name("value")
         # 子タスクは囲む領域を引き継がない
         child = x.derive(NonisolatedDomain())
         steps = tuple(_branch(child, value)) if value is not None else ()
-        branches.append(Body(NonisolatedDomain(), steps))
+        branches.append(ConcurrencyBody(NonisolatedDomain(), steps))
     return StructuredConcurrency(
         StructuredKind.JOIN_ALL, tuple(branches), line_of(group[0]), "async let"
     )
@@ -463,7 +463,7 @@ def _await(x: Extractor[_State], node: Node) -> list[ConcurrencyStep]:
 
 def _task_group(x: Extractor[_State], call: Node) -> list[ConcurrencyStep]:
     body = _lambda_of(call)
-    branches: list[Body] = []
+    branches: list[ConcurrencyBody] = []
     stack = list(reversed(body.children)) if body is not None else []
     while stack:
         current = stack.pop()
@@ -472,7 +472,9 @@ def _task_group(x: Extractor[_State], call: Node) -> list[ConcurrencyStep]:
             added = _lambda_of(current)
             if name in _ADD_TASK and added is not None:
                 isolation = _closure_annotation(added) or NonisolatedDomain()
-                branches.append(Body(isolation, tuple(x.lambda_steps(added, isolation))))
+                branches.append(
+                    ConcurrencyBody(isolation, tuple(x.lambda_steps(added, isolation)))
+                )
                 continue
         stack.extend(reversed(current.children))
     return [
@@ -491,7 +493,7 @@ def _special(x: Extractor[_State], call: Node) -> list[ConcurrencyStep] | None:
     if receiver is None and name == "Task" and closure is not None:
         # Task { } は囲む本体の領域を引き継ぐ
         isolation = _closure_annotation(closure) or x.domain
-        body = Body(isolation, tuple(x.lambda_steps(closure, isolation)))
+        body = ConcurrencyBody(isolation, tuple(x.lambda_steps(closure, isolation)))
         return [UnstructuredTask(TaskKind.TASK, body, line)]
     if (
         receiver is not None
@@ -500,11 +502,11 @@ def _special(x: Extractor[_State], call: Node) -> list[ConcurrencyStep] | None:
         and closure is not None
     ):
         isolation = _closure_annotation(closure) or NonisolatedDomain()
-        body = Body(isolation, tuple(x.lambda_steps(closure, isolation)))
+        body = ConcurrencyBody(isolation, tuple(x.lambda_steps(closure, isolation)))
         return [UnstructuredTask(TaskKind.DETACHED, body, line)]
     if receiver is not None and name == "async" and closure is not None:
         queue = QueueDomain(text_or_empty(receiver))
-        return [QueueDispatch(Body(queue, tuple(x.lambda_steps(closure, queue))), line)]
+        return [QueueDispatch(ConcurrencyBody(queue, tuple(x.lambda_steps(closure, queue))), line)]
     if _blocks(x.state, receiver, name):
         label = f"{text_or_empty(receiver)}.{name}" if receiver is not None else str(name)
         return [BlockingWait(label, line)]

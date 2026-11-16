@@ -23,7 +23,7 @@ from jigane.policy_materials.missing import (
     recorded_missing,
 )
 from jigane.reviews.lifecycle import DeclaredInputs, create_feature_review
-from jigane.skills import macro
+from jigane.skills import macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.group_result import (
     NO_MATERIAL_SUFFIX,
@@ -49,7 +49,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def _without_figures(sections: macro.PolicySections) -> macro.PolicySections:
+def _without_figures(sections: policy_figures.PolicySections) -> policy_figures.PolicySections:
     tree = PrebuiltSection.TREE
     emptied = {**sections.figures, tree: f"### {tree}\n\n{NO_FILES_TEXT}"}
     return replace(sections, figures=emptied)
@@ -114,7 +114,7 @@ def test_code_scope_without_figures_and_declaration_is_missing_material(project:
     with_declaration = create_feature_review(project, ["src"], "d")
     (project / "README.md").unlink()
     review = create_feature_review(project, ["src"], "p")
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     # 変更したファイルがあれば図は描ける
     assert not sections.figures_missing
     assert macro.missing_material(review, sections) == ()
@@ -133,8 +133,8 @@ def test_run_saves_no_material_without_calling_the_model(
     project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     review = create_feature_review(project, ["src"], "p")
-    real = macro.policy_sections
-    monkeypatch.setattr(macro, "policy_sections", lambda r: _without_figures(real(r)))
+    real = policy_figures.policy_sections
+    monkeypatch.setattr(policy_figures, "policy_sections", lambda r: _without_figures(real(r)))
     fake = MacroFake([])
     result = macro.run_macro(AssemblyInput.load(review), settings_for(fake, max_budget_usd=0.5))
     assert fake.calls == []

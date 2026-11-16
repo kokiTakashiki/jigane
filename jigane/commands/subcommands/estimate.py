@@ -20,7 +20,7 @@ from jigane.findings.records import HistoryWarning
 from jigane.groups.definitions import Effort, GroupId
 from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
-from jigane.reviews.catalog import load_review
+from jigane.reviews.catalog import collapse_skipped_warnings, load_review
 from jigane.reviews.lifecycle import Review
 from jigane.reviews.resolution import resolve_review
 from jigane.skills.assembly import AssemblyInput
@@ -33,8 +33,10 @@ from jigane.skills.estimate_result import (
 )
 from jigane.skills.estimator import estimate_of
 from jigane.skills.group_expectation import GroupExpectation, read_expectation
+from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import NO_MCP, McpSelection
 from jigane.skills.output_estimate import skipped_rows_message
+from jigane.skills.review_docs import read_docs_for_review
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -239,12 +241,12 @@ def estimate_and_print(
     mcp: McpSelection = NO_MCP,
 ) -> None:
     review = load_review(resolve_review(text))
-    assembly = AssemblyInput.load(review)
+    assembly = AssemblyInput.load(review, docs=read_docs_for_review(review, group))
     # 資料の組み立てはロガーに警告を流さない。警告を描く縁はここなので、両方の履歴の分を渡す
     warnings = (*assembly.source.own.warnings, *assembly.source.related_warnings)
     # シャードの数は実行と同じ上限の組から決まる（実行の入口と同じ resolve_run_defaults）
     budget = resolve_run_defaults(group, None, effort, max_budget_usd=max_budget_usd).budget
-    estimate = estimate_of(assembly, group, mcp, budget)
+    estimate = estimate_of(LaunchInput(assembly, group, mcp, budget))
     print_unparsed_notice(review)
     print_estimate(
         EstimateReport(estimate, warnings),
@@ -260,12 +262,13 @@ def estimate_and_print(
 def run(args: argparse.Namespace, context: Context) -> int:
     del context  # 見積もりは LLM を呼ばない
     mcp = load_mcp_selection(args.mcps, args.group, args.mcp_guide)
-    estimate_and_print(
-        args.review,
-        args.group,
-        as_json=args.json,
-        effort=args.effort,
-        max_budget_usd=args.max_budget_usd_per_call,
-        mcp=mcp,
-    )
+    with collapse_skipped_warnings():
+        estimate_and_print(
+            args.review,
+            args.group,
+            as_json=args.json,
+            effort=args.effort,
+            max_budget_usd=args.max_budget_usd_per_call,
+            mcp=mcp,
+        )
     return EXIT_OK

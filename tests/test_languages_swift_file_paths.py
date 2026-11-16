@@ -1,13 +1,13 @@
 import pytest
 
-from jigane.languages.base import FilePathAdapter, FilePathPattern, FileUsage, parse
+from jigane.languages.base import FilePathExpression, FilePathExpressionExtractor, FileUsage, parse
 from jigane.languages.swift import SwiftAdapter
 
 
-def patterns(code: str) -> list[FilePathPattern]:
+def patterns(code: str) -> list[FilePathExpression]:
     swift = SwiftAdapter()
     source = code.encode()
-    return swift.file_path_patterns(parse(swift, source).root_node, source, "r.swift")
+    return swift.file_path_expressions(parse(swift, source).root_node, source, "r.swift")
 
 
 def pairs(code: str) -> list[tuple[str, FileUsage]]:
@@ -15,7 +15,7 @@ def pairs(code: str) -> list[tuple[str, FileUsage]]:
 
 
 def test_swift_adapter_offers_the_reader() -> None:
-    assert isinstance(SwiftAdapter(), FilePathAdapter)
+    assert isinstance(SwiftAdapter(), FilePathExpressionExtractor)
 
 
 def test_data_and_string_initializers_read() -> None:
@@ -81,7 +81,7 @@ def test_variable_argument_is_resolved_one_step_and_function_is_qualified() -> N
         "}\n"
     )
     result = patterns(code)
-    assert [(p.function, p.expression, p.usage, p.line) for p in result] == [
+    assert [(p.function_qualified_name, p.expression, p.usage, p.line) for p in result] == [
         (
             "Exporter.save",
             'base.appendingPathComponent("\\(name).png")',
@@ -140,8 +140,8 @@ def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch)
     source = b"func f(u: URL) { try? FileManager.default.removeItem(at: u) }"
     root = parse(swift, source).root_node
 
-    def explode(_self: object, _rules: object) -> list[FilePathPattern]:
+    def explode(_self: object, _rules: object) -> list[FilePathExpression]:
         raise RecursionError
 
     monkeypatch.setattr("jigane.languages.file_paths_core._Reader.read", explode)
-    assert swift.file_path_patterns(root, source, "r.swift") == []
+    assert swift.file_path_expressions(root, source, "r.swift") == []

@@ -6,6 +6,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from jigane.storage.symlink_guard import StoredFileSymlinkError, raise_if_link
+
 LOCK_FILE = ".lock"
 # 開いているファイルを消せるか。Windows は共有違反（WinError 32）で消せない
 CAN_UNLINK_OPEN_FILE = sys.platform != "win32"
@@ -22,6 +24,32 @@ else:
 
 class LockTimeoutError(Exception):
     pass
+
+
+def open_lock_file(path: Path, flags: int) -> int:
+    """錠のファイルを、symlink を辿らずに開く。symlink なら StoredFileSymlinkError を送出する。
+
+    置き場へ書ける別の処理が錠のファイルを symlink に差し替えても、先のファイルを作らず、
+    権限も変えないための開き方である。
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        try:
+            return os.open(path, flags | nofollow)
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise StoredFileSymlinkError(path) from error
+            raise
+    # O_NOFOLLOW の無い Windows では、lstat と os.open の間の差し替えを塞ぐ手段が OS に無いので、
+    # 前後の検査で見つかる範囲に限る
+    raise_if_link(path)
+    descriptor = os.open(path, flags)
+    try:
+        raise_if_link(path)
+    except StoredFileSymlinkError:
+        os.close(descriptor)
+        raise
+    return descriptor
 
 
 def try_lock(descriptor: int) -> bool:
@@ -71,7 +99,7 @@ def hold_replaceable_file_lock(path: Path) -> Iterator[bool]:
     取れなかったときは何も握らずに False を返す。
     """
     while True:
-        descriptor = os.open(path, os.O_CREAT | os.O_RDWR)
+        descriptor = open_lock_file(path, os.O_CREAT | os.O_RDWR)
         try:
             if not try_lock(descriptor):
                 yield False
@@ -95,7 +123,7 @@ def remove_file_if_unlocked(path: Path) -> bool:
     消せない場合もファイルが残って False になる。
     """
     try:
-        descriptor = os.open(path, os.O_RDWR)
+        descriptor = open_lock_file(path, os.O_RDWR)
     except FileNotFoundError:
         return True
     try:
@@ -146,7 +174,7 @@ def review_lock(
     lock_path = directory / LOCK_FILE
     # ロックのファイルは解放しても消さない。消すと、消す前に開いていた待ち手が消えた後の
     # inode を握り、新しく作られたファイルを握る別の持ち主と同時に臨界区間に入る
-    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    descriptor = open_lock_file(lock_path, os.O_CREAT | os.O_RDWR)
     try:
         deadline = clock() + timeout
         while not try_lock(descriptor):

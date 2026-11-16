@@ -17,6 +17,7 @@ from fakes import (
 )
 from legacy_schemas import load_finding_schema
 from review_fakes import stored_finding, with_map, with_range_source
+from runs_support import write_runs_json
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
@@ -45,6 +46,7 @@ from jigane.skills import (
     macro,
     macro_principles_run,
     pipeline,
+    policy_figures,
     policy_launch,
 )
 from jigane.skills.assembly import AssemblyInput
@@ -302,7 +304,7 @@ def test_estimate_includes_past_run(project: Path) -> None:
 def test_estimate_past_run_ignores_other_shapes(project: Path, shape: str) -> None:
     review = create_feature_review(project, ["src"], "p")
     runs = {"macro": {"model": "m", "shape": shape, "invocations": [RECORD_ROW] * 4}}
-    (review.id.directory() / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
+    write_runs_json(review.id.directory(), runs)
     assert macro.estimate_macro(AssemblyInput.load(review)).to_record()["past_run"] is None
     run(review, MacroFake([discovered("M4")]))
     stored = json.loads((review.id.directory() / "runs.json").read_text("utf-8"))
@@ -318,7 +320,7 @@ def test_estimate_past_run_ignores_other_shapes(project: Path, shape: str) -> No
 def test_diagram_estimate_ignores_a_design_run(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     design_run = {"macro": {"model": "m", "shape": "design", "invocations": [RECORD_ROW]}}
-    (review.id.directory() / "runs.json").write_text(json.dumps(design_run), encoding="utf-8")
+    write_runs_json(review.id.directory(), design_run)
     assert macro.estimate_macro(AssemblyInput.load(review)).to_record()["past_run"] is None
 
 
@@ -414,7 +416,9 @@ def test_show_json_has_no_adjudication_and_run_record(
 def test_materials_have_technology_section(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     assert "### 技術選定" in macro.build_diagram_prompt(AssemblyInput.load(review))
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert text.index("### 同じ形の箇所") < text.index("### 技術選定")
 
 
@@ -470,7 +474,9 @@ def test_usage_row_is_the_diagram_role(project: Path, capsys: pytest.CaptureFixt
 
 def test_materials_put_sequence_section_between_tree_and_regions(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    text = macro.diagram_materials_text(AssemblyInput.load(review), macro.policy_sections(review))
+    text = macro.diagram_materials_text(
+        AssemblyInput.load(review), policy_figures.policy_sections(review)
+    )
     assert text.index("### 変更のツリー図") < text.index("### シーケンス図")
     assert text.index("### シーケンス図") < text.index("### 判断の箇所の一覧")
 
@@ -482,7 +488,7 @@ def test_prompt_gets_the_diagram_sections_and_not_the_code_sections(project: Pat
         changed_files.PrebuiltSection.TREE,
         changed_files.PrebuiltSection.SEQUENCE,
         changed_files.PrebuiltSection.REGIONS,
-        macro.SECTION_REPEATS,
+        policy_figures.SECTION_REPEATS,
         "技術選定",
         macro.SECTION_HISTORY,
     ):
@@ -492,7 +498,7 @@ def test_prompt_gets_the_diagram_sections_and_not_the_code_sections(project: Pat
 
 def test_prompt_uses_short_technology_and_repeats_without_lines(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     assert technology_materials.short_section_text(review) in macro.build_diagram_prompt(
         AssemblyInput.load(review)
     )
@@ -502,7 +508,7 @@ def test_prompt_uses_short_technology_and_repeats_without_lines(project: Path) -
 
 def test_sections_explain_themselves_in_their_first_sentence(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     assert sections.figures[changed_files.PrebuiltSection.TREE].startswith(
         f"### 変更のツリー図\n\n{TREE_INTRO}"
     )
@@ -511,35 +517,35 @@ def test_sections_explain_themselves_in_their_first_sentence(project: Path) -> N
 
 def test_run_builds_sections_once(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     review = create_feature_review(project, ["src"], "p")
-    real = macro.policy_sections
+    real = policy_figures.policy_sections
     calls: list[str] = []
 
-    def counting(target: Review) -> macro.PolicySections:
+    def counting(target: Review) -> policy_figures.PolicySections:
         calls.append("built")
         return real(target)
 
-    monkeypatch.setattr(macro, "policy_sections", counting)
+    monkeypatch.setattr(policy_figures, "policy_sections", counting)
     run(review, MacroFake([discovered("M2")]))
     assert calls == ["built"]
 
 
 def test_given_sections_are_not_rebuilt(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     review = create_feature_review(project, ["src"], "p")
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     calls: list[str] = []
 
-    def fail(_: Review) -> macro.PolicySections:
+    def fail(_: Review) -> policy_figures.PolicySections:
         calls.append("built")
         return sections
 
-    monkeypatch.setattr(macro, "policy_sections", fail)
+    monkeypatch.setattr(policy_figures, "policy_sections", fail)
     macro.build_diagram_prompt(AssemblyInput.load(review), sections)
     assert calls == []
 
 
 def test_estimated_materials_are_inside_the_real_prompt(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p", DeclaredInputs(intent="abc"))
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     prompt = macro.build_diagram_prompt(AssemblyInput.load(review), sections)
     assert macro.diagram_materials_text(AssemblyInput.load(review), sections) in prompt
     assert macro.declaration_prompt_text(review) in prompt
@@ -877,6 +883,15 @@ def test_prompt_declaration_has_no_heading_above_the_section(project: Path) -> N
     marks = [line.split()[0] for line in body.splitlines() if line.startswith("#")]
     levels = [len(mark) for mark in marks]
     assert levels == [4, 5]
+
+
+def test_declaration_fence_outlasts_backticks_in_the_intent(project: Path) -> None:
+    review = create_feature_review(
+        project, ["src"], "p", DeclaredInputs(intent="目的\n````\n## 差し込み")
+    )
+    text = macro.declaration_prompt_text(review)
+    assert text.startswith("`````\n")
+    assert text.endswith("\n`````")
 
 
 @pytest.mark.usefixtures("all_principle_shapes")

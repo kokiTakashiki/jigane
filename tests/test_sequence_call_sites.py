@@ -1,14 +1,14 @@
 from jigane.languages.base import (
-    Call,
+    CallReceiver,
     CallSite,
-    Creation,
+    CreationReceiver,
     DeferredSite,
-    Member,
-    Name,
-    Paren,
-    Self,
-    Super,
-    Unknown,
+    MemberReceiver,
+    NameReceiver,
+    ParenReceiver,
+    SelfReceiver,
+    SuperReceiver,
+    UnknownReceiver,
     parse,
 )
 from jigane.languages.csharp import CSharpAdapter
@@ -36,7 +36,7 @@ def _sites(member_name: str) -> list[CallSite | DeferredSite]:
     declaration = next(
         d for d in adapter.type_members(root, _SOURCE, "C.cs") if d.name == member_name
     )
-    body = adapter.body_of(declaration.node)
+    body = adapter.body_node_of(declaration.node)
     assert body is not None
     return adapter.call_sites(body, _SOURCE)
 
@@ -86,7 +86,7 @@ def test_expression_body_is_supported_and_field_has_no_body() -> None:
     adapter = CSharpAdapter()
     root = parse(adapter, _SOURCE).root_node
     field = next(d for d in adapter.type_members(root, _SOURCE, "C.cs") if d.name == "Field")
-    assert adapter.body_of(field.node) is None
+    assert adapter.body_node_of(field.node) is None
 
 
 def test_receiver_kinds_and_named_arguments() -> None:
@@ -101,21 +101,21 @@ def test_receiver_kinds_and_named_arguments() -> None:
         node = stack.pop()
         stack.extend(node.children)
         if node.type in ("this", "base"):
-            kinds[node.type] = adapter.receiver_of(node)
-    assert kinds == {"this": Self(), "base": Super()}
+            kinds[node.type] = adapter.receiver_kind_of(node)
+    assert kinds == {"this": SelfReceiver(), "base": SuperReceiver()}
     member = next(d for d in adapter.type_members(root, source, "C.cs") if d.name == "M")
-    body = adapter.body_of(member.node)
+    body = adapter.body_node_of(member.node)
     assert body is not None
     sites = _calls(adapter.call_sites(body, source))
     first = sites[0]
-    assert isinstance(adapter.receiver_of(first.node), Call)
+    assert isinstance(adapter.receiver_kind_of(first.node), CallReceiver)
     assert [a.name for a in first.arguments] == ["x", None]
     assert first.receiver is not None
-    assert isinstance(adapter.receiver_of(first.receiver), Paren)
+    assert isinstance(adapter.receiver_kind_of(first.receiver), ParenReceiver)
     creation = next(s for s in sites if s.is_creation)
-    assert isinstance(adapter.receiver_of(creation.node), Creation)
-    assert not isinstance(adapter.receiver_of(root), (Member, Name))
-    assert adapter.receiver_of(root) == Unknown()
+    assert isinstance(adapter.receiver_kind_of(creation.node), CreationReceiver)
+    assert not isinstance(adapter.receiver_kind_of(root), (MemberReceiver, NameReceiver))
+    assert adapter.receiver_kind_of(root) == UnknownReceiver()
 
 
 def test_generic_name_receiver_is_named_without_its_type_arguments() -> None:
@@ -128,8 +128,8 @@ def test_generic_name_receiver_is_named_without_its_type_arguments() -> None:
         node = stack.pop()
         stack.extend(node.children)
         if node.type == "generic_name":
-            generics.append(adapter.receiver_of(node))
-    assert generics == [Name("List")]
+            generics.append(adapter.receiver_kind_of(node))
+    assert generics == [NameReceiver("List")]
 
 
 def test_locals_of_reports_variables_functions_and_lambda_parameters() -> None:
@@ -140,7 +140,7 @@ def test_locals_of_reports_variables_functions_and_lambda_parameters() -> None:
     adapter = CSharpAdapter()
     root = parse(adapter, source).root_node
     member = next(d for d in adapter.type_members(root, source, "C.cs") if d.name == "M")
-    body = adapter.body_of(member.node)
+    body = adapter.body_node_of(member.node)
     assert body is not None
     found = adapter.locals_of(body)
     assert [(v.name, v.type_annotation) for v in found.variables] == [

@@ -3,8 +3,8 @@ from tree_sitter import Node
 from jigane.languages.base import (
     AwaitCall,
     BlockingWait,
-    Body,
     ConcurrencyAdapter,
+    ConcurrencyBody,
     ConcurrencyStep,
     EventLoopDomain,
     Isolation,
@@ -45,7 +45,7 @@ def find(node: Node, name: str) -> Node:
 def steps(code: str) -> list[ConcurrencyStep]:
     source = f"async def f():\n{code}\n".encode()
     root = parse(adapter, source).root_node
-    body = adapter.body_of(find(root, "f"))
+    body = adapter.body_node_of(find(root, "f"))
     assert body is not None
     return adapter.concurrency_steps(body, source, LOOP)
 
@@ -174,7 +174,7 @@ def test_to_thread_and_run_in_executor_dispatch_to_the_executor() -> None:
     (second,) = steps(indent("await loop.run_in_executor(None, work, 1)"))
     for step, label in ((first, "to_thread"), (second, "run_in_executor")):
         assert isinstance(step, QueueDispatch)
-        assert step.body == Body(QueueDomain("executor"), ())
+        assert step.body == ConcurrencyBody(QueueDomain("executor"), ())
         assert step.label == label
 
 

@@ -7,8 +7,8 @@ from pathlib import Path
 from jigane.gates.entry import Active, Allowed, GateEntry, GateSeverity, GateState, RegexDetail
 from jigane.gates.explanation import GateExplanation
 from jigane.gates.line_scope import LineScope
-from jigane.judgment_map.allow_annotation import AllowedSpot, scan_allow_comments, split_rows
-from jigane.languages.base import RegexLiteral
+from jigane.judgment_map.allow_annotation import scan_allow_comments, split_rows
+from jigane.languages.base import RegexLiteralSite
 from jigane.regex.source import read_regex_source
 from jigane.regex.tags import CountedRegex, RegexTag, Rule, Severity, explain, judge
 
@@ -30,7 +30,7 @@ class RegexDetection:
     state は、注記で外した札なら Allowed(理由)、外していなければ Active。
     """
 
-    literal: RegexLiteral
+    literal: RegexLiteralSite
     tag: RegexTag
     state: GateState = field(default_factory=Active)
 
@@ -52,9 +52,9 @@ class RegexTagFindings:
     violations: tuple[AnnotationViolation, ...]
 
 
-def _literals(root: Path, path: str) -> tuple[RegexLiteral, ...]:
+def _literals(root: Path, path: str) -> tuple[RegexLiteralSite, ...]:
     source = read_regex_source(root, path)
-    return () if source is None else source.scan(path).literals
+    return () if source is None else source.scan(path).literal_sites
 
 
 def detect_tags(
@@ -83,14 +83,14 @@ def detect_tags(
             continue
         scan = scan_allow_comments(source.adapter, source.root, "regex", {str(r) for r in Rule})
         before = {lit.pattern for lit in _literals(base_root, renames.get(path, path))}
-        for literal in source.scan(path).literals:
+        for literal in source.scan(path).literal_sites:
             # 変更前にも在る本文は、このレビューで変えた正規表現ではない
             if literal.pattern in before:
                 continue
             verdict = judge(literal)
             if isinstance(verdict, CountedRegex):
                 for tag in verdict.tags:
-                    reason = scan.allowed.get(AllowedSpot(str(tag.rule), literal.line))
+                    reason = scan.reason_for(str(tag.rule), literal.line)
                     found.append(
                         RegexDetection(
                             literal, tag, Active() if reason is None else Allowed(reason)

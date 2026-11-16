@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fakes import STARTED_AT
 
 from jigane.git.process import CommandError
 from jigane.llm_runs.claude import (
+    _MAX_OUTPUT_NESTING,
     ClaudeInvocationError,
     FailureKind,
     Invocation,
@@ -117,7 +119,7 @@ def test_build_command_with_mcp(tmp_path: Path) -> None:
 
 def test_parse_record_success() -> None:
     payload = json.loads((FIXTURES / "structured-success.json").read_text("utf-8"), strict=False)
-    record = parse_record(payload, 0.5)
+    record = parse_record(payload, 0.5, started_at=STARTED_AT)
     assert record.input_tokens == 4
     assert record.output_tokens == 525
     assert record.cache_read_input_tokens == 2584
@@ -131,11 +133,14 @@ def test_parse_record_success() -> None:
 
 
 def test_as_row_does_not_write_a_session_id() -> None:
-    assert "session_id" not in parse_record({"session_id": "abc-123"}, 0.5).as_row()
+    assert (
+        "session_id"
+        not in parse_record({"session_id": "abc-123"}, 0.5, started_at=STARTED_AT).as_row()
+    )
 
 
 def test_from_row_discards_a_session_id_left_in_an_old_row() -> None:
-    row = parse_record({}, 0.5).as_row()
+    row = parse_record({}, 0.5, started_at=STARTED_AT).as_row()
     restored = StoredInvocationRecord.from_row({**row, "session_id": "abc-123"})
     assert restored == StoredInvocationRecord.from_row(row)
     assert not hasattr(restored, "session_id")
@@ -143,7 +148,7 @@ def test_from_row_discards_a_session_id_left_in_an_old_row() -> None:
 
 def test_parse_record_permission_denied() -> None:
     payload = json.loads((FIXTURES / "permission-denied.json").read_text("utf-8"), strict=False)
-    assert parse_record(payload, 0.5).permission_denials == 1
+    assert parse_record(payload, 0.5, started_at=STARTED_AT).permission_denials == 1
 
 
 def test_run_success(tmp_path: Path) -> None:
@@ -387,12 +392,17 @@ def test_amounts_and_decimals_are_not_http_statuses(text: str) -> None:
 )
 def test_transient_follows_the_kind_not_the_cause(kind: FailureKind, *, transient: bool) -> None:
     # cause が過負荷を名乗っても、種類が決める
-    error = ClaudeInvocationError("529 overloaded", parse_record({}, 0.5), kind)
+    error = ClaudeInvocationError(
+        "529 overloaded", parse_record({}, 0.5, started_at=STARTED_AT), kind
+    )
     assert error.transient is transient
 
 
 def test_kind_defaults_to_other() -> None:
-    assert ClaudeInvocationError("boom", parse_record({}, 0.5)).kind is FailureKind.OTHER
+    assert (
+        ClaudeInvocationError("boom", parse_record({}, 0.5, started_at=STARTED_AT)).kind
+        is FailureKind.OTHER
+    )
 
 
 def test_timeout_is_decided_at_the_throw_site(tmp_path: Path) -> None:
@@ -488,5 +498,54 @@ def test_claude_binary_defaults_to_claude_when_unset_or_empty(
 def test_claude_binary_is_replaced_by_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("JIGANE_CLAUDE_BINARY", "/somewhere/fake")
-    assert build_command(make_invocation(tmp_path))[0] == "/somewhere/fake"
+    fake = str(tmp_path / "somewhere" / "fake")
+    monkeypatch.setenv("JIGANE_CLAUDE_BINARY", fake)
+    assert build_command(make_invocation(tmp_path))[0] == fake
+
+
+def _overflow_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """json.loads が RecursionError を出す環境（スタックの小さいスレッドなど）を作る。"""
+
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(json, "loads", explode)
+
+
+def test_run_rejects_output_nested_over_the_limit_as_bad_output(tmp_path: Path) -> None:
+    depth = _MAX_OUTPUT_NESTING + 1
+    stdout = "[" * depth + "]" * depth
+    with pytest.raises(ClaudeInvocationError) as raised:
+        run(make_invocation(tmp_path), runner=fake_runner(stdout))
+    assert raised.value.kind is FailureKind.BAD_OUTPUT
+    assert f"上限 {_MAX_OUTPUT_NESTING} 段" in str(raised.value)
+    assert "[[[" not in str(raised.value)
+
+
+def test_failed_run_with_over_nested_stdout_gives_the_raw_tail(tmp_path: Path) -> None:
+    # 数え上げで深すぎると分かった標準出力は、読めない出力として生の末尾を理由に添える
+    depth = _MAX_OUTPUT_NESTING + 1
+    stdout = "[" * depth + "]" * depth
+    with pytest.raises(ClaudeInvocationError) as raised:
+        run(make_invocation(tmp_path), runner=fake_runner(stdout, 1, "warn"))
+    reason = str(raised.value)
+    assert reason.startswith("claude の終了コードが 1 でした: warn / ")
+    assert reason.endswith("]")
+
+
+def test_failed_run_whose_stdout_overflows_json_still_gives_a_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _overflow_json(monkeypatch)
+    with pytest.raises(ClaudeInvocationError) as raised:
+        run(make_invocation(tmp_path), runner=fake_runner("[[]]", 1, "warn"))
+    assert str(raised.value) == "claude の終了コードが 1 でした: warn / [[]]"
+
+
+def test_run_maps_a_recursion_error_to_bad_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _overflow_json(monkeypatch)
+    with pytest.raises(ClaudeInvocationError) as raised:
+        run(make_invocation(tmp_path), runner=fake_runner("{}"))
+    assert raised.value.kind is FailureKind.BAD_OUTPUT

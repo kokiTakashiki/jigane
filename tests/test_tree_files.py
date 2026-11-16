@@ -1,8 +1,12 @@
 """レビュー対象の木の外へ出るシンボリックリンクを、各読み手が読まないことの確認。"""
 
+import errno
+import os
+import stat
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import pytest
 from review_fakes import with_map
@@ -11,11 +15,16 @@ from test_bots import (  # noqa: F401 pytest が fixture を名前で引くた�
     repo,
 )
 
+from jigane.git import tree_files
 from jigane.git.tree_files import (
     MAX_REVIEW_FILE_BYTES,
+    NotOpened,
+    TreeFileState,
     TreeFileTooLargeError,
     is_inside_tree,
+    read_tree,
     read_tree_bytes,
+    read_tree_file,
     read_tree_text,
     tree_file_state,
     walk_tree_files,
@@ -25,9 +34,11 @@ from jigane.judgment_map.classification import FilePair, _Side
 from jigane.judgment_map.configuration import Config
 from jigane.judgment_map.declaration import extract_declaration, public_names
 from jigane.policy_materials import changed_files
+from jigane.policy_materials.value_sets import ValueSetLocation
 from jigane.pull_request_context import background, bots
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import shards
+from jigane.skills.policy_value_sets import _name_referenced
 
 LEAK_MARK = "SECRET_TEXT_FROM_OUTSIDE"
 
@@ -166,9 +177,9 @@ def test_read_tree_bytes_raises_when_over_max_bytes(tmp_path: Path) -> None:
     assert read_tree_bytes(tmp_path, "f.txt", max_bytes=4) == b"abcd"
     with pytest.raises(TreeFileTooLargeError):
         read_tree_bytes(tmp_path, "f.txt", max_bytes=3)
-    assert tree_file_state(tmp_path, "f.txt") == "readable"
-    assert tree_file_state(tmp_path, "none.txt") == "missing"
-    assert tree_file_state(tmp_path, "../f.txt") == "refused"
+    assert tree_file_state(tmp_path, "f.txt") is TreeFileState.READABLE
+    assert tree_file_state(tmp_path, "none.txt") is TreeFileState.MISSING
+    assert tree_file_state(tmp_path, "../f.txt") is TreeFileState.REFUSED
 
 
 def test_changes_omits_file_over_the_size_limit(tmp_path: Path) -> None:
@@ -176,3 +187,241 @@ def test_changes_omits_file_over_the_size_limit(tmp_path: Path) -> None:
     lines = file_change(tmp_path, tmp_path, FilePair(None, "big.txt"), Config())
     assert lines[-1] == OMITTED_TOO_LARGE
     assert len(lines) == 3
+
+
+def test_read_tree_file_reads_regular_file(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_bytes(b"hello")
+    assert read_tree_file(tmp_path, "a.txt") == b"hello"
+
+
+def test_read_tree_file_refuses_symlink_to_outside(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    (root / "link.txt").symlink_to(tmp_path / "secret.txt")
+    assert read_tree_file(root, "link.txt") is None
+
+
+def test_read_tree_file_refuses_over_limit(tmp_path: Path) -> None:
+    (tmp_path / "big.bin").write_bytes(b"x" * 11)
+    assert read_tree_file(tmp_path, "big.bin", max_bytes=10) is None
+    (tmp_path / "ok.bin").write_bytes(b"x" * 10)
+    assert read_tree_file(tmp_path, "ok.bin", max_bytes=10) == b"x" * 10
+
+
+def test_read_tree_file_refuses_escaping_paths(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    assert read_tree_file(root, "../secret.txt") is None
+    assert read_tree_file(root, str(tmp_path / "secret.txt")) is None
+
+
+def test_read_tree_file_refuses_non_regular_file(tmp_path: Path) -> None:
+    # FIFO は POSIX にだけある。Windows ではディレクトリで確かめる
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "pipe")
+    else:
+        (tmp_path / "pipe").mkdir()
+    assert read_tree_file(tmp_path, "pipe") is None
+
+
+def test_read_tree_file_refuses_directory(tmp_path: Path) -> None:
+    (tmp_path / "dir").mkdir()
+    assert read_tree_file(tmp_path, "dir") is None
+
+
+def test_read_tree_file_refuses_symlinked_intermediate_directory(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "a.txt").write_text("a", encoding="utf-8")
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    (outside_directory / "a.txt").write_text("secret", encoding="utf-8")
+    (root / "out").symlink_to(outside_directory, target_is_directory=True)
+    (root / "in").symlink_to(root / "real", target_is_directory=True)
+    assert read_tree_file(root, "out/a.txt") is None
+    assert read_tree_file(root, "in/a.txt") is None
+    assert tree_file_state(root, "out/a.txt") is TreeFileState.REFUSED
+    assert read_tree_file(root, "real/a.txt") == b"a"
+
+
+def test_read_tree_file_refuses_in_tree_symlink(tmp_path: Path) -> None:
+    (tmp_path / "real.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "alias.txt").symlink_to(tmp_path / "real.txt")
+    assert read_tree_file(tmp_path, "alias.txt") is None
+    assert read_tree_bytes(tmp_path, "alias.txt") is None
+
+
+def test_value_set_reference_skips_symlink_and_oversized_body(tmp_path: Path) -> None:
+    definition = ValueSetLocation(path="defs.py", line=1, name="NAMES")
+    body = "from defs import NAMES\n"
+    (tmp_path / "real.py").write_text(body, encoding="utf-8")
+    (tmp_path / "alias.py").symlink_to(tmp_path / "real.py")
+    (tmp_path / "big.py").write_text(body + "#" * MAX_REVIEW_FILE_BYTES, encoding="utf-8")
+    assert _name_referenced(definition, "real.py", "NAMES", tmp_path)
+    assert not _name_referenced(definition, "alias.py", "NAMES", tmp_path)
+    assert not _name_referenced(definition, "big.py", "NAMES", tmp_path)
+
+
+def _raise_os_error(*_args: object, **_kwargs: object) -> NoReturn:
+    raise OSError("simulated")
+
+
+def test_read_tree_file_returns_none_when_fstat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    monkeypatch.setattr(os, "fstat", _raise_os_error)
+    assert read_tree_file(tmp_path, "a.txt") is None
+    assert read_tree_bytes(tmp_path, "a.txt") is None
+    assert tree_file_state(tmp_path, "a.txt") is TreeFileState.UNREADABLE
+
+
+def test_read_tree_file_returns_none_when_read_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    monkeypatch.setattr(os, "fdopen", _raise_os_error)
+    assert read_tree_file(tmp_path, "a.txt") is None
+    assert read_tree_bytes(tmp_path, "a.txt", max_bytes=10) is None
+
+
+def test_read_tree_file_follows_symlinked_root(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "a.txt").write_text("a", encoding="utf-8")
+    link = tmp_path / "root-link"
+    link.symlink_to(real, target_is_directory=True)
+    assert read_tree_file(link, "a.txt") == b"a"
+    assert tree_file_state(link, "a.txt") is TreeFileState.READABLE
+
+
+@pytest.mark.parametrize("walk", [True, False])
+def test_tree_file_states_in_both_open_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, walk: bool
+) -> None:
+    monkeypatch.setattr(
+        tree_files, "_CAN_WALK_BY_DIRECTORY", walk and tree_files._CAN_WALK_BY_DIRECTORY
+    )
+    root = tmp_path / "root"
+    (root / "d").mkdir(parents=True)
+    (root / "d" / "a.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("s", encoding="utf-8")
+    (root / "link.txt").symlink_to(tmp_path / "secret.txt")
+    (root / "dlink").symlink_to(root / "d", target_is_directory=True)
+    assert tree_file_state(root, "d/a.txt") is TreeFileState.READABLE
+    assert tree_file_state(root, "none.txt") is TreeFileState.MISSING
+    assert tree_file_state(root, "d/a.txt/b") is TreeFileState.MISSING
+    assert tree_file_state(root, "d") is TreeFileState.NOT_REGULAR
+    assert tree_file_state(root, "link.txt") is TreeFileState.REFUSED
+    assert tree_file_state(root, "../secret.txt") is TreeFileState.REFUSED
+    assert read_tree_file(root, "d/a.txt") == b"a"
+    assert read_tree_file(root, "link.txt") is None
+    # 途中の要素のリンクは、どちらの経路でも拒む
+    assert read_tree_file(root, "dlink/a.txt") is None
+
+
+def test_unreadable_is_distinct_from_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+
+    def refuse(*_args: object, **_kwargs: object) -> NoReturn:
+        raise PermissionError(errno.EACCES, "denied")
+
+    real_open = os.open
+    monkeypatch.setattr(os, "open", refuse)
+    assert tree_file_state(tmp_path, "a.txt") is TreeFileState.UNREADABLE
+    assert read_tree_bytes(tmp_path, "a.txt") is None
+    monkeypatch.setattr(os, "open", real_open)
+    assert tree_file_state(tmp_path, "none") is TreeFileState.MISSING
+
+
+def test_lstat_path_refuses_file_swapped_for_another_after_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows 相当の経路で、lstat と open の間に別のファイルへ差し替えられたら拒む。"""
+    monkeypatch.setattr(tree_files, "_CAN_WALK_BY_DIRECTORY", False)
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "other.txt").write_text("secret", encoding="utf-8")
+    real_open = os.open
+    swapped: list[bool] = []
+
+    def swap_then_open(path: Path, flags: int) -> int:
+        if Path(path).name == "a.txt" and not swapped:
+            swapped.append(True)
+            (tmp_path / "other.txt").replace(tmp_path / "a.txt")
+        return real_open(path, flags)
+
+    monkeypatch.setattr(os, "open", swap_then_open)
+    assert read_tree(tmp_path, "a.txt", None) == NotOpened(TreeFileState.REFUSED)
+    assert swapped == [True]
+
+
+def test_lstat_path_reads_unswapped_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tree_files, "_CAN_WALK_BY_DIRECTORY", False)
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "a.txt").write_text("a", encoding="utf-8")
+    assert read_tree_file(tmp_path, "d/a.txt") == b"a"
+    assert tree_file_state(tmp_path, "d/none") is TreeFileState.MISSING
+
+
+def test_lstat_path_refuses_path_that_resolves_outside_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tree_files, "_CAN_WALK_BY_DIRECTORY", False)
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    real_resolve = Path.resolve
+
+    def resolve(self: Path, *, strict: bool = False) -> Path:
+        if self.name == "a.txt":
+            return Path("/outside-the-root/a.txt")
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert read_tree(tmp_path, "a.txt", None) == NotOpened(TreeFileState.REFUSED)
+
+
+def test_lstat_path_refuses_reparse_point_intermediate_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows の junction は S_ISLNK にならない。再解析ポイントの属性だけで中間の要素を拒む。"""
+    monkeypatch.setattr(tree_files, "_CAN_WALK_BY_DIRECTORY", False)
+    (tmp_path / "in").mkdir()
+    (tmp_path / "in" / "a.txt").write_text("a", encoding="utf-8")
+    real_lstat = os.lstat
+
+    def lstat(path: Path) -> os.stat_result:
+        status = real_lstat(path)
+        if Path(path).name != "in":
+            return status
+        return cast(
+            "os.stat_result",
+            SimpleNamespace(
+                st_mode=status.st_mode, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ),
+        )
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    assert read_tree(tmp_path, "in/a.txt", None) == NotOpened(TreeFileState.REFUSED)
+
+
+@pytest.mark.parametrize("walk", [True, False])
+def test_directory_is_not_regular_when_open_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, walk: bool
+) -> None:
+    """Windows はディレクトリの open を EACCES で拒む。それでも NOT_REGULAR になる。"""
+    monkeypatch.setattr(
+        tree_files, "_CAN_WALK_BY_DIRECTORY", walk and tree_files._CAN_WALK_BY_DIRECTORY
+    )
+    (tmp_path / "d").mkdir()
+    real_open = os.open
+
+    def deny_directory(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if Path(str(path)).name == "d":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", deny_directory)
+    assert tree_file_state(tmp_path, "d") is TreeFileState.NOT_REGULAR

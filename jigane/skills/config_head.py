@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from jigane.git.tree_files import read_tree_bytes
+from jigane.markdown.fence import fence, one_line
 
 # 取り出せないときに先頭から渡す行数と、取り出した冒頭の行数の上限
 HEAD_MAX_LINES = 40
@@ -73,7 +74,7 @@ CONFIG_FILE_HEADS: dict[str, Callable[[list[str]], list[str]]] = {
 HEAD_SECTION_INTRO = (
     "### 設定ファイルの冒頭の設定\n\n"
     "差分に含まれる設定ファイルの冒頭の宣言である。差分には出ないが、"
-    "設定ファイルの挙動を左右する。"
+    "設定ファイルの挙動を左右する。各ファイルの冒頭はバッククォートの柵で囲んである。"
 )
 
 
@@ -104,7 +105,7 @@ def config_heads_section(root: Path, paths: Iterable[str]) -> str:
         except UnicodeDecodeError:
             continue
         if head:
-            parts.append(f"=== {path} （冒頭の設定） ===\n{head}\n")
+            parts.append(f"=== {one_line(path)} （冒頭の設定） ===\n{fence(head)}\n")
     if not parts:
         return ""
     return HEAD_SECTION_INTRO + "\n\n" + "\n".join(parts)

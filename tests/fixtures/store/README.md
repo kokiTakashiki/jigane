@@ -8,7 +8,8 @@
 - `root/` は置き場の根の素材（`root/mcp/mcp.json`）。レビューの置き場ではないので、試験は走査しない。
 - 形の一覧と元の件数は CATALOG.md。素材は CATALOG.md の識別子（approval/s01 など）で指す。ただし CATALOG.md は縮める前の素材の目録で、タグの欄は縮めた後の素材と一致しない。
 - pr_state.json は、PR の状態を CLI が取って保存していたころの保存物で、今の読み口は読まず、新しいレビューでは書かない。素材に残すのは、それが置き場に在っても他のファイルが読めることを縛るため。
-- background.json の issues と review.json の pull_request.linked_issues は、背景から issue を外す前の保存物が持っていたもので、今の読み口は版の移しで落とす。素材に残すのは、古い保存物が読めることを縛るため。
+- background.json の issues と review.json の pull_request.linked_issues は、背景から issue を外す前の保存物が持っていたもので、今の版には無い。素材に残すのは、古い保存物が止まることを縛るため。
+- findings、findings_history、background、bot_comments、gates、map、review、selection、runs、run_in_progress の素材は今の版より古いものがあり（map.json、review.json、selection.json、runs.json、run_in_progress.json は全部）、今の読み口は作り直しを案内して止まる。`tests/test_store_compat.py` は、止まることと案内の文を縛る。
 
 ## 素材の作り直し
 

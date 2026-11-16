@@ -73,7 +73,7 @@ def test_version_is_taken_from_the_raw_bytes() -> None:
 def test_read_document_returns_raw_bytes_and_normalized_text(tmp_path: Path) -> None:
     path = tmp_path / "doc.md"
     path.write_bytes(b"a\r\nb\rc\n")
-    document = read_document(path)
+    document = read_document(path.parent, path.name)
     assert document.data == b"a\r\nb\rc\n"
     assert document.text == "a\nb\nc\n"
     assert document.version == document_version(b"a\r\nb\rc\n")

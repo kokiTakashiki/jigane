@@ -5,7 +5,7 @@ from tree_sitter import Node
 from jigane.languages import concurrency_core as core
 from jigane.languages.base import (
     BlockingWait,
-    Body,
+    ConcurrencyBody,
     ConcurrencyStep,
     Isolation,
     IsolationContext,
@@ -295,8 +295,8 @@ def _blocking(
     return f"{label}.{name}"
 
 
-def _body(x: Extractor[None], argument: Node, domain: Isolation) -> Body:
-    return Body(domain, tuple(x.lambda_steps(argument, domain)))
+def _body(x: Extractor[None], argument: Node, domain: Isolation) -> ConcurrencyBody:
+    return ConcurrencyBody(domain, tuple(x.lambda_steps(argument, domain)))
 
 
 def _lambdas_of(collection: Node) -> list[Node]:
@@ -309,10 +309,10 @@ def _lambdas_of(collection: Node) -> list[Node]:
     return [a for a in _positional(collection) if a.type == "lambda_expression"]
 
 
-def _future_branch(x: Extractor[None], argument: Node) -> Body:
+def _future_branch(x: Extractor[None], argument: Node) -> ConcurrencyBody:
     """allOf・anyOf に渡された Future 一つを、枝の本体にする。"""
     if argument.type != "method_invocation":
-        return Body(x.domain, ())
+        return ConcurrencyBody(x.domain, ())
     receiver, name, _ = _callee(argument)
     arguments = _positional(argument)
     if receiver == "CompletableFuture" and name in _ASYNC_FACTORY_NAMES and arguments:
@@ -321,7 +321,7 @@ def _future_branch(x: Extractor[None], argument: Node) -> Body:
     steps = x.walk(argument)
     if site is not None:
         steps.append(SyncCall(site, site.line))
-    return Body(x.domain, tuple(steps))
+    return ConcurrencyBody(x.domain, tuple(steps))
 
 
 def _scope(x: Extractor[None], node: Node) -> list[ConcurrencyStep]:

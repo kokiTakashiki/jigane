@@ -2,10 +2,10 @@
 
 from tree_sitter import Node
 
-from jigane.languages.base import FilePathPattern, FileUsage
+from jigane.languages.base import FilePathExpression, FileUsage
 from jigane.languages.file_paths_core import Rules, text
-from jigane.languages.file_paths_core import file_path_patterns as core_file_path_patterns
-from jigane.languages.swift_nodes import DECLARED_FUNCTION_NODES
+from jigane.languages.file_paths_core import file_path_expressions as core_file_path_expressions
+from jigane.languages.swift_nodes import DECLARED_FUNCTION_NODES, SwiftCallSite
 
 _FILE_MANAGER = "FileManager.default"
 # 名前を組み立てるメソッド。連なりは式全体を一つの組み立てとして取る
@@ -61,46 +61,14 @@ def _builds_string(node: Node) -> bool:
     return False
 
 
-class Call:
-    """`呼び出し先(引数...)` の呼び出し先の名前、受け手の原文、ラベル付きの引数。"""
-
-    def __init__(self, node: Node) -> None:
-        self.node = node
-        self.name = ""
-        self.receiver: Node | None = None
-        self.arguments: dict[str, Node] = {}
-        callee = node.children[0] if node.children else None
-        suffix = next((c for c in node.children if c.type == "call_suffix"), None)
-        if callee is None or suffix is None:
-            return
-        if callee.type == "simple_identifier":
-            self.name = text(callee)
-        elif callee.type == "navigation_expression":
-            member = callee.child_by_field_name("suffix")
-            member_name = member.child_by_field_name("suffix") if member is not None else None
-            if member_name is not None:
-                self.name = text(member_name)
-            self.receiver = callee.child_by_field_name("target")
-        for argument in (
-            c for v in suffix.children if v.type == "value_arguments" for c in v.children
-        ):
-            if argument.type != "value_argument":
-                continue
-            label = argument.child_by_field_name("name")
-            value = argument.child_by_field_name("value")
-            # ラベルの無い引数は、どのメソッドも位置で読まないので捨てる
-            if label is not None and value is not None:
-                self.arguments[text(label)] = value
-
-
-def _initializer(call: Call) -> list[tuple[Node, FileUsage]]:
+def _initializer(call: SwiftCallSite) -> list[tuple[Node, FileUsage]]:
     for label in _READING_INITIALIZERS.get(call.name, ()):
         if label in call.arguments:
             return [(call.arguments[label], FileUsage.READ)]
     return []
 
 
-def _write_call(call: Call) -> list[tuple[Node, FileUsage]]:
+def _write_call(call: SwiftCallSite) -> list[tuple[Node, FileUsage]]:
     for label in _WRITING_LABELS:
         argument = call.arguments.get(label)
         # `to: &stream` は文字列の出力先であり、ファイルの名前ではない
@@ -110,7 +78,7 @@ def _write_call(call: Call) -> list[tuple[Node, FileUsage]]:
     return []
 
 
-def _file_manager_call(call: Call) -> list[tuple[Node, FileUsage]]:
+def _file_manager_call(call: SwiftCallSite) -> list[tuple[Node, FileUsage]]:
     if call.name == "urls":
         # ディレクトリの問い合わせ。引数はパスでなく場所の列挙なので、呼び出し全体を取る
         return [(call.node, FileUsage.READ)]
@@ -122,7 +90,7 @@ def _file_manager_call(call: Call) -> list[tuple[Node, FileUsage]]:
 
 
 def _io_arguments(node: Node) -> list[tuple[Node, FileUsage]]:
-    call = Call(node)
+    call = SwiftCallSite(node)
     if call.receiver is None:
         return _initializer(call)
     if text(call.receiver) == _FILE_MANAGER:
@@ -134,7 +102,7 @@ def _io_arguments(node: Node) -> list[tuple[Node, FileUsage]]:
 
 
 def _is_name_building(node: Node) -> bool:
-    call = Call(node)
+    call = SwiftCallSite(node)
     if call.receiver is None:
         return call.name == "URL" and bool(_URL_LABELS & call.arguments.keys())
     return call.name in _APPENDING_METHODS
@@ -164,5 +132,5 @@ RULES = Rules(
 )
 
 
-def file_path_patterns(root: Node, path: str) -> list[FilePathPattern]:
-    return core_file_path_patterns(root, path, RULES)
+def file_path_expressions(root: Node, path: str) -> list[FilePathExpression]:
+    return core_file_path_expressions(root, path, RULES)

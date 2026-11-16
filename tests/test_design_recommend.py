@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fakes import without_containment
 from pr_support import git
 
 from jigane.commands.subcommands.design import render, to_dict
@@ -17,7 +18,6 @@ from jigane.design.recommend import (
     CandidateKind,
     Found,
     Location,
-    LocationKind,
     Match,
     NamedReason,
     NotFound,
@@ -36,6 +36,7 @@ from jigane.design.submodule_status import (
     UnrecordedSubmodule,
 )
 from jigane.git import process
+from jigane.languages.kinds import LocationKind
 
 FILES = {
     "shop/cart.py": """\
@@ -762,7 +763,7 @@ def test_submodule_states_are_noted(tmp_path: Path) -> None:
 
 def _fake_status(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
     def run_command(args: list[str], **_: object) -> str:
-        if args[:2] == ["git", "submodule"]:
+        if without_containment(args)[:2] == ["git", "submodule"]:
             return status
         raise process.CommandError(args, "bad revision", returncode=128)
 

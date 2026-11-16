@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from review_fakes import build_content
+from review_fakes import build_content, current_form_findings
 
 from jigane.findings.records import FINDINGS_FILE, load_history_checked
 from jigane.groups.definitions import MACRO, MICRO
@@ -62,7 +62,9 @@ def finding(number: int, claim: str) -> dict[str, Any]:
 
 def write_findings(review: Review, findings: list[dict[str, Any]]) -> None:
     state = {"last_number": 9, "groups": {MACRO: findings}}
-    (review.id.directory() / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (review.id.directory() / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
 
 
 def keys(review: Review) -> list[str]:
@@ -221,7 +223,9 @@ def test_micro_history_carries_triage_and_verdict_for_the_shard_files_only(proje
             ]
         },
     }
-    (older.id.directory() / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (older.id.directory() / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     save_selection(older.id.directory(), Selection({"F1": Held(), "F2": Held()}))
     current = save(project, "retry-2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     assert history.history_text(AssemblyInput.load(current), MICRO, ["src/a.py"]).splitlines() == [
@@ -256,7 +260,9 @@ def test_micro_lines_ignore_deepens(project: Path) -> None:
         "last_number": 9,
         "groups": {"micro": [{**finding(1, "c"), "deepens": "F3", "triage": "remaining"}]},
     }
-    (review.id.directory() / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (review.id.directory() / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     assert history.history_text(AssemblyInput.load(review), MICRO) == (
         "- 前の回 F1 M2 warning 区分=残り 反証=なし c（src/a.py:1）"
     )

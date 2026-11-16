@@ -12,6 +12,8 @@ from jigane.git import process
 from jigane.git.environment import GIT_LOCATION_VARIABLES
 
 PULL_REQUEST_FIELDS = "number,url,title,body,baseRefOid,headRefOid,author"
+# GitHub の応答の JSON の入れ子の上限。応答は数段で収まり、これを超えれば応答として扱わない
+MAX_RESPONSE_NESTING = 200
 
 # 形の中の可変の部分。照合は、この印を右の正規表現に置き換えて行う
 _NAME = r"(?!-)(?!\.+(?:/|$))[A-Za-z0-9._-]+"

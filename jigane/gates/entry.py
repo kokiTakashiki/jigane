@@ -1,8 +1,8 @@
 """gates.json の違反と警告の一件の型。強さと出所を一か所で持ち、gates.json の形と往復させる。
 
-gates.json の全体の形（版 3。版 2 からは警告に出所 unreadable の項目が増えただけ）は次のとおり。
+gates.json の全体の形（版 4）は次のとおり。
 
-- `format`: 形の版。版 1 は版の鍵を持たず、flaky.gates_v1 が読み替える。
+- `format`: 形の版。現行の版以外は flaky.gates の load_gates が止める。
 - 番号の台帳の鍵: NumberLedger.to_json が書き、from_json が読む。どれも必須で、
   無ければ読む境で ValueError にする。
 - `violations`、`warnings`: GateEntry.to_json の列。
@@ -15,6 +15,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from jigane.gates.construct_kind import ConstructKind
 from jigane.gates.tree_side import TreeSide
 
 
@@ -65,8 +66,9 @@ class RegexDetail:
 
 @dataclass(frozen=True)
 class UnreadableDetail:
-    """読めない記述に固有の欄。記述がある木の側だけを持つ。"""
+    """読めない記述に固有の欄。記述の種類と、記述がある木の側。"""
 
+    kind: ConstructKind
     side: TreeSide
 
 
@@ -148,6 +150,7 @@ class GateEntry:
             case RegexDetail():
                 data["severity"] = str(self.severity)
             case UnreadableDetail() as detail:
+                data["kind"] = str(detail.kind)
                 data["side"] = str(detail.side)
         if isinstance(self.state, Allowed):
             data["allowed"] = self.state.reason
@@ -175,10 +178,15 @@ class GateEntry:
                 state=state,
             )
         if source is GateSource.UNREADABLE:
+            raw_kind = data["kind"]
+            kind = ConstructKind(raw_kind)
+            if kind.entry_id != data["id"]:
+                # id と kind の綴りが食い違う保存物は、どちらが正しいか決められない
+                raise ValueError(f"id と kind が食い違います: {data['id']} {raw_kind}")
             return cls(
                 **common,
                 severity=GateSeverity.UNREADABLE,
-                detail=UnreadableDetail(TreeSide(data["side"])),
+                detail=UnreadableDetail(kind, TreeSide(data["side"])),
             )
         detail = FlakyDetail(
             reason=data["reason"],
@@ -192,8 +200,8 @@ class GateEntry:
         return cls(**common, severity=GateSeverity.FLAKY, detail=detail)
 
 
-# gates.json の形の版。版 1 は改名の前の形で、最上位に版の鍵を持たない
-GATES_FORMAT = 3
+# gates.json の形の版
+GATES_FORMAT = 4
 
 
 class GateKind(StrEnum):
@@ -321,9 +329,7 @@ class Gates:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "Gates":
-        """現行の形（版 3）だけを厳しく読む。古い版は flaky.gates が読み替えてから渡す。"""
-        if data["format"] != GATES_FORMAT:
-            raise ValueError(f"知らない gates.json の版です: {data['format']}")
+        """現行の形（版 4）だけを厳しく読む。版の検査は load_gates が済ませている。"""
         return cls(
             tuple(GateEntry.from_json(entry) for entry in data["violations"]),
             tuple(GateEntry.from_json(entry) for entry in data["warnings"]),

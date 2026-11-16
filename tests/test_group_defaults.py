@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fakes import MacroFake, MicroFake, clear_policy, d_finding, discovered
+from listing_support import listing_warnings
 from test_security import SecurityFake, s_finding, write_mcp
 
 from jigane.commands import main
@@ -10,6 +11,7 @@ from jigane.commands.exit_codes import EXIT_OK
 from jigane.groups.definitions import Effort
 from jigane.llm_runs import claude
 from jigane.reviews.lifecycle import Review, create_feature_review
+from jigane.storage.store import REVIEW_FILE
 
 
 @pytest.fixture
@@ -103,6 +105,23 @@ def test_estimate_json_carries_the_resolved_effort(
     assert json.loads(capsys.readouterr().out)["effort"] == "low"
     with pytest.raises(SystemExit):
         main(["estimate", str(review.id), "micro", "--effort", "ultra"])
+
+
+def test_estimate_reports_older_reviews_as_one_warning(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    review = review_of(project)
+    older = [create_feature_review(project, ["src"], f"older{number}") for number in range(3)]
+    for old in older:
+        meta_path = old.id.directory() / REVIEW_FILE
+        stored = json.loads(meta_path.read_text(encoding="utf-8"))
+        stored["format"] = 4
+        meta_path.write_text(json.dumps(stored), encoding="utf-8")
+    assert main(["estimate", str(review.id), "micro", "--json"]) == EXIT_OK
+    [message] = listing_warnings(caplog)
+    # 見積もりは置き場を複数回引くので、件数ではなく警告が 1 件であることを固定する
+    assert "件のレビューを除きました" in message
+    assert "一覧から除きました:" not in message
 
 
 def test_command_carries_effort(tmp_path: Path) -> None:

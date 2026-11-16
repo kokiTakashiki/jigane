@@ -33,7 +33,9 @@ def test_dead_process_in_progress_shows_as_stopped(review: Review) -> None:
         "max_budget_usd": 1.0,
         "pid": dead_pid(),
     }
-    (directory / IN_PROGRESS_FILE).write_text(json.dumps({"macro": started}), encoding="utf-8")
+    (directory / IN_PROGRESS_FILE).write_text(
+        json.dumps({"format": run_record.IN_PROGRESS_FORMAT, "macro": started}), encoding="utf-8"
+    )
     view = run_record.stopped_view(directory, MACRO)
     assert view.in_progress is None
     assert [(e.kind, e.stopped_at) for e in view.stopped_runs] == [
@@ -43,7 +45,9 @@ def test_dead_process_in_progress_shows_as_stopped(review: Review) -> None:
         "止まった実行（強制終了、起動 2026-10-20T10:00:00+00:00、止めた 不明、金額は不明）"
     ]
     live = {**started, "pid": os.getpid()}
-    (directory / IN_PROGRESS_FILE).write_text(json.dumps({"macro": live}), encoding="utf-8")
+    (directory / IN_PROGRESS_FILE).write_text(
+        json.dumps({"format": run_record.IN_PROGRESS_FORMAT, "macro": live}), encoding="utf-8"
+    )
     alive_view = run_record.stopped_view(directory, MACRO)
     assert alive_view.stopped_runs == ()
     assert alive_view.in_progress is not None

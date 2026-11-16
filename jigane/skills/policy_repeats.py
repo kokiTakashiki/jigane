@@ -17,6 +17,7 @@ from jigane.languages import registry
 from jigane.languages.base import LanguageAdapter, comment_nodes, import_rows, parse
 from jigane.languages.registry import adapter_for
 from jigane.markdown.cells import CellKind, code_cell, markdown_table
+from jigane.preconditions.required import required
 from jigane.reviews.lifecycle import Review
 from jigane.skills.policy_tree import PolicyTree
 
@@ -442,7 +443,9 @@ def _repeats_table(
     if line_limit is None:
         # 代表の行は、塊の中で最初の eligible な行。_runs は eligible な行を含む範囲だけを返す
         for cell_row, (_, _, _, texts) in zip(cells, rows, strict=True):
-            cell_row.append(_body(next(line for line in texts if _eligible(line))))
+            cell_row.append(
+                _body(required(next((line for line in texts if _eligible(line)), None)))
+            )
         return markdown_table([*head, "代表の行"], cells, [*kinds, "codespan"], cap=LINE_CAP)
     if line_limit >= MIN_BLOCK_LINES:
         for cell_row, (_, length, _, texts) in zip(cells, rows, strict=True):

@@ -7,22 +7,19 @@ from typing import Literal
 from tree_sitter import Node
 
 from jigane.languages.base import (
-    Argument,
+    VALUE_KINDS,
+    CallArgument,
     CallParts,
+    CallReceiver,
     CallSite,
-    Creation,
+    CreationReceiver,
     DeferredSite,
     LocalVariable,
-    Name,
-    Paren,
-    Self,
-    Super,
-)
-from jigane.languages.base import (
-    Call as CallKind,
-)
-from jigane.languages.base import (
-    Member as MemberRef,
+    MemberReceiver,
+    NameReceiver,
+    ParenReceiver,
+    SelfReceiver,
+    SuperReceiver,
 )
 from jigane.preconditions.required import required
 from jigane.sequence.index import (
@@ -38,7 +35,6 @@ from jigane.sequence.index import (
 )
 
 _CALLABLE_KINDS: tuple[MemberKind, ...] = ("method", "constructor")
-_VALUE_KINDS: tuple[MemberKind, ...] = ("field", "property", "parameter")
 _EXPRESSION_DEPTH = 12
 
 
@@ -129,7 +125,7 @@ def call_resolver(index: Index, member: Member) -> Callable[[CallSite], Call]:
     return _Extractor(index, member, {}).resolve_call
 
 
-def _shape(arguments: tuple[Argument, ...]) -> tuple[int, tuple[str | None, ...]]:
+def _shape(arguments: tuple[CallArgument, ...]) -> tuple[int, tuple[str | None, ...]]:
     """lookup に渡す、引数の数とラベルの並び。"""
     return len(arguments), tuple(a.name for a in arguments)
 
@@ -141,7 +137,7 @@ class _Extractor:
         self.path = member.path
         self.owner = required(index.types.get(member.owner))
         # 本体を持たない宣言（フィールドなど）は、宣言全体の呼び出しを対象にする
-        self.body = index.adapter.body_of(member.node) or member.node
+        self.body = index.adapter.body_node_of(member.node) or member.node
         self.source = required(index.trees[member.path].root_node.text)
         self.bound = {
             name: info
@@ -174,7 +170,7 @@ class _Extractor:
         return found[0] if len(found) == 1 else CompositeType(tuple(found))
 
     def _typed_member(self, info: TypeInfo | CompositeType, name: str) -> _Typed:
-        found, _, _ = self.index.lookup(info, name, _VALUE_KINDS)
+        found, _, _ = self.index.lookup(info, name, VALUE_KINDS)
         if found is None or found.type_name is None:
             return None
         return self._to_type(found.type_name)
@@ -195,27 +191,27 @@ class _Extractor:
             self._resolving.discard(expr.id)
 
     def _type_of_expression(self, expr: Node, depth: int) -> _Typed:
-        kind = self.index.adapter.receiver_of(expr)
-        if isinstance(kind, Paren):
+        kind = self.index.adapter.receiver_kind_of(expr)
+        if isinstance(kind, ParenReceiver):
             return self._type_of(kind.inner, depth)
-        if isinstance(kind, (Self, Super)):
+        if isinstance(kind, (SelfReceiver, SuperReceiver)):
             return self._self_or_super_type(kind)
-        if isinstance(kind, Name):
+        if isinstance(kind, NameReceiver):
             return self._identifier(kind.text, depth)
-        if isinstance(kind, MemberRef):
+        if isinstance(kind, MemberReceiver):
             return self._member_ref_type(kind, depth)
-        if isinstance(kind, (CallKind, Creation)):
+        if isinstance(kind, (CallReceiver, CreationReceiver)):
             return self._call_type(expr, depth)
         return None
 
-    def _self_or_super_type(self, kind: Self | Super) -> _Typed:
+    def _self_or_super_type(self, kind: SelfReceiver | SuperReceiver) -> _Typed:
         """self は所有する型、super は索引にある最初の基底（無ければ宣言どおりの最初の基底）。"""
-        if isinstance(kind, Self):
+        if isinstance(kind, SelfReceiver):
             return self.owner
         bases = self.index.base_types(self.owner)
         return bases[0] if bases else (self.owner.bases[0] if self.owner.bases else None)
 
-    def _member_ref_type(self, kind: MemberRef, depth: int) -> _Typed:
+    def _member_ref_type(self, kind: MemberReceiver, depth: int) -> _Typed:
         name = self.index.adapter.simple_type_name(kind.name)
         base = self._type_of(kind.base, depth)
         if not isinstance(base, (TypeInfo, CompositeType)):
@@ -248,7 +244,7 @@ class _Extractor:
             return self._to_type(local.type_annotation)
         init = local.initializer
         if init is not None and isinstance(
-            self.index.adapter.receiver_of(init), (CallKind, Creation)
+            self.index.adapter.receiver_kind_of(init), (CallReceiver, CreationReceiver)
         ):
             return self._type_of(init, depth)
         return None
@@ -274,7 +270,7 @@ class _Extractor:
 
         module は型に数えない。
         """
-        if not isinstance(kind, CallKind) or not self.index.adapter.constructs_by_call:
+        if not isinstance(kind, CallReceiver) or not self.index.adapter.constructs_by_call:
             return None
         name = kind.parts.name
         if kind.parts.receiver is not None or name is None:
@@ -288,10 +284,10 @@ class _Extractor:
 
     def _call_type(self, call: Node, depth: int) -> _Typed:
         """規則 7 と、生成の式の型。呼び先の戻り値の型注記の型を返す。"""
-        kind = self.index.adapter.receiver_of(call)
-        if isinstance(kind, Creation):
+        kind = self.index.adapter.receiver_kind_of(call)
+        if isinstance(kind, CreationReceiver):
             return self._to_type(kind.type_text) if kind.type_text is not None else None
-        if not isinstance(kind, CallKind):
+        if not isinstance(kind, CallReceiver):
             return None
         constructed = self._constructed(kind)
         if constructed is not None:
@@ -321,7 +317,7 @@ class _Extractor:
             return External(typed)
         return Unresolved(text_of(receiver))
 
-    def _resolve_bare(self, name: str, arguments: tuple[Argument, ...]) -> Resolution:
+    def _resolve_bare(self, name: str, arguments: tuple[CallArgument, ...]) -> Resolution:
         """受け手の無い呼び出し。局所関数、取り込んだ名前、含む型、同じモジュールの最上位の順に引く。"""
         shape = _shape(arguments)
         if name in self.local_functions:
@@ -375,7 +371,7 @@ class _Extractor:
                 return Resolved(enclosing.key, member, candidates)
         return None
 
-    def _resolve_creation(self, creation: Creation) -> Resolution:
+    def _resolve_creation(self, creation: CreationReceiver) -> Resolution:
         if creation.type_text is None:
             # new(...) は代入先の型で決まる。受け手の型の注記だけでは決められない
             return Unresolved(creation.text.split("(", 1)[0] + "(...)")
@@ -391,7 +387,7 @@ class _Extractor:
         return External(typed)
 
     def _bindings(
-        self, resolution: Resolution, arguments: tuple[Argument, ...]
+        self, resolution: Resolution, arguments: tuple[CallArgument, ...]
     ) -> tuple[tuple[str, TypeKey], ...]:
         """規則 9: インターフェース型の仮引数に渡した new T(...) の、仮引数名から T への対応。"""
         if not isinstance(resolution, Resolved) or resolution.member is None or not arguments:
@@ -400,7 +396,7 @@ class _Extractor:
         found: list[tuple[str, TypeKey]] = []
         for parameter, argument in resolution.member.bind(arguments, positional_labels=positional):
             expression = argument.expression
-            if not isinstance(self.index.adapter.receiver_of(expression), Creation):
+            if not isinstance(self.index.adapter.receiver_kind_of(expression), CreationReceiver):
                 continue
             concrete = self._call_type(expression, 0)
             declared = self._to_type(parameter.type_name)
@@ -415,16 +411,16 @@ class _Extractor:
     # 抽出
 
     def resolve_call(self, site: CallSite) -> Call:
-        kind = self.index.adapter.receiver_of(site.node)
+        kind = self.index.adapter.receiver_kind_of(site.node)
         constructed = self._constructed(kind)
         if constructed is not None:
             member, candidates, _ = self.index.lookup(
                 constructed, constructed.name, ("constructor",), *_shape(site.arguments)
             )
             resolution: Resolution = Resolved(constructed.key, member, candidates)
-        elif isinstance(kind, Creation):
+        elif isinstance(kind, CreationReceiver):
             resolution = self._resolve_creation(kind)
-        elif isinstance(kind, CallKind):
+        elif isinstance(kind, CallReceiver):
             resolution = self._resolve_invocation(kind.parts)
         else:
             resolution = Unresolved(text_of(site.node))
@@ -433,7 +429,7 @@ class _Extractor:
             resolution,
             self.path,
             site.line,
-            site.end,
+            site.end_byte,
             len(site.arguments),
             site.is_creation or constructed is not None,
             self._bindings(resolution, site.arguments),
@@ -466,7 +462,7 @@ class _Extractor:
                 name in self.locals
                 or name in self.params
                 or name in self.opaque
-                or self.index.lookup(self.owner, name, _VALUE_KINDS)[0] is not None
+                or self.index.lookup(self.owner, name, VALUE_KINDS)[0] is not None
             ):
                 return None
             member, candidates, _ = self.index.lookup(self.owner, name, _CALLABLE_KINDS)

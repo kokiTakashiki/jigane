@@ -1,12 +1,13 @@
-"""findings.json の型の往復と、旧形式の移行が読み込みの一度で済むことを確かめる。"""
+"""findings.json の型の往復と、区分の補いが読み込みの一度で済むことを確かめる。"""
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 from ast_support import edits_state_by_key, json_users_of_stored_file, reads_or_writes_stored_file
-from review_fakes import group_result, stored_finding
+from review_fakes import current_form_findings, group_result, stored_finding
 
 from jigane.findings.records import (
     FINDINGS_FILE,
@@ -54,7 +55,9 @@ def directory(tmp_path: Path) -> Path:
         },
         "themes": [{"id": "T1", "finding_ids": ["F1"], "triage": "legacy-theme-name"}],
     }
-    (tmp_path / FINDINGS_FILE).write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / FINDINGS_FILE).write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return tmp_path
 
 
@@ -68,8 +71,8 @@ def _stored_triages(directory: Path) -> list[object]:
     return [f["triage"] for f in state["groups"]["micro"]] + [state["themes"][0]["triage"]]
 
 
-# 読み込みで一度だけ移行された後の保存値。古い名前は現行の名前になり、知らない名前は区分なしになる
-EXPECTED = [None, "remaining", None, None]
+# 保存し直した後の保存値。知らない名前は区分なしになる
+EXPECTED = [None, None, None, None]
 # 読むだけでは findings.json を書き換えない
 ORIGINAL = ["no-such-name", "deferred", None, "legacy-theme-name"]
 
@@ -78,7 +81,7 @@ def test_reader_sees_filled_triage(directory: Path) -> None:
     state = load_findings_state(directory)
     micro = state.groups[MICRO]
     assert micro[0].decision.triage is Triage.MUST_READ
-    assert micro[1].decision.triage is Triage.REMAINING
+    assert micro[1].decision.triage is Triage.MUST_READ
     assert micro[2].decision.triage is Triage.FOLDED
     assert state.themes[0].triage is Triage.MUST_READ
     assert _stored_triages(directory) == ORIGINAL
@@ -104,7 +107,7 @@ def test_mark_stale_keeps_stored_triage(directory: Path) -> None:
 
 def test_writer_read_then_save_keeps_stored_triage(directory: Path) -> None:
     # 書き手の流れ。別の群を読み直して差し替え、保存しても、
-    # micro の区分は移行後の値のまま変わらない
+    # micro の区分は読み込み時の値のまま変わらない
     state = read_stored_state(directory)
     state.groups[MACRO] = (stored_finding(_finding("F4", "must_read")),)
     save_findings_state(directory, state)
@@ -138,40 +141,12 @@ def test_stored_findings_round_trips_the_current_form() -> None:
 
 
 def test_read_findings_json_does_not_touch_the_input() -> None:
-    raw: dict[str, Any] = {"last_number": 1, "groups": {"macro": [_finding("F1", "deferred")]}}
+    raw = current_form_findings(
+        {"last_number": 1, "groups": {"macro": [_finding("F1", "no-such-name")]}}
+    )
+    before = copy.deepcopy(raw)
     read_findings_json(raw)
-    assert raw["groups"]["macro"][0]["triage"] == "deferred"
-
-
-def test_read_findings_json_fills_defaults_for_the_oldest_form() -> None:
-    stored = read_findings_json({"last_number": 1, "groups": {}})
-    assert (stored.stale_groups, stored.last_theme_number, stored.themes) == ((), 0, ())
-
-
-def test_read_findings_json_moves_theme_triage_to_findings_without_one() -> None:
-    raw = {
-        "last_number": 1,
-        "groups": {"micro": [_finding("F1", None)]},
-        "themes": [{"id": "T1", "finding_ids": ["F1"], "triage": "remaining"}],
-    }
-    assert read_findings_json(raw).groups[MICRO][0].triage is Triage.REMAINING
-
-
-def test_read_findings_json_migrates_legacy_nit_in_a_group() -> None:
-    legacy = {
-        "id": "F1",
-        "severity": "nit",
-        "viewpoint": "discarded",
-        "claim": "A",
-        "discard_kind": "other",
-        "concern": "C",
-    }
-    raw: dict[str, Any] = {"last_number": 1, "groups": {"micro": [legacy]}}
-    migrated = read_findings_json(raw).groups[MICRO][0].to_json()
-    assert "discard_kind" not in migrated
-    assert "concern" not in migrated
-    assert migrated["nit_reason"]["kind"] == "other"
-    assert raw["groups"]["micro"][0] == legacy
+    assert raw == before
 
 
 @pytest.mark.whole_tree
@@ -228,9 +203,12 @@ def test_a_group_name_outside_the_current_groups_is_kept_and_written_back(
 ) -> None:
     legacy = [{"id": "F9", "triage": "banana"}]
     raw = {
-        "format": 2,
+        "format": 4,
         "last_number": 1,
-        "groups": {"macro": [_finding("F1", "must_read")], "retired": legacy},
+        "groups": {
+            "macro": [{**_finding("F1", "must_read"), "viewpoint": str(by_number("M2").uuid)}],
+            "retired": legacy,
+        },
         "stale_groups": [],
         "last_theme_number": 0,
         "themes": [],

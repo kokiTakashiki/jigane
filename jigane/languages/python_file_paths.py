@@ -5,7 +5,7 @@ import re
 
 from tree_sitter import Node
 
-from jigane.languages.base import FilePathPattern, FileUsage
+from jigane.languages.base import FilePathExpression, FileUsage
 from jigane.languages.file_paths_core import text
 from jigane.languages.python_walk import call_arguments, enclosing_function
 from jigane.preconditions.required import required
@@ -159,11 +159,11 @@ class _Reader:
     def __init__(self, root: Node, path: str) -> None:
         self._root = root
         self._path = path
-        self._found: list[tuple[int, FilePathPattern]] = []
+        self._found: list[tuple[int, FilePathExpression]] = []
         # 報告済みの式の範囲。同じ式を、ファイルの読み書きと `Path` の組み立てで二重に報告しない
         self._reported: list[tuple[int, int]] = []
 
-    def read(self) -> list[FilePathPattern]:
+    def read(self) -> list[FilePathExpression]:
         nodes = self._all_nodes()
         for node in nodes:
             if node.type == "call":
@@ -191,8 +191,8 @@ class _Reader:
         self._found.append(
             (
                 anchor.start_byte,
-                FilePathPattern(
-                    function=_qualified_name(anchor),
+                FilePathExpression(
+                    function_qualified_name=_qualified_name(anchor),
                     expression=text(expression),
                     usage=usage,
                     path=self._path,
@@ -442,5 +442,5 @@ class _Reader:
         self._add(node, node, FileUsage.UNKNOWN)
 
 
-def file_path_patterns(root: Node, path: str) -> list[FilePathPattern]:
+def file_path_expressions(root: Node, path: str) -> list[FilePathExpression]:
     return _Reader(root, path).read()

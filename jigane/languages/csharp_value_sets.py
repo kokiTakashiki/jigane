@@ -7,7 +7,7 @@
 - コレクション式（`["a", "b", "c"]`）
 - 型の本体が、短い文字列の `const` の宣言だけで成るもの（文字列の値を持つ定数の並び）
 
-区別（`ValueSet.kind`）は、
+区別（`StringLiteralSet.definition_kind`）は、
 宣言の名前を取り出せた並びを名前に束ねた定義（NAMED）、
 名前が取れず、
 並びが変数宣言子にも代入式にも含まれない並びを名前の無いリテラル（LITERAL）、
@@ -23,7 +23,7 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import ValueSet
+from jigane.languages.base import StringLiteralSet
 from jigane.languages.csharp_nodes import TYPE_DECLARATIONS
 from jigane.languages.value_set_core import (
     declared_name,
@@ -104,6 +104,6 @@ def _found(root: Node) -> Iterator[tuple[frozenset[str], int, str | None, bool]]
             )
 
 
-def value_sets_of(root: Node, path: str) -> list[ValueSet]:
+def value_sets_of(root: Node, path: str) -> list[StringLiteralSet]:
     """ファイルの値の組を、定義の行の順に返す。"""
     return ordered_value_sets(_found(root), path)

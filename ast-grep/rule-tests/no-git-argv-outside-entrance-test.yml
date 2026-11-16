@@ -1,0 +1,19 @@
+id: no-git-argv-outside-entrance
+valid:
+  - run_command(["gh", "status"])
+  - run_command(["status", "git"])
+  - |
+    # ["git", "status"] を説明するコメント
+    x = 1
+  - |
+    def f():
+        """["git", "status"] を説明する docstring。"""
+  - x = "git"
+  - names = ["tool", "git"]
+  - os.system("git status")
+invalid:
+  - run_command(["git", "status"])
+  - run_command(("git", "-C", d, "log"))
+  - run_command([f"git", "status"])
+  - run_command(['git', *args])
+  - run_command(["git"] + args)

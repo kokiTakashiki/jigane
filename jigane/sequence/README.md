@@ -9,6 +9,7 @@
 | 名前 | 役割 |
 | --- | --- |
 | `index.build_index` | 型とメンバを名前で引ける `Index` を作ります |
+| `index.shared_indexes` | この範囲の中では、同じ木と言語の `build_index` を一度だけ作って使い回します。`jigane diagrams` が各図で索引を作り直さないために使います |
 | `indexes.Indexes` | 言語アダプタごとの `Index` をまとめ、型の名前から引けるようにします |
 | `resolve.extract_calls` | メンバの本体の呼び出しを評価の順に取り出し、受け手の型を解決します |
 | `roots.changed_members` | 判断の地図の変更から、変更した宣言の集合を求めます |
@@ -30,7 +31,7 @@
 
 <!-- BEGIN GENERATED: dependencies (scripts/generate_readme_dependencies.py) -->
 
-読むサブパッケージ：`figures`、`gates`、`git`、`judgment_map`、`languages`、`preconditions`、`reviews`
+読むサブパッケージ：`figures`、`gates`、`git`、`judgment_map`、`languages`、`preconditions`、`reviews`、`text`
 
 読まれるサブパッケージ：`commands`、`design`、`policy_materials`、`skills`
 
@@ -46,7 +47,7 @@
 
 ### なぜ呼び出しの抽出の query を言語の層が持ち、シーケンス図の層は構文の節点の型名を書かないのですか
 
-呼び出しの抽出に使う tree-sitter の query は言語の層（`jigane.languages`）が持ち、シーケンス図の層は構文の節点の型名を書かず、`receiver_of`、`locals_of`、`call_sites` の返す種別だけで解決します。言語の違いをアダプタの口に閉じ込めると、索引、解決、根の選び方、図のモデルを言語に依らない一つの実装にできるためです。
+呼び出しの抽出に使う tree-sitter の query は言語の層（`jigane.languages`）が持ち、シーケンス図の層は構文の節点の型名を書かず、`receiver_kind_of`、`locals_of`、`call_sites` の返す種別だけで解決します。言語の違いをアダプタの口に閉じ込めると、索引、解決、根の選び方、図のモデルを言語に依らない一つの実装にできるためです。
 
 ### なぜ言語ではなく、アダプタが `SequenceAdapter` を実装しているかで、図を描けるかを決めるのですか
 

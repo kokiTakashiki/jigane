@@ -6,13 +6,13 @@ from tree_sitter import Node
 
 from jigane.judgment_map.classification import Segment
 from jigane.languages.base import (
-    Branch,
-    BranchArm,
     CallSite,
     DeferredSite,
-    Return,
+    FlowBranch,
+    FlowBranchArm,
+    FlowReturn,
+    FlowStep,
     SequenceAdapter,
-    Step,
     Visibility,
     parse,
 )
@@ -238,7 +238,7 @@ def _sites(source: str, name: str) -> list[CallSite | DeferredSite]:
     data = source.encode()
     root = parse(adapter, data).root_node
     declaration = next(d for d in adapter.type_members(root, data, "C.java") if d.name == name)
-    body = adapter.body_of(declaration.node)
+    body = adapter.body_node_of(declaration.node)
     assert body is not None
     return adapter.call_sites(body, data)
 
@@ -255,11 +255,11 @@ def test_call_sites_follow_evaluation_order_and_flag_creations() -> None:
     assert calls[5].receiver.type == "method_invocation"
 
 
-def _branches(body: str) -> list[Step]:
+def _branches(body: str) -> list[FlowStep]:
     adapter = JavaAdapter()
     root = parse(adapter, f"class C {{ Kind m(Object o, int x) {{ {body} }} }}".encode()).root_node
     method = next(n for n in _walk(root) if n.type == "method_declaration")
-    steps = adapter.discriminator_branches(required(adapter.body_of(method)), b"")
+    steps = adapter.discriminator_flow_steps(required(adapter.body_node_of(method)), b"")
     return required(steps)
 
 
@@ -274,14 +274,14 @@ def test_discriminator_if_chain_nests_else_if_and_reads_instanceof_pattern() -> 
         "else { throw new X(); }"
     )
     first = steps[0]
-    assert isinstance(first, Branch)
+    assert isinstance(first, FlowBranch)
     assert first.condition == "x > 1"
-    assert first.arms[0] == BranchArm("yes", (Return("Kind.A"),))
+    assert first.arms[0] == FlowBranchArm("yes", (FlowReturn("Kind.A"),))
     nested = first.arms[1].steps[0]
-    assert isinstance(nested, Branch)
+    assert isinstance(nested, FlowBranch)
     assert nested.condition == "o instanceof Foo f && f.ok()"
-    assert nested.arms[0].steps == (Return("Kind.B"),)
-    assert nested.arms[1] == BranchArm("no", (Return(None),))
+    assert nested.arms[0].steps == (FlowReturn("Kind.B"),)
+    assert nested.arms[1] == FlowBranchArm("no", (FlowReturn(None),))
 
 
 def test_discriminator_switch_statement_colon_form_merges_fallthrough_labels() -> None:
@@ -290,17 +290,17 @@ def test_discriminator_switch_statement_colon_form_merges_fallthrough_labels() -
         "default: return Kind.C; }"
     )
     branch = steps[0]
-    assert isinstance(branch, Branch)
+    assert isinstance(branch, FlowBranch)
     assert branch.condition == "switch x"
     assert [a.label for a in branch.arms] == ["case 1", "case 2, 3", "default"]
-    assert branch.arms[1].steps == (Return("Kind.B"),)
+    assert branch.arms[1].steps == (FlowReturn("Kind.B"),)
 
 
 def test_discriminator_switch_statement_arrow_form() -> None:
     steps = _branches("switch (x) { case 1 -> { return Kind.A; } default -> throw new X(); }")
     branch = steps[0]
-    assert isinstance(branch, Branch)
-    assert [a.steps for a in branch.arms] == [(Return("Kind.A"),), (Return(None),)]
+    assert isinstance(branch, FlowBranch)
+    assert [a.steps for a in branch.arms] == [(FlowReturn("Kind.A"),), (FlowReturn(None),)]
 
 
 def test_discriminator_switch_expression_with_patterns() -> None:
@@ -309,13 +309,13 @@ def test_discriminator_switch_expression_with_patterns() -> None:
         "default -> compute(); };"
     )
     branch = steps[0]
-    assert isinstance(branch, Branch)
+    assert isinstance(branch, FlowBranch)
     assert branch.condition == "switch o"
     assert [a.label for a in branch.arms] == ["case Foo f when f.ok()", "case Bar b", "default"]
     assert [a.steps for a in branch.arms] == [
-        (Return("Kind.A"),),
-        (Return("Kind.B"),),
-        (Return(None),),
+        (FlowReturn("Kind.A"),),
+        (FlowReturn("Kind.B"),),
+        (FlowReturn(None),),
     ]
 
 

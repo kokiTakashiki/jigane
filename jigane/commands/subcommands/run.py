@@ -58,7 +58,9 @@ from jigane.skills import (
 from jigane.skills.assembly import AssemblyInput, HistorySource
 from jigane.skills.estimator import estimate_of
 from jigane.skills.group_expectation import read_expectation
+from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import McpSelection
+from jigane.skills.review_docs import read_docs_for_review
 
 
 def _model_defaults_text() -> str:
@@ -120,7 +122,26 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     run.set_defaults(handler=handle)
 
 
-def print_run_json(
+class RunJson(failure_views.FailuresJson):
+    """run --json の本体の最上位。鍵の知識はここだけが持つ。
+
+    `debug run` が足す鍵は、これと重ならない名前にする。
+    """
+
+    findings: list[dict[str, Any]]
+    run: dict[str, Any]
+    totals: dict[str, Any]
+    policy_notice: str | None
+    # 目安の超過の見込みなど、実行は続けるが利用者へ知らせる文
+    notice: str | None
+    # 読めない履歴は前の回の指摘が資料に載らない理由になる。show --json と同じ欄の形
+    history_warnings: list[HistoryWarningJson]
+
+
+RUN_JSON_KEYS = frozenset(RunJson.__annotations__)
+
+
+def run_json_body(
     findings: Sequence[TriagedFinding],
     run: pipeline.GroupRun,
     totals: Mapping[str, Any],
@@ -128,29 +149,28 @@ def print_run_json(
     history_warnings: Sequence[HistoryWarningJson] = (),
     *,
     notice: str | None = None,
-) -> None:
-    print(
-        json.dumps(
-            {
-                "findings": triaged_dicts(findings),
-                "run": run.to_json(),
-                "totals": pipeline.totals_record(totals),
-                "policy_notice": policy_notice,
-                # 目安の超過の見込みなど、実行は続けるが利用者へ知らせる文
-                "notice": notice,
-                # 読めない履歴は前の回の指摘が資料に載らない理由になる。show --json と同じ欄の形
-                "history_warnings": list(history_warnings),
-                # 記録した失敗の種類と理由を、そのまま --json に載せる
-                "failures": [
-                    view.to_json()
-                    for view in failure_views.failure_views(run.launch_failures or ())
-                ],
-                "earlier_failures": failure_views.earlier_failures_json(run.launch_failures or ()),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+) -> RunJson:
+    return RunJson(
+        findings=triaged_dicts(findings),
+        run=run.to_json(),
+        totals=pipeline.totals_record(totals),
+        policy_notice=policy_notice,
+        notice=notice,
+        history_warnings=list(history_warnings),
+        **failure_views.failures_json_fields(run.launch_failures or ()),
     )
+
+
+@dataclass(frozen=True)
+class GroupReport:
+    """出力へ書いた結果。本体は --json でなくても常に組み、印字は呼ぶ側が決める。"""
+
+    exit_code: int
+    body: RunJson
+
+
+def print_run_json(body: Mapping[str, object]) -> None:
+    print(json.dumps(body, ensure_ascii=False, indent=2))
 
 
 def _total_cost_line(totals: dict[str, Any], run: pipeline.GroupRun) -> str:
@@ -167,7 +187,8 @@ def report_macro(
     *,
     as_json: bool,
     history: "HistoryNotice",
-) -> None:
+) -> RunJson:
+    """本体を返す。印字は呼ぶ側が行う。"""
     run = result.run_state
     totals = pipeline.summarize_invocations(run)
     kept = kept_previous_lines(policy_reason.diagram_not_run(result.run_state))
@@ -181,16 +202,8 @@ def report_macro(
     # stopped_notice の文を使う。起動の失敗の行は欠けの一覧から作る
     failure_gaps = [gap for gap in pipeline.run_gaps(run) if isinstance(gap, pipeline.LaunchGap)]
     print_gap_lines([gap_text(gap) for gap in failure_gaps], skipped)
-    if as_json:
-        print_run_json(
-            result.findings,
-            run,
-            totals,
-            None,
-            history.warnings,
-            notice=notice,
-        )
-    else:
+    body = run_json_body(result.findings, run, totals, None, history.warnings, notice=notice)
+    if not as_json:
         print_lines(
             history.lines,
             [
@@ -204,6 +217,7 @@ def report_macro(
             ],
             over_budget_lines(totals),
         )
+    return body
 
 
 def incomplete_exit_code(
@@ -295,23 +309,20 @@ def report_sharded(
     as_json: bool,
     policy_notice: str | None,
     history: "HistoryNotice",
-) -> None:
-    """実装とセキュリティの実行結果を出す。終了コードは GroupRunResult が決める。"""
+) -> RunJson:
+    """実装とセキュリティの実行結果を出す。終了コードは GroupRunResult が決める。
+
+    本体を返す。印字は呼ぶ側が行う。
+    """
     run = result.run_state
     totals = pipeline.summarize_invocations(run)
     # 標準出力は --json の本体に空ける
     if result.notice is not None:
         print(result.notice, file=sys.stderr)
-    if as_json:
-        print_run_json(
-            result.findings,
-            run,
-            totals,
-            policy_notice,
-            history.warnings,
-            notice=result.notice,
-        )
-    else:
+    body = run_json_body(
+        result.findings, run, totals, policy_notice, history.warnings, notice=result.notice
+    )
+    if not as_json:
         print_lines(
             history.lines,
             [
@@ -343,6 +354,7 @@ def report_sharded(
         print_gap_lines([gap_text(gap) for gap in gaps if isinstance(gap, pipeline.BudgetStopGap)])
     else:
         print_gap_lines([gap_text(gap) for gap in gaps])
+    return body
 
 
 def group_defaults(group: GroupId) -> RunShape:
@@ -430,13 +442,15 @@ class ShardedGroupResult:
 type GroupRunResult = PolicyGroupResult | ShardedGroupResult
 
 
-def print_group_result(result: GroupRunResult, *, as_json: bool) -> int:
-    """結果を出力へ書き、終了コードを返す。"""
+def report_group_result(result: GroupRunResult, *, as_json: bool) -> GroupReport:
+    """結果を出力へ書き、終了コードと --json の本体を返す。本体の印字は呼ぶ側が行う。"""
     match result:
         case PolicyGroupResult():
-            report_macro(result.outcome, result.review, as_json=as_json, history=result.history)
+            body = report_macro(
+                result.outcome, result.review, as_json=as_json, history=result.history
+            )
         case ShardedGroupResult():
-            report_sharded(
+            body = report_sharded(
                 result.label,
                 result.outcome,
                 as_json=as_json,
@@ -445,14 +459,22 @@ def print_group_result(result: GroupRunResult, *, as_json: bool) -> int:
             )
         case unreachable:
             assert_never(unreachable)
-    return result.exit_code
+    return GroupReport(result.exit_code, body)
+
+
+def print_group_result(result: GroupRunResult, *, as_json: bool) -> int:
+    """結果を出力へ書き、終了コードを返す。"""
+    report = report_group_result(result, as_json=as_json)
+    if as_json:
+        print_run_json(report.body)
+    return report.exit_code
 
 
 def plan_of(
     assembly: AssemblyInput, group: GroupId, settings: claude.RunSettings, mcp: McpSelection
 ) -> LaunchPlan:
     """同意の問いも回の記録の刻印も、ここで組んだ計画の群の見込みを使う。"""
-    estimate = estimate_of(assembly, group, mcp, settings.budget)
+    estimate = estimate_of(LaunchInput(assembly, group, mcp, settings.budget))
     expectation = read_expectation(
         estimate, settings.budget, Path(assembly.review.repository_root), group
     )
@@ -539,13 +561,21 @@ def run_review(
         max_turns=shape.max_turns,
     )
     history = load_history_checked(review.id.directory())
-    assembly = AssemblyInput.from_loaded(review, history)
+    assembly = AssemblyInput.from_loaded(review, history, docs=read_docs_for_review(review, group))
     mcp = load_mcp_selection(mcps, group, mcp_guide)
     plan = plan_of(assembly, group, settings, mcp)
     return print_group_result(run_group(assembly, settings, plan=plan), as_json=as_json)
 
 
-def handle(args: argparse.Namespace, context: Context) -> int:
+@dataclass(frozen=True)
+class PreparedRun:
+    assembly: AssemblyInput
+    settings: claude.RunSettings
+    plan: LaunchPlan
+
+
+def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
+    """資料と設定と計画を組む。何も書き始めない。`run` と `debug run` が共有する。"""
     review = load_review(resolve_review(args.review))
     defaults = resolve_run_defaults(
         args.group,
@@ -560,13 +590,18 @@ def handle(args: argparse.Namespace, context: Context) -> int:
     # 前の回の指摘を資料にする前に読めるかを見る。実行の中で壊れが直ることは想定しない。
     # 同意の見積もりも実行の資料も、ここで読んだ履歴から組む。読むだけで、何も書き始めない
     history = load_history_checked(review.id.directory())
-    assembly = AssemblyInput.from_loaded(review, history)
+    assembly = AssemblyInput.from_loaded(review, history, docs=read_docs_for_review(review, group))
+    return PreparedRun(assembly, settings, plan_of(assembly, group, settings, mcp))
+
+
+def handle(args: argparse.Namespace, context: Context) -> int:
     # 同意が無ければ、記録の開始も含めて何も始めない
-    plan = plan_of(assembly, group, settings, mcp)
+    prepared = prepare_run(args, context)
+    assembly, settings, plan = prepared.assembly, prepared.settings, prepared.plan
     require_consent(
         plan,
         is_terminal=context.is_terminal,
         read_answer=context.read_answer,
     )
-    require_unparsed_consent(review, read_answer=context.read_answer)
+    require_unparsed_consent(assembly.review, read_answer=context.read_answer)
     return print_group_result(run_group(assembly, settings, plan=plan), as_json=args.json)

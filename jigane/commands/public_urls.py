@@ -29,11 +29,16 @@ def installed_version() -> str | None:
         return None
 
 
-def terms_urls(version: str | None) -> TermsUrls:
-    """リリースの版なら、その版のタグの文書。そうでなければ main の文書。"""
+def blob_base_url(version: str | None) -> str:
+    """リリースの版なら、その版のタグの文書の根。そうでなければ main の文書の根。"""
     is_release = version is not None and _RELEASE_VERSION.fullmatch(version) is not None
     ref = f"v{version}" if is_release else "main"
-    base = f"{PUBLIC_REPOSITORY_BLOB_URL}/{ref}"
+    return f"{PUBLIC_REPOSITORY_BLOB_URL}/{ref}"
+
+
+def terms_urls(version: str | None) -> TermsUrls:
+    """リリースの版なら、その版のタグの文書。そうでなければ main の文書。"""
+    base = blob_base_url(version)
     return TermsUrls(
         terms_ja=f"{base}/TERMS.ja.md",
         terms_en=f"{base}/TERMS.en.md",

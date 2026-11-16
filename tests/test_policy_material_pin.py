@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from jigane.reviews.lifecycle import create_feature_review
-from jigane.skills import macro
+from jigane.skills import macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 
 FIXTURES = Path(__file__).parent / "fixtures" / "policy_material"
@@ -70,7 +70,7 @@ def test_builtin_language_policy_material_text_is_pinned(
     (root / name).write_text(text, encoding="utf-8")
     monkeypatch.chdir(root)
     review = create_feature_review(root, ["src"], "p")
-    sections = macro.policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     actual = macro.diagram_materials_text(AssemblyInput.load(review), sections)
     expected_file = FIXTURES / f"{language}.txt"
     assert actual == expected_file.read_text(encoding="utf-8")

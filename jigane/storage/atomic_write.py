@@ -1,8 +1,10 @@
 import os
 import sys
-import threading
+import tempfile
 import time
 from pathlib import Path
+
+from jigane.storage.symlink_guard import StoredFileSymlinkError, is_link_like
 
 # Windows で置き換え先を読みの手が開いている間は、os.replace が WinError 5 で落ちる。
 # 読みの手は短く閉じるので、間隔を置いて試し直す。待ちの和は COUNT * SECONDS で 2 秒
@@ -41,10 +43,28 @@ def _replace_retrying(temporary: Path, path: Path) -> None:
 
 
 def write_text_atomic(path: Path, text: str) -> None:
-    """一時のファイルに書いてから置き換える。途中で落ちても壊れたファイルを残さない。"""
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    """一時のファイルに書いてから置き換える。途中で落ちても壊れたファイルを残さない。
+
+    保存先が symlink のときは書かずに StoredFileSymlinkError にする。
+
+    検査するのは保存先の最終の要素だけで、path.parent が symlink に差し替えられている
+    場合の検査は呼び出し側の責務とする。jigane が作る置き場の中にある保存物のディレクトリは
+    この前提で足りる。複製の置き場のように外部が作りうるディレクトリは別途検査する。
+
+    限界として、lstat による確認と os.replace の間に保存先が symlink に差し替えられる
+    競合では、StoredFileSymlinkError で止める約束が成り立たない。ただし os.replace は
+    symlink そのものを置き換えるだけで、symlink の先のファイルは書き換えないため、
+    実害は小さい。
+    """
+    if is_link_like(path):
+        raise StoredFileSymlinkError(path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
     try:
-        temporary.write_text(text, encoding="utf-8")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(text)
         _replace_retrying(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)

@@ -3,26 +3,28 @@
 配布物（wheel）には入らない。jigane のテストと、jigane の開発のリポジトリの運用のテストだけが使う。
 """
 
+import copy
 import json
+import uuid
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, assert_never, cast
 
 from jigane.findings.records import (
+    FINDINGS_FORMAT,
     HISTORY_FILE,
     GroupResult,
     HistoryRound,
     HistoryWarning,
     StoredFinding,
     ThemeUpdate,
-    _upgrade_finding_v1,
-    _upgrade_finding_v2,
     fill_triage,
     load_history_checked,
 )
 from jigane.gates.entry import FlakyDetail, GateEntry, GateSeverity
 from jigane.groups.definitions import MACRO, GroupId
+from jigane.groups.viewpoints import by_number
 from jigane.judgment_map.classification import ChangeKind, Segment
 from jigane.judgment_map.declaration import Declaration, DeclarationSource
 from jigane.judgment_map.kinds import LEVEL_OF_KIND, Kind
@@ -202,8 +204,68 @@ def history_rounds(directory: Path, group: GroupId) -> list[HistoryRound]:
 
 
 def stored_finding(raw: dict[str, Any]) -> StoredFinding:
-    """欠けた鍵のある辞書を、版 1 の指摘として今の版まで移してから読む。"""
-    return StoredFinding.from_json(_upgrade_finding_v2(_upgrade_finding_v1(raw)))
+    """欠けた鍵のある辞書を、書き手が必ず書く鍵を既定で補ってから読む。"""
+    data = copy.deepcopy(raw)
+    for key in ("severity", "viewpoint", "claim"):
+        data.setdefault(key, "")
+    for key in ("theme", "triage", "adjudication"):
+        data.setdefault(key, None)
+    if data.get("nit_reason") is not None:
+        data["nit_reason"].setdefault("places", [])
+    return StoredFinding.from_json(data)
+
+
+def current_form_findings(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """鍵の欠けた findings.json の中身を、今の版のファイルとして読める形に整える。
+
+    版と最上位の欠けた鍵、指摘の欠けた鍵を既定で補い、観点の番号を保存の形（UUID）にする。
+    """
+    groups = {
+        group: [_stored_form(f) for f in items] for group, items in raw.get("groups", {}).items()
+    }
+    themes = [
+        {"title": "", "finding_ids": [], "severity": "", "triage": None, **theme}
+        for theme in raw.get("themes", [])
+    ]
+    defaults: dict[str, Any] = {
+        "format": FINDINGS_FORMAT,
+        "last_number": 0,
+        "stale_groups": [],
+        "last_theme_number": 0,
+    }
+    return (
+        defaults
+        | {k: v for k, v in raw.items() if k not in ("groups", "themes")}
+        | {
+            "groups": groups,
+            "themes": themes,
+        }
+    )
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _stored_form(finding: Mapping[str, Any]) -> dict[str, Any]:
+    data = {
+        "severity": "",
+        "viewpoint": "",
+        "claim": "",
+        "theme": None,
+        "triage": None,
+        "adjudication": None,
+        **finding,
+    }
+    if data["viewpoint"] not in ("", "discarded") and not _is_uuid(data["viewpoint"]):
+        data["viewpoint"] = str(by_number(data["viewpoint"]).uuid)
+    if data.get("nit_reason") is not None:
+        data["nit_reason"] = {"places": [], **data["nit_reason"]}
+    return data
 
 
 def group_result(

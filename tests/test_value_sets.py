@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from jigane.languages.base import ComparisonKind, DefinitionKind, ValueSetReader
+from jigane.languages.base import (
+    ComparisonKind,
+    DefinitionKind,
+    StringLiteralComparisonExtractor,
+    StringLiteralSetExtractor,
+)
 from jigane.languages.python import PythonAdapter
 from jigane.policy_materials import value_sets
 from jigane.policy_materials.value_sets import (
@@ -14,7 +19,7 @@ ASPECTS = ["alpha_x", "beta_x", "gamma_x", "delta_x"]
 
 
 def _found(source: str) -> list[tuple[int, set[str]]]:
-    return [(v.line, set(v.values)) for v in PythonAdapter().value_sets(source, "m.py")]
+    return [(v.line, set(v.values)) for v in PythonAdapter().string_literal_sets(source, "m.py")]
 
 
 def test_collects_literal_sequences_of_three_or_more_short_strings() -> None:
@@ -42,7 +47,7 @@ def test_collects_enum_member_values() -> None:
 
 
 def _names(source: str) -> list[str | None]:
-    return [v.name for v in PythonAdapter().value_sets(source, "m.py")]
+    return [v.binding_name for v in PythonAdapter().string_literal_sets(source, "m.py")]
 
 
 def test_names_come_from_assignments_and_annotated_assignments() -> None:
@@ -65,7 +70,8 @@ def test_unnamed_sequence_has_no_name() -> None:
 
 
 def test_adapter_satisfies_the_reader_protocol() -> None:
-    assert isinstance(PythonAdapter(), ValueSetReader)
+    assert isinstance(PythonAdapter(), StringLiteralSetExtractor)
+    assert isinstance(PythonAdapter(), StringLiteralComparisonExtractor)
 
 
 def _repository(extra_common_files: int = 100) -> dict[str, str]:
@@ -131,7 +137,10 @@ def test_rows_with_equal_counts_sort_by_definition() -> None:
 
 
 def _comparisons(source: str) -> list[tuple[int, ComparisonKind, str]]:
-    return [(c.line, c.kind, c.value) for c in PythonAdapter().string_comparisons(source, "m.py")]
+    return [
+        (c.line, c.comparison_kind, c.literal_value)
+        for c in PythonAdapter().string_literal_comparisons(source, "m.py")
+    ]
 
 
 def test_collects_equality_and_inequality_in_either_order() -> None:
@@ -185,7 +194,7 @@ def test_unparsable_source_has_no_comparisons() -> None:
 def _row_comparisons(extra: dict[str, str]) -> list[tuple[str, int, ComparisonKind]]:
     files = {**_repository(), **extra}
     row = build_value_set_rows(files)[0]
-    return [(c.path, c.line, c.kind) for c in row.comparisons]
+    return [(c.path, c.line, c.comparison_kind) for c in row.comparisons]
 
 
 def test_row_binds_equality_membership_and_regex_comparisons_by_value() -> None:

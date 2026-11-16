@@ -1,7 +1,6 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pr_support import commit_all, git, remove_tree
@@ -9,7 +8,6 @@ from pr_support import commit_all, git, remove_tree
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.subcommands.refresh import refresh_review
-from jigane.reviews import review_formats
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import (
     LocalRange,
@@ -116,20 +114,6 @@ def test_refresh_without_the_working_directory_and_the_common_git_directory_fail
     remove_tree(Path(repo["root"]))
     with pytest.raises(ReviewError, match="作業ディレクトリがありません"):
         refresh_review(review.id)
-
-
-def test_review_v4_local_range_upgrades_with_default_tracking() -> None:
-    raw: dict[str, Any] = {"local_range": {"range_text": "a..b", "working_directory": "/work"}}
-    upgraded = review_formats._REVIEW_UPGRADES[4](raw)
-    assert upgraded["local_range"] == {
-        "range_text": "a..b",
-        "working_directory": "/work",
-        "git_directory": "",
-        "head_tracking": None,
-    }
-    assert "git_directory" not in raw["local_range"]
-    assert review_formats._REVIEW_UPGRADES[4]({"local_range": None}) == {"local_range": None}
-    assert read_stored_local_range(upgraded["local_range"]) == LocalRange("a..b", "/work")
 
 
 def test_range_review_at_a_tag_tracks_the_current_branch_only_when_it_points_there(

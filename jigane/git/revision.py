@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from jigane.git import process
+from jigane.git.invocation import git_invocation, run_invocation
 
 _COMMIT_SHA_PATTERN = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
@@ -38,8 +38,11 @@ def parse_commit_sha(label: str, text: str) -> CommitSha:
 
 def resolve_commit_sha(git_dir: Path, revision: str) -> CommitSha:
     """ref 名や `<SHA>~9` のような式を、完全なコミットの SHA に解く。解けなければ CommandError。"""
-    output = process.run_command(
-        ["git", "rev-parse", "--verify", "--quiet", "--end-of-options", f"{revision}^{{commit}}"],
-        cwd=git_dir,
+    output = run_invocation(
+        git_invocation(
+            "rev-parse",
+            ["--verify", "--quiet", "--end-of-options", f"{revision}^{{commit}}"],
+            cwd=git_dir,
+        )
     )
     return parse_commit_sha("rev-parse の出力", output.strip())

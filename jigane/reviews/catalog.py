@@ -1,26 +1,32 @@
 """保存済みのレビューの読み出しと一覧を持つ。名前からの解決は resolution が持つ。"""
 
 import json
-import warnings
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from jigane.flaky.gates import load_gates
 from jigane.judgment_map.declaration import Declaration
-from jigane.judgment_map.map_kind import MAP_FILE, load_map
+from jigane.judgment_map.map_kind import MAP_FILE, load_map, read_line_totals
 from jigane.pull_request_context.background import load_background
+from jigane.reviews.kind_fields import kind_fields_of
 from jigane.reviews.lifecycle import (
     Review,
     ReviewKindMismatchError,
+    ReviewOrigin,
     now,
     origin_from_stored,
+    origin_kind,
     read_stored_local_range,
     read_stored_sources,
     write_review_file,
 )
 from jigane.reviews.review_formats import load_review_meta
-from jigane.reviews.stored_pairs import load_pairs
+from jigane.reviews.stored_pairs import PairsNotSavedError, load_pairs
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.review_access import locked_review, stored_file_exists
 from jigane.storage.review_error import ReviewError
@@ -29,9 +35,13 @@ from jigane.storage.store import (
     STAGING_PREFIX,
     CheckedReviewId,
     ReviewId,
+    ReviewKind,
     check_review_id,
     data_home,
+    review_name_of_directory,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 # 削除が中身を退ける置き場の名前。データの置き場の直下に作る。一覧には出さない
 TRASH_DIRECTORY = ".trash"
@@ -54,6 +64,37 @@ class LocatedReview:
     directory: Path
 
 
+class _StoredHead(NamedTuple):
+    meta: dict[str, Any]
+    review_id: ReviewId
+    origin: ReviewOrigin
+
+
+def _read_meta_and_origin(directory: Path) -> _StoredHead:
+    """review.json を読み、識別子と出所にする。read_review_at と一覧の軽い読みが共通に通る。
+
+    ValueError / KeyError / TypeError と ReviewKindMismatchError は呼ぶ側が受ける。
+    """
+    meta = load_review_meta(json.loads((directory / REVIEW_FILE).read_text(encoding="utf-8")))
+    review_id = parse_stored_id(meta)
+    diff_source, pull_request = read_stored_sources(meta["pull_request"], meta["diff_source"])
+    try:
+        origin = origin_from_stored(
+            review_id.kind,
+            pull_request,
+            read_stored_local_range(meta["local_range"]),
+            diff_source,
+            meta["targets"],
+            design_doc=meta["design_doc"],
+        )
+    except ReviewError as error:
+        # 固有のデータと diff_source の組が合わず、保存した出所の種類が決まらない
+        raise ReviewKindMismatchError(
+            f"保存した出所が食い違います: {review_id}: {error}"
+        ) from error
+    return _StoredHead(meta, review_id, origin)
+
+
 def read_review_at(directory: Path) -> LocatedReview:
     """保存先のディレクトリからレビューを読む。保存先と識別子の一致は求めない。
 
@@ -62,24 +103,8 @@ def read_review_at(directory: Path) -> LocatedReview:
     本物の置き場の検査は load_review_at が、この上に重ねる。
     """
     try:
-        meta = load_review_meta(json.loads((directory / REVIEW_FILE).read_text(encoding="utf-8")))
-        review_id = parse_stored_id(meta)
+        meta, review_id, origin = _read_meta_and_origin(directory)
         map_kind = load_map(json.loads((directory / MAP_FILE).read_text(encoding="utf-8")))
-        diff_source, pull_request = read_stored_sources(meta["pull_request"], meta["diff_source"])
-        try:
-            origin = origin_from_stored(
-                review_id.kind,
-                pull_request,
-                read_stored_local_range(meta["local_range"]),
-                diff_source,
-                meta["targets"],
-                design_doc=meta["design_doc"],
-            )
-        except ReviewError as error:
-            # 固有のデータと diff_source の組が合わず、保存した出所の種類が決まらない
-            raise ReviewKindMismatchError(
-                f"保存した出所が食い違います: {review_id}: {error}"
-            ) from error
         review = Review(
             check_review_id(review_id),
             meta["created_at"],
@@ -111,6 +136,22 @@ def set_repository_root(located: LocatedReview, root: str) -> None:
     write_review_file(located.directory, located.review)
 
 
+def _check_stored_place(
+    review_id: CheckedReviewId, stored_kind: ReviewKind, directory: Path
+) -> None:
+    """保存先と識別子、識別子の種類と保存した出所の種類が合うことを確かめる。"""
+    if review_id.directory() != directory:
+        # 種類は保存した記録の id が決め、保存先の名前だけでは決めない
+        # （数字だけのファイルのレビューの名前は PR の番号と同じ名前になる）。
+        # id が指す場所と保存先が違う記録は、どちらが正しいか決められない
+        raise ReviewError(f"保存先が識別子（{review_id}）の指す場所と違います: {directory}")
+    if stored_kind != review_id.kind:
+        raise ReviewKindMismatchError(
+            f"識別子の種類（{review_id.kind}）と保存した出所（{stored_kind}）が"
+            f"食い違います: {review_id}"
+        )
+
+
 def load_review_at(directory: Path) -> Review:
     """保存先のディレクトリからレビューを読む。記録を Review にするまでの検査はここに集める。
 
@@ -118,18 +159,7 @@ def load_review_at(directory: Path) -> Review:
     失敗は ReviewError（とその派生）だけで返す。呼ぶ側は ReviewError を捕まえれば足りる。
     """
     review = read_review_at(directory).review
-    review_id = review.id
-    if review_id.directory() != directory:
-        # 種類は保存した記録の id が決め、保存先の名前だけでは決めない
-        # （数字だけのファイルのレビューの名前は PR の番号と同じ名前になる）。
-        # id が指す場所と保存先が違う記録は、どちらが正しいか決められない
-        raise ReviewError(f"保存先が識別子（{review_id}）の指す場所と違います: {directory}")
-    stored_kind = review.kind
-    if stored_kind != review_id.kind:
-        raise ReviewKindMismatchError(
-            f"識別子の種類（{review_id.kind}）と保存した出所（{stored_kind}）が"
-            f"食い違います: {review_id}"
-        )
+    _check_stored_place(review.id, review.kind, directory)
     return review
 
 
@@ -176,8 +206,10 @@ def scope_files(review: Review) -> set[str]:
         return set(review.paths)
     try:
         pairs = load_pairs(review.id)
-    except ReviewError:
-        # ファイルの対を保存する前の古いレビュー。paths が変更したファイルの新しい側を持つ
+    except PairsNotSavedError:
+        # pairs.json が無いときだけ paths に切り替える（ファイルの対を保存する前の古いレビュー。
+        # paths が変更したファイルの新しい側を持つ）。古い版、新しすぎる版、壊れた版は
+        # 読めない保存物なので例外のまま伝える。以前はどれも paths に落としていた
         return set(review.paths)
     return {path for pair in pairs for path in (pair.old_path, pair.new_path) if path is not None}
 
@@ -198,9 +230,58 @@ def set_archived(review_id: CheckedReviewId, *, archived: bool) -> bool:
         return True
 
 
-def list_reviews(archived: str = ARCHIVED_EXCLUDE) -> list[Review]:
-    """archived は EXCLUDE（隠す）、ONLY（アーカイブ済みだけ）、INCLUDE（全部）。"""
-    reviews: list[Review] = []
+@dataclass(frozen=True)
+class ReviewSummary:
+    """一覧が使う項目だけを持つレビューの要約。区間と箇所の地図、背景、ゲートは持たない。"""
+
+    id: CheckedReviewId
+    created_at: str
+    repository_root: str
+    file_count: int
+    origin: ReviewOrigin
+    # 判断が要る行と全体の行。map.json の集計から読む
+    required_lines: int
+    total_lines: int
+
+    @property
+    def kind_fields(self) -> dict[str, Any]:
+        return kind_fields_of(origin_kind(self.origin))
+
+
+def _read_review_summary(directory: Path) -> ReviewSummary:
+    """一覧のために、レビューの要約の行だけを軽く読む。検査は load_review_at と同じ入口で行う。
+
+    map.json は集計の項目だけを取り、background.json と gates.json は開かない。
+    失敗は ReviewError だけで返す。
+
+    検査は load_review_at より緩い。map.json の本体（区間と箇所）、background.json、gates.json の
+    形は検査しない。この差は意図で、一覧が引く項目だけを検査して読みを軽くするためにある。
+    """
+    try:
+        meta, review_id, origin = _read_meta_and_origin(directory)
+        checked = check_review_id(review_id)
+        _check_stored_place(checked, origin_kind(origin), directory)
+        required, total = read_line_totals(
+            json.loads((directory / MAP_FILE).read_text(encoding="utf-8"))
+        )
+        return ReviewSummary(
+            checked,
+            meta["created_at"],
+            meta["repository_root"],
+            len(meta["paths"]),
+            origin,
+            required,
+            total,
+        )
+    except FileNotFoundError as error:
+        raise ReviewError(f"レビューがありません: {directory}") from error
+    except (ValueError, KeyError, TypeError) as error:
+        raise ReviewError(f"保存したレビューを読めません: {directory}: {error!r}") from error
+
+
+def _listed_directories(archived: str) -> list[Path]:
+    """一覧に出すレビューの保存先。ごみ箱と作成途中は除き、アーカイブの絞り込みを掛ける。"""
+    directories: list[Path] = []
     home = data_home()
     for review_file in sorted(home.glob(f"*/*/*/{REVIEW_FILE}")):
         directory = review_file.parent
@@ -210,9 +291,91 @@ def list_reviews(archived: str = ARCHIVED_EXCLUDE) -> list[Review]:
         marked = (directory / ARCHIVE_MARKER_FILE).is_file()
         if archived != ARCHIVED_INCLUDE and marked != (archived == ARCHIVED_ONLY):
             continue
+        directories.append(directory)
+    return directories
+
+
+# 除いた記録の警告をまとめて出す間だけ、除いた記録を溜める入れ物。None のときは 1 件ずつ警告する
+_SKIPPED_COLLECTOR: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+    "skipped_review_collector", default=None
+)
+# まとめの警告に名前を挙げる記録の数
+SKIPPED_EXAMPLE_COUNT = 3
+
+
+def _warn_skipped(directory: Path, error: ReviewError) -> None:
+    name = review_name_of_directory(directory)
+    collector = _SKIPPED_COLLECTOR.get()
+    if collector is None:
+        LOGGER.warning("一覧から除きました: %s: %s", name, error)
+        return
+    collector.append((name, str(error)))
+
+
+@contextmanager
+def collapse_skipped_warnings() -> Iterator[None]:
+    """この間に一覧から除いた記録の警告を、抜けるときに 1 件へまとめて出す。
+
+    見積もりのように置き場の全件を引く入口で、古い版の記録 1 件ごとに同じ警告が並ぶのを避ける。
+    """
+    collected: list[tuple[str, str]] = []
+    token = _SKIPPED_COLLECTOR.set(collected)
+    try:
+        yield
+    finally:
+        _SKIPPED_COLLECTOR.reset(token)
+        if collected:
+            names = "、".join(name for name, _ in collected[:SKIPPED_EXAMPLE_COUNT])
+            rest = len(collected) - SKIPPED_EXAMPLE_COUNT
+            more = f" ほか {rest} 件" if rest > 0 else ""
+            LOGGER.warning(
+                "一覧から %d 件のレビューを除きました（例: %s%s）。"
+                "古い版などで読めない記録です。必要なら `jigane delete` で消し、"
+                "`jigane new` でレビューを作り直してください。"
+                "理由は `jigane list` で 1 件ずつ出ます",
+                len(collected),
+                names,
+                more,
+            )
+
+
+@dataclass(frozen=True)
+class SummariesWithSkipped:
+    """読めた要約（新しい順）と、読めずに除いた記録の数。"""
+
+    summaries: tuple[ReviewSummary, ...]
+    skipped: int
+
+
+def list_review_summaries_counting_skipped(
+    archived: str = ARCHIVED_EXCLUDE,
+) -> SummariesWithSkipped:
+    """list_review_summaries と同じ要約に、読めずに除いた記録の数を添えて返す。"""
+    summaries: list[ReviewSummary] = []
+    skipped = 0
+    for directory in _listed_directories(archived):
+        try:
+            summaries.append(_read_review_summary(directory))
+        except ReviewError as error:
+            # 壊れた記録 1 件で一覧の全体が出なくなるのを避ける。隠したままにはせず警告する
+            _warn_skipped(directory, error)
+            skipped += 1
+    ordered = sorted(summaries, key=lambda summary: summary.created_at, reverse=True)
+    return SummariesWithSkipped(tuple(ordered), skipped)
+
+
+def list_review_summaries(archived: str = ARCHIVED_EXCLUDE) -> list[ReviewSummary]:
+    """list_reviews と同じ並びと除外で、要約だけを返す。archived の意味も同じ。"""
+    return list(list_review_summaries_counting_skipped(archived).summaries)
+
+
+def list_reviews(archived: str = ARCHIVED_EXCLUDE) -> list[Review]:
+    """archived は EXCLUDE（隠す）、ONLY（アーカイブ済みだけ）、INCLUDE（全部）。"""
+    reviews: list[Review] = []
+    for directory in _listed_directories(archived):
         try:
             reviews.append(load_review_at(directory))
         except ReviewError as error:
             # 壊れた記録 1 件で一覧の全体が出なくなるのを避ける。隠したままにはせず警告する
-            warnings.warn(f"一覧から除きました: {error}", stacklevel=2)
+            _warn_skipped(directory, error)
     return sorted(reviews, key=lambda review: review.created_at, reverse=True)

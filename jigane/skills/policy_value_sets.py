@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from jigane.figures.models import RowChange, TableFigure, TableRow
+from jigane.git.tree_files import read_tree_file
 from jigane.judgment_map.changes import CHANGES_FILE, split_file_sections
 from jigane.languages.base import ComparisonKind, DefinitionKind
 from jigane.policy_materials.value_sets import (
@@ -140,6 +141,17 @@ def _imports_name(definition: ValueSetLocation, name: str, body: str) -> bool:
     )
 
 
+def _readable_body(root: Path, path: str) -> str | None:
+    """レビュー対象の木のリンクは辿らず、上限を超えるファイルは読まない。読めなければ None。"""
+    data = read_tree_file(root, path)
+    if data is None:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _name_referenced(definition: ValueSetLocation, path: str, line_body: str, root: Path) -> bool:
     name = definition.name
     if name is None:
@@ -150,9 +162,8 @@ def _name_referenced(definition: ValueSetLocation, path: str, line_body: str, ro
         return True
     if _word(name).search(line_body) is None:
         return False
-    try:
-        body = (root / path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    body = _readable_body(root, path)
+    if body is None:
         # 本文が読めなければ取り込みを確かめられないので、参照とは数えない
         return False
     return _imports_name(definition, name, body)
@@ -229,7 +240,7 @@ def _comparison_cell(row: ValueSetRow) -> str:
         row.comparisons,
         key=lambda c: (kind_of(c.path) == FileKind.TEST, c.path, c.line),
     )
-    places = [f"{c.path}:{c.line} {COMPARISON_WORDS[c.kind]}" for c in ordered]
+    places = [f"{c.path}:{c.line} {COMPARISON_WORDS[c.comparison_kind]}" for c in ordered]
     if not places:
         return "0"
     return f"{len(places)} ({_with_remainder(places)})"

@@ -16,7 +16,7 @@ adapter = PythonAdapter()
 
 def _table(code: str, path: str) -> dict[str, str]:
     source = code.encode()
-    return adapter.imported_names(parse(adapter, source).root_node, source, path)
+    return adapter.imported_name_origins(parse(adapter, source).root_node, source, path)
 
 
 def _index(tmp_path: Path, files: dict[str, str]) -> Index:

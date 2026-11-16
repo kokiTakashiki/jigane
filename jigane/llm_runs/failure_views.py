@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 from jigane.llm_runs.claude import FailureKind
 from jigane.llm_runs.launch_failure import (
@@ -137,3 +137,18 @@ def earlier_failures_json(failures: Iterable[StoredFailure]) -> dict[str, Any] |
     """run --json と show --json が共有する、前の回の失敗の欄。"""
     earlier = earlier_failures_view(failures)
     return None if earlier is None else earlier.to_json()
+
+
+class FailuresJson(TypedDict):
+    """run --json と show --json が共有する、failures と earlier_failures の二つの欄。"""
+
+    failures: list[dict[str, Any]]
+    earlier_failures: dict[str, Any] | None
+
+
+def failures_json_fields(failures: Iterable[StoredFailure]) -> FailuresJson:
+    stored = tuple(failures)
+    return {
+        "failures": [view.to_json() for view in failure_views(stored)],
+        "earlier_failures": earlier_failures_json(stored),
+    }

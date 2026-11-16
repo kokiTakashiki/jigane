@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from tree_sitter import Node
 
-from jigane.languages.base import FilePathPattern, FileUsage
+from jigane.languages.base import FilePathExpression, FileUsage
 from jigane.preconditions.required import required
 
 type Span = tuple[int, int]
@@ -87,11 +87,11 @@ class _Reader:
     def __init__(self, root: Node, path: str) -> None:
         self._root = root
         self._path = path
-        self._found: list[tuple[int, FilePathPattern]] = []
+        self._found: list[tuple[int, FilePathExpression]] = []
         # 報告済みの式の範囲。読み書きの呼び出しの引数を、組み立てとして二重に報告しない
         self._reported: list[Span] = []
 
-    def read(self, rules: Rules) -> list[FilePathPattern]:
+    def read(self, rules: Rules) -> list[FilePathExpression]:
         calls = [n for n in _all_nodes(self._root) if n.type in rules.call_nodes]
         for call in calls:
             self._io_call(call, rules)
@@ -107,8 +107,8 @@ class _Reader:
         self._found.append(
             (
                 anchor.start_byte,
-                FilePathPattern(
-                    function=qualified_name(anchor, rules),
+                FilePathExpression(
+                    function_qualified_name=qualified_name(anchor, rules),
                     expression=text(expression),
                     usage=usage,
                     path=self._path,
@@ -175,7 +175,7 @@ class _Reader:
         return parent or self._root
 
 
-def file_path_patterns(root: Node, path: str, rules: Rules) -> list[FilePathPattern]:
+def file_path_expressions(root: Node, path: str, rules: Rules) -> list[FilePathExpression]:
     """文書順に返す。深すぎて辿れないファイルは空を返す。"""
     try:
         return _Reader(root, path).read(rules)

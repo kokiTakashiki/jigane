@@ -8,6 +8,7 @@ from tree_sitter import Parser
 
 from jigane.languages import grammars
 from jigane.languages.api import Declaration, LanguageAdapter, Visibility
+from jigane.languages.api.capabilities import UnsupportedSyntaxDetector
 
 SOURCE = b"""package a.b
 
@@ -65,6 +66,10 @@ def test_plugin_reads_its_own_distribution() -> None:
     assert result.label == "Kotlin"
     assert isinstance(result.adapter, LanguageAdapter)
     assert result.adapter.suffixes == frozenset({".kt", ".kts"})
+
+
+def test_adapter_omits_unsupported_syntax_on_purpose() -> None:
+    assert not isinstance(KotlinAdapter(), UnsupportedSyntaxDetector)
 
 
 def test_types_and_members_are_listed(declarations: dict[str, Declaration]) -> None:

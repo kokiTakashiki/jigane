@@ -11,7 +11,7 @@ import re
 from tree_sitter import Node
 
 from jigane.languages import discriminators_core as core
-from jigane.languages.base import Branch, BranchArm, Return, Step
+from jigane.languages.base import FlowBranch, FlowBranchArm, FlowReturn, FlowStep
 from jigane.languages.node_text import text_of
 from jigane.preconditions.required import required
 
@@ -46,7 +46,7 @@ def _condition_text(statement: Node) -> str:
     return " ".join(required(statement.text)[start:end].decode().split())
 
 
-def discriminator_steps(body_node: Node) -> list[Step]:
+def discriminator_steps(body_node: Node) -> list[FlowStep]:
     """本体の分岐と return を文書順に返す。"""
     statements = _statements(body_node)
     owner = _return_type(body_node)
@@ -73,22 +73,24 @@ def _return_type(body_node: Node) -> str | None:
     return None if "<" in name else name
 
 
-def _qualify(steps: list[Step], owner: str) -> list[Step]:
+def _qualify(steps: list[FlowStep], owner: str) -> list[FlowStep]:
     """`.foo` を `Owner.foo` に直す。戻り値の型が分かれば、暗黙のメンバ参照の列挙型が決まる。"""
-    qualified: list[Step] = []
+    qualified: list[FlowStep] = []
     for step in steps:
-        if isinstance(step, Return):
+        if isinstance(step, FlowReturn):
             value = step.value
-            qualified.append(Return(owner + value) if value and value.startswith(".") else step)
+            qualified.append(
+                FlowReturn(owner + value) if value and value.startswith(".") else step
+            )
         else:
             arms = tuple(
-                BranchArm(a.label, tuple(_qualify(list(a.steps), owner))) for a in step.arms
+                FlowBranchArm(a.label, tuple(_qualify(list(a.steps), owner))) for a in step.arms
             )
-            qualified.append(Branch(step.condition, arms, step.fallthrough_label))
+            qualified.append(FlowBranch(step.condition, arms, step.fallthrough_label))
     return qualified
 
 
-def _transfer(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _transfer(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     del is_value
     if not text_of(statement).startswith("return"):
         # break、continue、fallthrough は関数の終わりではない。throw は `Rules.is_throw` が読む
@@ -98,25 +100,25 @@ def _transfer(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Ste
         return [core.if_branch(result, _RULES, is_value=True)]
     if result is not None and result.type == "switch_statement":
         return [core.switch_branch(result, _RULES, is_value=True)]
-    return [Return(core.member_text(result, _RULES))]
+    return [FlowReturn(core.member_text(result, _RULES))]
 
 
-def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _if_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     return [core.if_branch(statement, _RULES, is_value=is_value)]
 
 
-def _switch_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[Step]:
+def _switch_statement(statement: Node, _rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     return [core.switch_branch(statement, _RULES, is_value=is_value)]
 
 
-def _guard_statement(statement: Node, rest: list[Node], *, is_value: bool) -> list[Step]:
+def _guard_statement(statement: Node, rest: list[Node], *, is_value: bool) -> list[FlowStep]:
     # 条件が真の流れは、guard の後ろの文がすべて受け持つ
     return [_guard_branch(statement, rest, is_value=is_value)]
 
 
-def _expression_value(statement: Node, *, is_value: bool) -> Step | None:
+def _expression_value(statement: Node, *, is_value: bool) -> FlowStep | None:
     if is_value and statement.type.endswith("_expression"):
-        return Return(core.member_text(statement, _RULES))
+        return FlowReturn(core.member_text(statement, _RULES))
     return None
 
 
@@ -126,7 +128,7 @@ def _is_throw(statement: Node) -> bool:
     )
 
 
-def _then_steps(statement: Node, *, is_value: bool) -> list[Step]:
+def _then_steps(statement: Node, *, is_value: bool) -> list[FlowStep]:
     children = statement.children
     else_index = next((i for i, c in enumerate(children) if c.type == "else"), None)
     before = children if else_index is None else children[:else_index]
@@ -134,7 +136,7 @@ def _then_steps(statement: Node, *, is_value: bool) -> list[Step]:
     return core.steps(_statements(consequence), _RULES, is_value=is_value) if consequence else []
 
 
-def _else_steps(statement: Node, *, is_value: bool) -> list[Step] | None:
+def _else_steps(statement: Node, *, is_value: bool) -> list[FlowStep] | None:
     children = statement.children
     else_index = next((i for i, c in enumerate(children) if c.type == "else"), None)
     if else_index is None:
@@ -150,14 +152,14 @@ def _else_steps(statement: Node, *, is_value: bool) -> list[Step] | None:
     )
 
 
-def _guard_branch(statement: Node, rest: list[Node], *, is_value: bool) -> Branch:
+def _guard_branch(statement: Node, rest: list[Node], *, is_value: bool) -> FlowBranch:
     """偽の腕は else の中身、真の腕は guard の後ろの文。"""
     otherwise = [s for c in statement.children if c.type == "statements" for s in _statements(c)]
-    return Branch(
+    return FlowBranch(
         _condition_text(statement),
         (
-            BranchArm("yes", tuple(core.steps(rest, _RULES, is_value=is_value))),
-            BranchArm("no", tuple(core.steps(otherwise, _RULES))),
+            FlowBranchArm("yes", tuple(core.steps(rest, _RULES, is_value=is_value))),
+            FlowBranchArm("no", tuple(core.steps(otherwise, _RULES))),
         ),
         None,
     )

@@ -5,7 +5,13 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.base import (
+    RegexComposedSite,
+    RegexDialect,
+    RegexLiteralSite,
+    RegexSites,
+    RegexUse,
+)
 from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
 
@@ -166,9 +172,9 @@ def _first_argument(invocation: Node) -> Node | None:
     return next((c for c in arguments.named_children if c.type not in comments), None)
 
 
-def regex_scan(root: Node, path: str) -> RegexScan:
-    literals: list[RegexLiteral] = []
-    composed: list[RegexComposed] = []
+def regex_scan(root: Node, path: str) -> RegexSites:
+    literals: list[RegexLiteralSite] = []
+    composed: list[RegexComposedSite] = []
     for node in _walk(root):
         if node.type != "method_invocation":
             continue
@@ -183,7 +189,9 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         if _is_pattern_class(owner) and name in _PATTERN_METHODS:
             call = f"Pattern.{name}"
             if value is None:
-                composed.append(RegexComposed(call=call, use=_USES[call], path=path, line=line))
+                composed.append(
+                    RegexComposedSite(call_name=call, use=_USES[call], path=path, line=line)
+                )
                 continue
         elif name in _STRING_METHODS:
             call = f"String.{name}"
@@ -196,13 +204,13 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         else:
             continue
         literals.append(
-            RegexLiteral(
+            RegexLiteralSite(
                 pattern=value,
                 dialect=RegexDialect.JAVA,
-                call=call,
+                call_name=call,
                 use=_USES[call],
                 path=path,
                 line=line,
             )
         )
-    return RegexScan(literals=tuple(literals), composed=tuple(composed))
+    return RegexSites(literal_sites=tuple(literals), composed_sites=tuple(composed))

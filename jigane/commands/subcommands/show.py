@@ -35,7 +35,6 @@ from jigane.commands.views.review import (
     warning_lines,
 )
 from jigane.findings.discard import NO_CONCERN_CLAIM, concern_with_places, places_line
-from jigane.findings.discarded_nits import is_legacy_nit_id, selection_note_of
 from jigane.findings.records import (
     KEY_NIT_REASON,
     TriagedFinding,
@@ -57,13 +56,10 @@ from jigane.skills.group_result import (
     NOT_RUN_OUTCOME,
     Failed,
     GroupOutcome,
-    HasFindings,
-    NoFindings,
     NotRun,
     group_outcome,
     outcome_line,
 )
-from jigane.skills.legacy_nits import legacy_nits_of
 from jigane.skills.received_concerns import NotRecorded, received_concerns
 
 OVERVIEW: Final = "overview"
@@ -128,12 +124,9 @@ def run_record(review: Review, group: GroupId) -> dict[str, Any] | None:
         ),
         # 上限を超えた起動の数
         "over_budget": totals["over_budget"],
-        # 最終的に通らなかった起動の失敗（上限で失敗を含む）。種類と理由、額とその出所を添えた文
-        "failures": [
-            view.to_json() for view in failure_views.failure_views(run.launch_failures or ())
-        ],
-        # 今回の回の前に起きた失敗の件数と額。無ければ None
-        "earlier_failures": failure_views.earlier_failures_json(run.launch_failures or ()),
+        # failures: 最終的に通らなかった起動の失敗（上限で失敗を含む）。種類と理由、額と出所の文
+        # earlier_failures: 今回の回の前に起きた失敗の件数と額。無ければ None
+        **failure_views.failures_json_fields(run.launch_failures or ()),
     }
 
 
@@ -218,17 +211,14 @@ def _with_derived_nit_reason(finding: TriagedFinding) -> dict[str, Any]:
     return {**raw, KEY_NIT_REASON: {**reason.to_json(), **derived}}
 
 
-def with_in_reply(
+def with_display_fields(
     findings: Sequence[TriagedFinding], *, with_display_category: bool = False
 ) -> list[dict[str, Any]]:
-    """返信の画面が描くだけで済むよう、各指摘に返信へ載るかと指摘の種類の欄を足す。"""
+    """画面が描くだけで済むよう、各指摘に派生した nit の理由、観点、指摘の種類の欄を足す。"""
     return [
         {
             **_with_derived_nit_reason(f),
             **viewpoint_fields(f.finding.viewpoint),
-            # 古い記録から組み立てた nit は返信とレポートの候補に入れない
-            "in_reply": not is_legacy_nit_id(f.finding.id),
-            "selection_note": selection_note_of(f.finding.id),
             # 指摘の種類は from_json が一度だけ決める。
             # kind_mark は必読と分けて見せる種類の札で、通常の指摘は None
             "kind": f.finding.kind.value,
@@ -250,13 +240,7 @@ def show_macro(review: Review, *, as_json: bool) -> None:
         show_not_run(review, macro.GROUP, as_json=as_json, extra={})
         return
     stale = macro.GROUP in state.stale_groups
-    legacy_nits = legacy_nits_of(review.id.directory(), findings)
-    if legacy_nits and isinstance(outcome, NoFindings):
-        # nit の行が並ぶ結果を「指摘なし」とは読ませない。
-        # 保存物の outcome は変えず、見せ方だけ指摘のある群に揃える。
-        outcome = HasFindings()
-    shown = [*findings, *legacy_nits]
-    ordered = sorted(shown, key=triage_sort_key)
+    ordered = sorted(findings, key=triage_sort_key)
     macro_run = group_run(review, macro.GROUP)
     considered = None if macro_run is None else macro_run.considered
     if as_json:
@@ -269,7 +253,7 @@ def show_macro(review: Review, *, as_json: bool) -> None:
                 "stale": stale,
                 **outcome.to_json(),
                 "run": run,
-                "findings": with_in_reply(ordered),
+                "findings": with_display_fields(ordered),
                 **stopped_view(review, macro.GROUP).to_json(),
             },
             review,
@@ -280,7 +264,7 @@ def show_macro(review: Review, *, as_json: bool) -> None:
         [STALE_NOTE] if stale else [],
         stopped_lines(stopped_view(review, macro.GROUP)),
         outcome_lines(outcome),
-        no_document_body_lines(review, len(shown)),
+        no_document_body_lines(review, len(findings)),
         shown_failure_lines(macro_run, outcome),
         shown_budget_stop_lines(macro_run),
         kept_previous_lines(
@@ -313,7 +297,7 @@ def show_micro(review: Review, *, as_json: bool) -> None:
                 "stale": stale,
                 **outcome.to_json(),
                 "run": run_record(review, micro.GROUP),
-                "findings": with_in_reply(findings, with_display_category=True),
+                "findings": with_display_fields(findings, with_display_category=True),
                 "display_categories": output.display_category_table(),
                 "themes": [theme.to_json() for theme in state.themes],
                 "received_concerns": received.to_json(),
@@ -349,7 +333,7 @@ def show_security(review: Review, *, as_json: bool) -> None:
                 "stale": stale,
                 **outcome.to_json(),
                 "run": run_record(review, security.GROUP),
-                "findings": with_in_reply(findings),
+                "findings": with_display_fields(findings),
                 **stopped_view(review, security.GROUP).to_json(),
             },
             review,

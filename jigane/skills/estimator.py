@@ -1,28 +1,12 @@
-"""群から見積もりの型への対応。群ごとの分岐はこの match だけに置く。"""
+"""群から見積もりへの対応。
 
-from typing import assert_never
+群で見積もりとプロンプトを分ける分岐は `launch_prompts.group_launch` の match だけに置く。
+"""
 
-from jigane.groups.definitions import GroupId
-from jigane.llm_runs import claude
-from jigane.skills import macro_principles_run, micro, security
-from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimate_result import Estimate
-from jigane.skills.mcp import NO_MCP, McpSelection
+from jigane.skills.launch_prompts import LaunchInput, group_launch
 
 
-def estimate_of(
-    assembly: AssemblyInput,
-    group: GroupId,
-    mcp: McpSelection = NO_MCP,
-    budget: claude.RunBudget | None = None,
-) -> Estimate:
+def estimate_of(launch_input: LaunchInput) -> Estimate:
     """budget は実行が使う上限の組。実行と同じシャードの数にするため、実行の入口は必ず渡す。"""
-    match group:
-        case GroupId.MACRO:
-            return macro_principles_run.estimate_policy(assembly)
-        case GroupId.MICRO:
-            return micro.estimate_micro(assembly, group, budget)
-        case GroupId.SECURITY:
-            return security.estimate_security(assembly, mcp, budget)
-        case _:
-            assert_never(group)
+    return group_launch(launch_input).estimate()

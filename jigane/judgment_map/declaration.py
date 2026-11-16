@@ -8,6 +8,7 @@ from jigane.git.tree_files import is_inside_tree, read_tree_bytes, read_tree_tex
 from jigane.languages import registry
 from jigane.languages.base import parse
 from jigane.markdown import blocks as markdown_blocks
+from jigane.text.document_files import is_markdown_path
 
 NO_DECLARATION_WARNING = "宣言が見つからない。方針の M1 は未評価になる"
 EMPTY_BODY_WARNING = "PR の本文が空。宣言はタイトルだけになる"
@@ -187,7 +188,7 @@ def public_names(root: Path, relative: str) -> list[str]:
 
 
 def _markdown_files(root: Path) -> list[str]:
-    return [path for path in walk_tree_files(root, root) if path.endswith(".md")]
+    return [path for path in walk_tree_files(root, root) if is_markdown_path(path)]
 
 
 def _is_compound_name(name: str) -> bool:

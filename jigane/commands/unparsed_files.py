@@ -3,7 +3,7 @@
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from jigane.commands.consent import ConsentDeclinedError, is_yes
 from jigane.commands.unreadable_notice import unreadable_text
@@ -18,6 +18,7 @@ from jigane.languages.grammars import FETCH_COMMAND
 from jigane.languages.states import LanguageGrammarAbsent
 from jigane.reviews.lifecycle import Review
 from jigane.text.document_files import DOCUMENT_SUFFIXES
+from jigane.text.path_suffix import suffix_of
 from jigane.text.terminal import one_line_text
 
 # 言語のソースでない文書とデータの形式。アダプタが無くても、宣言を読めない言語としては数えない
@@ -54,7 +55,7 @@ def unparsed_files(review: Review) -> UnparsedFiles:
         if path is None:
             # 新旧どちらの経路も無い区間は、数える対象のファイルを持たない
             continue
-        suffix = PurePosixPath(path.replace("\\", "/")).suffix.lower()
+        suffix = suffix_of(path)
         if not suffix or suffix in NON_SOURCE_SUFFIXES:
             # 拡張子が無いと言語を決められず、文書とデータの形式は言語ではない
             continue

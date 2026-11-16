@@ -6,12 +6,19 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, fields, replace
+from datetime import UTC, datetime
 from enum import StrEnum
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from jigane.git.process import CLAUDE_BINARY_ENVIRONMENT, launch_failure, run_claude_resolved
+from jigane.git.process import (
+    CLAUDE_BINARY_ENVIRONMENT,
+    CommandError,
+    is_windows,
+    launch_failure,
+    run_claude_resolved,
+)
 from jigane.groups.definitions import Effort
 from jigane.llm_runs.cost import (
     BudgetOutcome,
@@ -32,6 +39,7 @@ from jigane.llm_runs.pricing import (
     input_cost_usd,
     tier_prices,
 )
+from jigane.text.json_input import JsonTooDeepError, loads_bounded
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,8 @@ class StoredInvocationRecord:
     is_error: bool
     terminal_reason: str | None
     permission_denials: int
+    # 起動した時刻（UTC、秒までの ISO 8601）。起動の直前に取る
+    started_at: str
     # この起動が持っていた上限。上限の欄が無い古い記録は None
     max_budget_usd: float | None
     # この起動のモデル。実行の中で起動ごとにモデルが違う形があるので起動で残す。古い記録は None
@@ -95,11 +105,13 @@ class StoredInvocationRecord:
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "StoredInvocationRecord":
-        """行から起動の記録の欄だけを読む。上限の欄の無い古い行は None。
+        """行から起動の記録の欄だけを読む。上限の欄の無い古い行は None。started_at は必須。
 
         names に無い鍵（過去に書いた session_id など）は読まずに捨てる。
         """
         names = {item.name for item in fields(cls)} - {"cost"}
+        # 欠けた行は KeyError、読めない時刻は ValueError（文字列でなければ TypeError）で止まる
+        datetime.fromisoformat(row["started_at"])
         return cls(
             **{
                 "max_budget_usd": None,
@@ -283,6 +295,9 @@ class FailureKind(StrEnum):
         return self in _TRANSIENT_KINDS
 
 
+# claude の標準出力は信頼しない入力なので、読む前に入れ子の深さを数えて上限で拒む
+_MAX_OUTPUT_NESTING = 200
+
 _TRANSIENT_KINDS = frozenset(
     {
         FailureKind.TIMEOUT,
@@ -414,9 +429,20 @@ def claude_binary() -> str:
     """起動する claude の実行ファイル。JIGANE_CLAUDE_BINARY を読む唯一の口。
 
     空や未設定は "claude"。確かめでは偽の claude（scripts/fake_claude.py）に向け、
-    本物の起動を構造で防ぐ。
+    本物の起動を構造で防ぐ。絶対パスに限る。相対パスは作業ディレクトリ次第で別の実体を
+    指すため、誤りとして断る。
     """
-    return os.environ.get(CLAUDE_BINARY_ENVIRONMENT) or "claude"
+    replaced = os.environ.get(CLAUDE_BINARY_ENVIRONMENT)
+    if not replaced:
+        return "claude"
+    path_type = PureWindowsPath if is_windows() else PurePosixPath
+    absolute = path_type(replaced).is_absolute()
+    if not absolute:
+        raise CommandError(
+            [replaced],
+            f"{CLAUDE_BINARY_ENVIRONMENT} は絶対パスで指定する（相対パスは受けない）: {replaced}",
+        )
+    return replaced
 
 
 # 秘密のファイル名の唯一の一覧。claude の Read の拒否、反証役が示した位置の抜粋、
@@ -506,8 +532,15 @@ def build_command(invocation: Invocation) -> list[str]:
     return command
 
 
+def now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 def failure_record(
-    payload: dict[str, Any] | None, limit_usd: float, model: str | None = None
+    payload: dict[str, Any] | None,
+    limit_usd: float,
+    started_at: str,
+    model: str | None = None,
 ) -> InvocationRecord:
     """失敗した起動の記録。
 
@@ -516,7 +549,7 @@ def failure_record(
     代用の額は厳密な上界ではない。
     結果が往復ゼロ、トークンゼロで額も無いときだけは、API を呼ぶ前に止まったので課金なしとする。
     """
-    record = parse_record(payload or {}, limit_usd, model)
+    record = parse_record(payload or {}, limit_usd, started_at, model)
     if _stopped_before_api(payload, record):
         return replace(record, cost=NotCharged())
     return replace(record, cost=with_limit(record.cost, limit_usd))
@@ -536,7 +569,10 @@ def _stopped_before_api(payload: dict[str, Any] | None, record: InvocationRecord
 
 
 def parse_record(
-    payload: dict[str, Any], limit_usd: float, model: str | None = None
+    payload: dict[str, Any],
+    limit_usd: float,
+    started_at: str,
+    model: str | None = None,
 ) -> InvocationRecord:
     usage = payload.get("usage") or {}
     return InvocationRecord(
@@ -550,6 +586,7 @@ def parse_record(
         is_error=bool(payload.get("is_error", False)),
         terminal_reason=payload.get("terminal_reason"),
         permission_denials=len(payload.get("permission_denials") or []),
+        started_at=started_at,
         max_budget_usd=limit_usd,
         model=model,
     )
@@ -575,8 +612,8 @@ def _failure_reason(completed: subprocess.CompletedProcess[str]) -> str:
     stdout = completed.stdout.strip()
     if stdout:
         try:
-            payload = json.loads(stdout, strict=False)
-        except json.JSONDecodeError:
+            payload = loads_bounded(stdout, _MAX_OUTPUT_NESTING, strict=False)
+        except ValueError:
             payload = None
         if isinstance(payload, dict):
             reasons = [str(payload[key]) for key in ("subtype", "result") if payload.get(key)]
@@ -589,8 +626,8 @@ def _failure_reason(completed: subprocess.CompletedProcess[str]) -> str:
 def _stdout_payload(stdout: str) -> dict[str, Any] | None:
     # JSON として読めない出力は subtype も金額も無い扱いにし、本文での分類に任せる
     try:
-        payload = json.loads(stdout, strict=False)
-    except json.JSONDecodeError:
+        payload = loads_bounded(stdout, _MAX_OUTPUT_NESTING, strict=False)
+    except ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -615,6 +652,7 @@ def run(
     # プロンプトは標準入力で渡す。差分や PR の本文を含むプロンプトが、Windows の
     # コマンドラインの長さの上限（約 32,767 文字）を超えうるため。-p に位置引数が
     # 無ければ標準入力を読むことを、claude 2.1.292 で実測した。
+    started_at = now_iso()
     try:
         completed = runner(
             build_command(invocation),
@@ -636,7 +674,7 @@ def run(
     except subprocess.TimeoutExpired as error:
         raise ClaudeInvocationError(
             f"claude が {timeout_seconds} 秒でタイムアウトしました",
-            failure_record(None, invocation.budget.limit_usd, invocation.model),
+            failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
             FailureKind.TIMEOUT,
         ) from error
     if completed.returncode != 0:
@@ -645,41 +683,48 @@ def run(
         raise ClaudeInvocationError(
             f"claude の終了コードが {completed.returncode} でした: {reason}",
             # 上限での失敗は終了コードが 0 でないことがあり、標準出力の結果に使った額が入る
-            failure_record(failed_payload, invocation.budget.limit_usd, invocation.model),
+            failure_record(
+                failed_payload, invocation.budget.limit_usd, started_at, invocation.model
+            ),
             _is_error_kind(
                 None if failed_payload is None else failed_payload.get("subtype"), reason
             ),
         )
     try:
         # 出力の文字列に制御文字が生で入りうるため strict=False で読む。
-        payload = json.loads(completed.stdout, strict=False)
-    except json.JSONDecodeError as error:
+        payload = loads_bounded(completed.stdout, _MAX_OUTPUT_NESTING, strict=False)
+    except ValueError as error:
+        message = (
+            f"出力の JSON の入れ子が深すぎます（上限 {_MAX_OUTPUT_NESTING} 段）"
+            if isinstance(error, JsonTooDeepError)
+            else f"出力が JSON ではありません: {error}"
+        )
         raise ClaudeInvocationError(
-            f"出力が JSON ではありません: {error}",
-            failure_record(None, invocation.budget.limit_usd, invocation.model),
+            message,
+            failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
             FailureKind.BAD_OUTPUT,
         ) from error
     if not isinstance(payload, dict):
         raise ClaudeInvocationError(
             "出力が JSON オブジェクトではありません",
-            failure_record(None, invocation.budget.limit_usd, invocation.model),
+            failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
             FailureKind.BAD_OUTPUT,
         )
-    record = parse_record(payload, invocation.budget.limit_usd, invocation.model)
+    record = parse_record(payload, invocation.budget.limit_usd, started_at, invocation.model)
     if record.is_error:
         # subtype と result に失敗の理由（過負荷、上限の超過など）が書かれる
         reasons = [str(payload[key]) for key in ("subtype", "result") if payload.get(key)]
         detail = f": {_tail(' '.join(reasons))}" if reasons else ""
         raise ClaudeInvocationError(
             f"claude が is_error を返しました{detail}",
-            failure_record(payload, invocation.budget.limit_usd, invocation.model),
+            failure_record(payload, invocation.budget.limit_usd, started_at, invocation.model),
             _is_error_kind(payload.get("subtype"), " ".join(reasons)),
         )
     structured_output = payload.get("structured_output")
     if not isinstance(structured_output, dict):
         raise ClaudeInvocationError(
             "structured_output がありません",
-            failure_record(payload, invocation.budget.limit_usd, invocation.model),
+            failure_record(payload, invocation.budget.limit_usd, started_at, invocation.model),
             FailureKind.BAD_OUTPUT,
         )
     return InvocationResult(structured_output=structured_output, record=record)

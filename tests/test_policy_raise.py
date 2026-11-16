@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from review_fakes import stored_finding
+from review_fakes import current_form_findings, stored_finding
 from triage_support import assigned
 
 from jigane.commands import main
@@ -104,7 +104,9 @@ def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:
         },
         "themes": [],
     }
-    (created.id.directory() / "findings.json").write_text(json.dumps(state), encoding="utf-8")
+    (created.id.directory() / "findings.json").write_text(
+        json.dumps(current_form_findings(state)), encoding="utf-8"
+    )
     return created
 
 

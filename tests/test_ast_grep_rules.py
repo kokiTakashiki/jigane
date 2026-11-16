@@ -49,7 +49,10 @@ def scan_rule_ids(tmp_path: Path, source: str) -> list[str]:
     ],
 )
 def test_git_stash_calls_are_found(tmp_path: Path, source: str) -> None:
-    assert scan_rule_ids(tmp_path, source) == ["no-git-stash-python"]
+    found = scan_rule_ids(tmp_path, source)
+    # ["git", "stash"] の形は、入口の外の argv の規則にも当たる
+    assert "no-git-stash-python" in found
+    assert set(found) <= {"no-git-stash-python", "no-git-argv-outside-entrance"}
 
 
 @pytest.mark.parametrize(
@@ -63,6 +66,33 @@ def test_git_stash_calls_are_found(tmp_path: Path, source: str) -> None:
 )
 def test_name_kill_calls_are_found(tmp_path: Path, source: str) -> None:
     assert scan_rule_ids(tmp_path, source) == ["no-name-kill-python"]
+
+
+@pytest.mark.parametrize(
+    ("source", "found"),
+    [
+        ('x = next(c for c in children if c.type == ":")\n', ["no-bare-next-generator"]),
+        ('x = required(next((c for c in children if c.type == ":"), None))\n', []),
+    ],
+)
+def test_next_over_a_generator_without_a_default_is_found(
+    tmp_path: Path, source: str, found: list[str]
+) -> None:
+    assert scan_rule_ids(tmp_path, source) == found
+
+
+@pytest.mark.parametrize(
+    ("source", "found"),
+    [
+        (f'run(["{GIT}", "status"])\n', ["no-git-argv-outside-entrance"]),
+        (f'run(("{GIT}", "-C", d, "log"))\n', ["no-git-argv-outside-entrance"]),
+        (f'run(["{GIT}", *args])\n', ["no-git-argv-outside-entrance"]),
+        (f'run(["gh", "{GIT}"])\n', []),
+        (f'x = "{GIT}"\n', []),
+    ],
+)
+def test_git_argv_literals_are_found(tmp_path: Path, source: str, found: list[str]) -> None:
+    assert scan_rule_ids(tmp_path, source) == found
 
 
 def test_comments_and_docstrings_are_not_found(tmp_path: Path) -> None:

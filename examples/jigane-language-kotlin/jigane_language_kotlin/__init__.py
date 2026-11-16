@@ -5,7 +5,7 @@ from importlib import metadata
 from tree_sitter import Node
 
 from jigane.languages.api import (
-    PLUGIN_API_VERSION,
+    ApiVersion,
     BodyBounds,
     Declaration,
     DeclarationKind,
@@ -145,7 +145,7 @@ def plugin() -> LanguagePlugin:
     distribution = metadata.distribution(DISTRIBUTION)
     return LanguagePlugin(
         origin=Distribution(distribution.name, distribution.version),
-        api_version=PLUGIN_API_VERSION,
+        api_version=ApiVersion(2, 0),
         adapter=KotlinAdapter(),
         label="Kotlin",
         grammar=GrammarSpec(

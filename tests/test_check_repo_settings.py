@@ -336,7 +336,7 @@ def test_read_api_routes_tag_rules_to_the_collector(monkeypatch: pytest.MonkeyPa
 def test_empty_body_means_enabled_only_for_vulnerability_alerts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(checker, "run_command", lambda _: "")
+    monkeypatch.setattr(checker.process, "run_command", lambda _: "")
     assert checker.read_gh("repos/o/r/vulnerability-alerts") == {"enabled": True}
     for endpoint in (
         "repos/o/r/private-vulnerability-reporting",

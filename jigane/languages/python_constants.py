@@ -14,7 +14,7 @@ f 文字列、文字列でない値は拾わない。
 import ast
 from collections.abc import Iterator
 
-from jigane.languages.base import StringConstant
+from jigane.languages.base import TopLevelStringConstant
 from jigane.languages.python_ast import read_python
 
 
@@ -43,8 +43,8 @@ def _top_level_statements(body: list[ast.stmt]) -> Iterator[ast.stmt]:
                 yield statement
 
 
-def _collect(tree: ast.Module) -> list[StringConstant]:
-    found: list[StringConstant] = []
+def _collect(tree: ast.Module) -> list[TopLevelStringConstant]:
+    found: list[TopLevelStringConstant] = []
     for statement in _top_level_statements(tree.body):
         match statement:
             case ast.Assign(targets=targets, value=value):
@@ -55,10 +55,10 @@ def _collect(tree: ast.Module) -> list[StringConstant]:
                 # 代入でない文には、定数の宣言が無い
                 continue
         if (text := _non_empty_string(value)) is not None:
-            found.extend(StringConstant(name, text, statement.lineno) for name in names)
+            found.extend(TopLevelStringConstant(name, text, statement.lineno) for name in names)
     return found
 
 
-def string_constants(source: str) -> list[StringConstant]:
+def top_level_string_constants(source: str) -> list[TopLevelStringConstant]:
     """モジュール直下の文字列定数。読めないファイルは空。"""
     return read_python(source, _collect) or []

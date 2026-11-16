@@ -14,7 +14,6 @@ from jigane.groups.viewpoints import (
 from jigane.policy_materials.changed_files import PrebuiltSection
 from jigane.skills import adversarial, policy_figures
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.macro import policy_sections
 from jigane.skills.policy_figures import PROMPT_OMITTED, REGISTRY
 from jigane.skills.policy_principles import (
     FIGURE_KEYS_BY_PRINCIPLE,
@@ -59,7 +58,7 @@ def test_tree_figure_is_given_to_every_principle() -> None:
 
 def test_unknown_figure_key_is_rejected(tmp_path: Path) -> None:
     review = _range_review(tmp_path, _tree(P1_CASE / "before"), _tree(P1_CASE / "after"))
-    sections = policy_sections(review)
+    sections = policy_figures.policy_sections(review)
     with pytest.raises(ValueError, match="no_such_figure"):
         policy_figures.prompt_figure_texts(
             AssemblyInput.load(review), sections.figures, ("tree", "no_such_figure")

@@ -12,6 +12,8 @@ import os
 import platform
 import re
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -20,10 +22,13 @@ from typing import TYPE_CHECKING, assert_never
 import tree_sitter_language_pack as pack
 from tree_sitter import Language, Parser
 
+from jigane.text.terminal import sanitize_text
+
 if TYPE_CHECKING:
     # plugin.py は base.py を経て本モジュールを読み込むため、型の注釈にだけ使う
     from collections.abc import Collection, Iterable
 
+    from jigane.languages.base import LanguageAdapter
     from jigane.languages.plugin import GrammarSpec, LanguagePlugin
 
 CACHE_ENV = "TREE_SITTER_LANGUAGE_PACK_CACHE_DIR"
@@ -192,6 +197,26 @@ class DeclaredGrammar:
 
 GrammarTarget = BuiltinGrammar | DeclaredGrammar
 
+# 追加の言語のアダプタ → 照合に通った文法の対象。鍵はアダプタの id で、値にアダプタ自身を持つのは、
+# アダプタが解放されて id が別の物に再利用されるのを防ぐため。アダプタを包まずに対象を結ぶ
+_bound: dict[int, tuple[object, GrammarTarget]] = {}
+
+
+def bind(adapter: object, target: GrammarTarget) -> None:
+    _bound[id(adapter)] = (adapter, target)
+
+
+def unbind_all() -> None:
+    _bound.clear()
+
+
+def target_of(adapter: "LanguageAdapter") -> GrammarTarget:
+    """アダプタの文法の対象。登録の無いアダプタは組み込みの記録で照合する。"""
+    bound = _bound.get(id(adapter))
+    if bound is not None:
+        return bound[1]
+    return BuiltinGrammar(adapter.grammar)
+
 
 @dataclass(frozen=True)
 class FetchFailure:
@@ -277,14 +302,17 @@ def fetch(
 
     `names` を渡すと、その名前の言語だけを対象にする。None ならすべて。
     追加の言語の取得と照合の誤りは、その言語の分だけを返して他へ進む。
-    組み込みの文法の誤りは、これまで通り例外にする。
+    組み込みの文法の誤りは、これまで通り例外にする。パックの取得の誤りも GrammarError に包む。
     """
     root = cache_root()
     os.environ[CACHE_ENV] = str(root)
     _checked.clear()
     selected_builtin = [name for name in GRAMMARS if names is None or name in names]
     if selected_builtin:
-        pack.download(selected_builtin)
+        _discard_mismatched_builtin(root, selected_builtin)
+        # 取得の呼び出しは、外への通信を許した場所（fetch）から動かさない
+        with _builtin_download_errors():
+            pack.download(selected_builtin)
     failures: list[FetchFailure] = []
     fetched: dict[str, GrammarError | None] = {}
     selected_external = [
@@ -311,10 +339,72 @@ def fetch(
     return failures
 
 
+def _discard_mismatched_builtin(root: Path, names: "Iterable[str]") -> None:
+    recorded = _recorded().get(platform_key(), {})
+    for name in names:
+        _discard_mismatched(root, name, recorded.get(name))
+
+
+def _discard_mismatched(root: Path, grammar: str, expected: str | None) -> None:
+    """取得の前に、置き場の共有ライブラリが期待の sha256 と合わなければ消す。読み込みはしない。
+
+    パックは取得の要否を決めるときに置き場の共有ライブラリを読み込むため、合わない物が
+    先に読み込まれないようにする。置き場の外を指す物は消さずに GrammarError で止める。
+    """
+    try:
+        path = library_path(root, grammar)
+    except GrammarError:
+        # 複数ある誤りは、取得の後の照合が同じ文で示す
+        return
+    if path is None or expected is None:
+        # 無い物は照合できず、期待が無い物は照合の誤りが取得の後に示す
+        return
+    if not path.is_file():
+        # 壊れたリンクやディレクトリは、パックが置く形ではない。消さずに置き場を確かめてもらう
+        raise GrammarError(
+            f"文法 {grammar} のファイル {path} を読めないため、取得を止めました",
+            f"置き場を確かめてから、{_SETUP_ACTION}",
+        )
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise GrammarError(
+            f"文法 {grammar} のファイル {path} を読めないため、取得を止めました（{error}）",
+            f"置き場を確かめてから、{_SETUP_ACTION}",
+        ) from error
+    if digest == expected:
+        return
+    inside = path.resolve().is_relative_to(root.resolve())
+    if path.is_symlink() or not inside:
+        raise GrammarError(
+            f"文法 {grammar} のファイル {path} が文法の置き場の外を指しているため、"
+            "取得を止めました",
+            f"置き場を確かめてから、{_SETUP_ACTION}",
+        )
+    path.unlink()
+    sys.stderr.write(
+        f"文法 {sanitize_text(grammar)} のファイルが記録と合わないため、消して取り直します。\n"
+    )
+
+
+@contextmanager
+def _builtin_download_errors() -> Iterator[None]:
+    """組み込みの文法の取得の失敗を、利用者に見せる文の誤りへ包み直す。"""
+    try:
+        yield
+    except pack.DownloadError as error:
+        # パックは途中まで取れた文法を次の回に使わないため、打ち直すと最初から取り直す
+        raise GrammarError(
+            f"組み込みの文法の取得に失敗しました（{error}）。打ち直すと最初から取り直します",
+            _SETUP_ACTION,
+        ) from error
+
+
 def _download_external(target: DeclaredGrammar) -> GrammarError | None:
     if _declaration_error(target.name, target.spec) is not None:
         # 誤った宣言の文法は取得しない。誤りは照合が示す
         return None
+    _discard_mismatched(cache_root(), target.name, target.spec.hashes.get(platform_key()))
     try:
         pack.download([target.name])
     except Exception as error:  # noqa: BLE001 取得先の失敗の型は多様で絞れない

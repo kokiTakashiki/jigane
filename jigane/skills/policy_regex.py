@@ -1,6 +1,6 @@
 """方針のレビューに渡す正規表現の表と、実装とセキュリティの断片に渡す決定的な札。
 
-正規表現の書き場所は言語アダプタの RegexAdapter が構文木から拾い、数えて札を付けるのは
+正規表現の書き場所は言語アダプタの RegexSiteExtractor が構文木から拾い、数えて札を付けるのは
 `jigane.regex.tags.judge` が持つ。ここは変更した正規表現の選り分けと、
 表と資料の行への並べ替えだけを持つ。
 """
@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import assert_never
 
 from jigane.figures.models import RowChange, TableFigure, TableRow
-from jigane.languages.base import RegexLiteral, RegexScan
+from jigane.languages.base import RegexLiteralSite, RegexSites
+from jigane.markdown.fence import one_line
 from jigane.policy_materials import changed_files
 from jigane.policy_materials.changed_files import MovedAwayFileChange
 from jigane.regex.source import read_regex_source
@@ -59,11 +60,11 @@ DIRECTION_SEPARATOR = "。"
 class RegexSelection:
     """選り分けた正規表現。composed_count は、本文を数えられない書き場所の件数。"""
 
-    targets: tuple[RegexLiteral, ...]
+    targets: tuple[RegexLiteralSite, ...]
     composed_count: int
 
 
-def _scan(root: Path, path: str) -> RegexScan | None:
+def _scan(root: Path, path: str) -> RegexSites | None:
     source = read_regex_source(root, path)
     return None if source is None else source.scan(path)
 
@@ -85,20 +86,20 @@ def select_regexes(review: Review) -> RegexSelection:
             if scan is None:
                 continue
             after_path = entry.moved_to if isinstance(entry, MovedAwayFileChange) else path
-            before.update((after_path, literal.pattern) for literal in scan.literals)
+            before.update((after_path, literal.pattern) for literal in scan.literal_sites)
             if after_path != path:
-                moved_composed[after_path] = len(scan.composed)
-    targets: list[RegexLiteral] = []
+                moved_composed[after_path] = len(scan.composed_sites)
+    targets: list[RegexLiteralSite] = []
     composed = 0
     for path in sorted(p for p, entry in changes.items() if entry.exists_after):
         scan = _scan(root, path)
         if scan is None:
             continue
         # 移したファイルは、移動元に在った組み立ての書き場所を足したものに数えない
-        composed += max(0, len(scan.composed) - moved_composed.get(path, 0))
+        composed += max(0, len(scan.composed_sites) - moved_composed.get(path, 0))
         targets += [
             literal
-            for literal in scan.literals
+            for literal in scan.literal_sites
             if not review.is_diff or (path, literal.pattern) not in before
         ]
     return RegexSelection(tuple(targets), composed)
@@ -151,11 +152,11 @@ def _directions(verdicts: list[RegexVerdict]) -> str:
     return "直し方の向き: " + "".join(f"{rule} は、{found[rule]}。" for rule in sorted(found))
 
 
-def _row(literal: RegexLiteral, verdict: RegexVerdict) -> TableRow:
+def _row(literal: RegexLiteralSite, verdict: RegexVerdict) -> TableRow:
     weight = str(verdict.metrics.complexity) if isinstance(verdict, CountedRegex) else ""
     cells = (
         f"{literal.path}:{literal.line}",
-        literal.call,
+        literal.call_name,
         weight,
         _tags_text(verdict),
         _cut(literal.pattern),
@@ -229,5 +230,8 @@ def shard_checks(prompt_name: str, review: Review, paths: Collection[str]) -> st
         for tag in verdict.tags:
             if group is not None and RULE_DEFINITIONS[tag.rule].shard_group is group:
                 body = _cut(literal.pattern)
-                lines.append(f"- {literal.path}:{literal.line} {tag.rule} {tag.severity} {body}")
+                lines.append(
+                    f"- {one_line(literal.path)}:{literal.line} {tag.rule} {tag.severity} "
+                    f"{one_line(body)}"
+                )
     return "\n".join(lines) if lines else NO_CHECKS

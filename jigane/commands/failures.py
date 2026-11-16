@@ -7,7 +7,7 @@
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 
 from jigane.commands.consent import ConsentDeclinedError, ConsentUnavailableError
@@ -30,6 +30,7 @@ from jigane.skills.mcp import SecurityConfigError
 from jigane.storage.atomic_write import StoredFileInUseError
 from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
+from jigane.storage.symlink_guard import StoredFileSymlinkError
 
 UNEXPECTED = "unexpected"
 # 子のプロセスの標準エラーを理由へ載せる長さの上限。失敗の原因は末尾に出やすいので末尾を残す
@@ -74,6 +75,10 @@ class ExistingReviewFailure(Failure):
 
 
 REVIEW_EXISTS_KIND = "review_exists"
+
+
+# 基底の失敗に鍵を足す型を持つ種類。ここに無い種類は基底の鍵だけを持つ
+FAILURE_TYPE_BY_KIND: dict[str, type[Failure]] = {REVIEW_EXISTS_KIND: ExistingReviewFailure}
 
 
 @dataclass(frozen=True)
@@ -193,6 +198,14 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
             "保存物を置き換えられませんでした",
             "理由に出ているファイルを開いている jigane の show やエディタなどを閉じてから、"
             "もう一度実行してください",
+        ),
+    ),
+    (
+        StoredFileSymlinkError,
+        Kind(
+            "stored_file_symlink",
+            "保存先のディレクトリにシンボリックリンクがあるため書けません",
+            "シンボリックリンクを確かめ、意図したものでなければ消してから、もう一度実行してください",
         ),
     ),
     (
@@ -354,3 +367,30 @@ def blockers() -> tuple[Blocker, ...]:
     # 前提の欠けは今のところ無い。セキュリティの MCP は --mcps を指定したときだけ要り、
     # その確かめは起動の前の run_security が行う
     return ()
+
+
+def failure_fields() -> tuple[str, ...]:
+    """`Failure.to_dict` が出す鍵の並び。"""
+    return tuple(Failure("", "", "", "").to_dict())
+
+
+def all_kinds() -> tuple[Kind, ...]:
+    """失敗の種類を、表の並びのまま重複なしで返す。`jigane debug errors` の出力の元。"""
+    ordered = [
+        *(kind for _, kind in KINDS),
+        *COMMAND_KINDS.values(),
+        MISSING_TOOL_KIND,
+        UNEXPECTED_KIND,
+    ]
+    # 出力の鍵の一意性を保つため、同じ種類が複数の行にあれば先に出た行を採る
+    unique: dict[str, Kind] = {}
+    for kind in ordered:
+        unique.setdefault(kind.kind, kind)
+    return tuple(unique.values())
+
+
+def extra_fields(kind: str) -> tuple[str, ...]:
+    """その種類の失敗だけが、基底の鍵に足す鍵。足さない種類は空。"""
+    base = {field.name for field in fields(Failure)}
+    failure_type = FAILURE_TYPE_BY_KIND.get(kind, Failure)
+    return tuple(field.name for field in fields(failure_type) if field.name not in base)

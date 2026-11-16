@@ -11,7 +11,6 @@ from jigane.pull_request_context.background import (
     Background,
     PastCommit,
     PastPullRequest,
-    parse_background,
 )
 
 
@@ -68,16 +67,6 @@ def test_background_round_trips_both_kinds() -> None:
     data = original.to_dict()
     assert [c["kind"] for c in data["past_changes"]] == ["pull_request", "commit"]
     assert Background.from_dict(data) == original
-
-
-def test_background_reads_old_record_with_past_pull_requests() -> None:
-    old = {
-        "issues": [],
-        "documents": [],
-        "past_pull_requests": [{"number": 5, "title": "Tune", "files": ["x.py"]}],
-        "owners": [],
-    }
-    assert parse_background(old).past_changes == (PastPullRequest(5, "Tune", ("x.py",)),)
 
 
 @pytest.mark.parametrize("finder", ["find_past_changes", "find_past_pull_requests"])

@@ -12,6 +12,8 @@ from jigane.llm_runs.claude import (
     NONESSENTIAL_TRAFFIC_SWITCH,
     REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES,
 )
+from jigane.text import prompt_labels as labels
+from jigane.text.prompt_labels import Match, PromptLabel
 
 
 class Channel(StrEnum):
@@ -132,7 +134,7 @@ class ClaudeInput(Enum):
         Channel.PROMPT,
         "変更前の木の中身。図、判断の地図、同じ形の箇所、技術選定を通して入る",
         (
-            "jigane/skills/macro.py:policy_sections",
+            "jigane/skills/policy_figures.py:policy_sections",
             "jigane/pull_request_context/fetching.py:extract_tree",
             "jigane/reviews/lifecycle.py:_build_diff_tree",
         ),
@@ -193,6 +195,7 @@ class ClaudeInput(Enum):
         "レビューボットのコメント（ログイン名、位置、本文）",
         (
             "jigane/skills/macro.py:bot_findings",
+            "jigane/skills/macro.py:bot_findings_section",
             "jigane/pull_request_context/bots.py:fetch_bot_comments",
         ),
         _MACRO_POLICY,
@@ -214,7 +217,7 @@ class ClaudeInput(Enum):
         Channel.PROMPT,
         "技術の追加と削除、依存の宣言の変化",
         (
-            "jigane/skills/macro.py:policy_sections",
+            "jigane/skills/policy_figures.py:policy_sections",
             "jigane/technology_list/materials.py:short_section_text",
         ),
         _MACRO_POLICY,
@@ -225,7 +228,7 @@ class ClaudeInput(Enum):
         Channel.PROMPT,
         "同じ形の箇所（消した行と同じ行が残る箇所、重なる塊）の宣言の抜粋",
         (
-            "jigane/skills/macro.py:policy_sections",
+            "jigane/skills/policy_figures.py:policy_sections",
             "jigane/skills/policy_repeats.py:repeats_text",
         ),
         _MACRO_POLICY,
@@ -540,14 +543,14 @@ HEADING_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     # macro_diagram.md と macro_design.md の固定の導入。$materials は入れ子の見出しの側
     "### 資料": _INSTRUCTIONS,
     "### 手戻りの大きい外形の欠陥": _INSTRUCTIONS,
-    # macro.py の policy_sections。changed_files.py の materials_sections が変更後の図を、
+    # policy_figures.py の policy_sections。changed_files.py の materials_sections が変更後の図を、
     # 変更前の木（pull_request_context/fetching.py の extract_tree）と並べて組む
     "### 変更のツリー図": (_C.TARGET_FILES, _C.BASE_TREE),
     "### クラス図": (_C.TARGET_FILES, _C.BASE_TREE),
     "### シーケンス図": (_C.TARGET_FILES, _C.BASE_TREE),
     # policy_callers.py の表。変更前後の木を読み、名前と数だけを載せる
     "### 足した公開の口と呼ぶ側": (_C.TARGET_FILES, _C.BASE_TREE),
-    # macro.py の bot_findings
+    # macro.py の bot_findings_section
     "### レビューボットの指摘の一覧": (_C.BOT_COMMENTS,),
     # changed_files.py の materials_sections
     "### 判断の箇所の一覧": (_C.JUDGMENT_MAP,),
@@ -613,31 +616,38 @@ HEADING_PREFIX_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     "#### 付属の文書: ": (_C.DESIGN_DOC,),
 }
 
-# 見出しではなく、固定のラベルや太字だけの行で区切る節。行の全文に一致するもの。
-# 固定のラベルは雛形（skills/prompts/*.md）と policy_materials/design_doc.py にある
-LABEL_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
+
+# 見出しではなく、固定のラベルや太字だけの行で区切る節。文言と一致の方式は text/prompt_labels.py
+# が持ち、ここは渡す素材を対応させる
+LABEL_MATERIALS: Mapping[PromptLabel, tuple[ClaudeInput, ...]] = {
     # rebuttal.md の固定の導入
-    "問うこと:": _INSTRUCTIONS,
-    # 先の役の出力を JSON で渡す節。adversarial.py の render_prompt が差し込む
-    "候補 (JSON):": _PRIOR,
-    "反証役の出力 (JSON):": _PRIOR,
-    "代案役の出力 (JSON):": _PRIOR,
-    "擁護役の出力 (JSON):": _PRIOR,
+    labels.QUESTIONS_LABEL: _INSTRUCTIONS,
+    # 先の役の出力を JSON で渡す節
+    labels.CANDIDATES_LABEL: _PRIOR,
+    labels.CHALLENGES_LABEL: _PRIOR,
+    labels.ALTERNATIVES_LABEL: _PRIOR,
+    labels.DEFENSES_LABEL: _PRIOR,
     # adversarial.py が作業ディレクトリから読み直した抜粋
-    "反証役が確かめた位置と抜粋 (JSON):": (_C.SOURCE_EXCERPTS,),
+    labels.EXCERPTS_LABEL: (_C.SOURCE_EXCERPTS,),
     # design_doc.py の見出しの木の節
-    "見出しの木（印は受け持ちの目安）:": (_C.DESIGN_DOC,),
+    labels.SECTION_TREE_LABEL: (_C.DESIGN_DOC,),
+    labels.TRUST_BOUNDARY_LABEL: _INSTRUCTIONS,
+    # design_doc_render.py の numbered_text
+    labels.DESIGN_DOC_PATH_LABEL: (_C.DESIGN_DOC,),
+    labels.ATTACHMENT_PATH_LABEL: (_C.DESIGN_DOC,),
+    # sharded.py が MCP を使える群の標準入力へ足す
+    labels.MCP_AVAILABLE_LABEL: (_C.MCP_GUIDE, _C.INSTRUCTIONS),
+    # sequence/review_diagrams.py の NO_CALL_ENTRIES_NOTE と UNRELATED_CALL_ENTRIES_NOTE
+    labels.NO_CALL_ENTRIES_LABEL: (_C.TARGET_FILES, _C.BASE_TREE),
+    labels.UNRELATED_CALL_ENTRIES_LABEL: (_C.TARGET_FILES, _C.BASE_TREE),
 }
 
-# 値の入る行は接頭辞で引く。通し番号や名前、パスが続く
+# 行の全文に一致するラベル
+LABEL_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
+    label.text: items for label, items in LABEL_MATERIALS.items() if label.match is Match.EXACT
+}
+
+# 値の入る行は接頭辞で引く
 LABEL_PREFIX_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
-    "信頼の境界: ": _INSTRUCTIONS,
-    # design_doc.py の _numbered_text
-    "設計書のパス: ": (_C.DESIGN_DOC,),
-    "付属の文書のパス: ": (_C.DESIGN_DOC,),
-    # sharded.py が MCP を使える群の標準入力へ足す
-    "次の MCP が使える: ": (_C.MCP_GUIDE, _C.INSTRUCTIONS),
-    # sequence/review_diagrams.py の NO_CALL_ENTRIES_NOTE と UNRELATED_CALL_ENTRIES_NOTE
-    "呼び出しの無い入口 ": (_C.TARGET_FILES, _C.BASE_TREE),
-    "変更に関わる呼び出しの無い入口 ": (_C.TARGET_FILES, _C.BASE_TREE),
+    label.text: items for label, items in LABEL_MATERIALS.items() if label.match is Match.PREFIX
 }

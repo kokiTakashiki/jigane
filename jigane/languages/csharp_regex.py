@@ -3,7 +3,13 @@ from collections.abc import Iterator
 
 from tree_sitter import Node
 
-from jigane.languages.base import RegexComposed, RegexDialect, RegexLiteral, RegexScan, RegexUse
+from jigane.languages.base import (
+    RegexComposedSite,
+    RegexDialect,
+    RegexLiteralSite,
+    RegexSites,
+    RegexUse,
+)
 from jigane.languages.csharp_nodes import CALLABLE_BODIES, STRING_LITERALS
 from jigane.languages.node_text import text_of
 from jigane.languages.regex_locals import LocalDeclaration, LocalRules, local_value
@@ -96,9 +102,9 @@ _LOCALS = LocalRules(
 )
 
 
-def regex_scan(root: Node, path: str) -> RegexScan:
-    literals: list[RegexLiteral] = []
-    composed: list[RegexComposed] = []
+def regex_scan(root: Node, path: str) -> RegexSites:
+    literals: list[RegexLiteralSite] = []
+    composed: list[RegexComposedSite] = []
     for node in _walk(root):
         site = _site(node)
         if site is None:
@@ -108,19 +114,21 @@ def regex_scan(root: Node, path: str) -> RegexScan:
         try:
             pattern = _constant(argument)
         except _NotConstantError:
-            composed.append(RegexComposed(call=call, use=_USES[call], path=path, line=line))
+            composed.append(
+                RegexComposedSite(call_name=call, use=_USES[call], path=path, line=line)
+            )
         else:
             literals.append(
-                RegexLiteral(
+                RegexLiteralSite(
                     pattern=pattern,
                     dialect=RegexDialect.DOTNET,
-                    call=call,
+                    call_name=call,
                     use=_USES[call],
                     path=path,
                     line=line,
                 )
             )
-    return RegexScan(literals=tuple(literals), composed=tuple(composed))
+    return RegexSites(literal_sites=tuple(literals), composed_sites=tuple(composed))
 
 
 def _walk(root: Node) -> Iterator[Node]:

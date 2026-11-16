@@ -1,14 +1,14 @@
 import pytest
 
-from jigane.languages.base import FilePathAdapter, FilePathPattern, FileUsage, parse
+from jigane.languages.base import FilePathExpression, FilePathExpressionExtractor, FileUsage, parse
 from jigane.languages.csharp import CSharpAdapter
-from jigane.languages.csharp_file_paths import file_path_patterns
+from jigane.languages.csharp_file_paths import file_path_expressions
 
 
-def patterns(code: str) -> list[FilePathPattern]:
+def patterns(code: str) -> list[FilePathExpression]:
     csharp = CSharpAdapter()
     source = code.encode()
-    return csharp.file_path_patterns(parse(csharp, source).root_node, source, "R.cs")
+    return csharp.file_path_expressions(parse(csharp, source).root_node, source, "R.cs")
 
 
 def pairs(code: str) -> list[tuple[str, FileUsage]]:
@@ -20,7 +20,7 @@ def body(statements: str) -> str:
 
 
 def test_csharp_adapter_offers_the_reader() -> None:
-    assert isinstance(CSharpAdapter(), FilePathAdapter)
+    assert isinstance(CSharpAdapter(), FilePathExpressionExtractor)
 
 
 def test_file_reads_read() -> None:
@@ -139,7 +139,7 @@ def test_lambda_belongs_to_the_enclosing_method() -> None:
         "} } }\n"
     )
     found = patterns(code)
-    assert [(p.function, p.line) for p in found] == [("Outer.R.F", 3)]
+    assert [(p.function_qualified_name, p.line) for p in found] == [("Outer.R.F", 3)]
 
 
 def test_constructor_and_accessors_are_part_of_the_qualified_name() -> None:
@@ -152,12 +152,12 @@ def test_constructor_and_accessors_are_part_of_the_qualified_name() -> None:
         "    }\n"
         "}\n"
     )
-    assert [p.function for p in patterns(code)] == ["R.R", "R.P.get", "R.P.set"]
+    assert [p.function_qualified_name for p in patterns(code)] == ["R.R", "R.P.get", "R.P.set"]
 
 
 def test_file_scoped_namespace_does_not_change_the_qualified_name() -> None:
     code = "namespace N;\nclass R { void F(string p) { File.Delete(p); } }\n"
-    assert [p.function for p in patterns(code)] == ["R.F"]
+    assert [p.function_qualified_name for p in patterns(code)] == ["R.F"]
 
 
 def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,8 +165,8 @@ def test_a_file_too_deep_to_walk_yields_nothing(monkeypatch: pytest.MonkeyPatch)
     source = b"class R { void F(string p) { File.Delete(p); } }"
     root = parse(csharp, source).root_node
 
-    def explode(_self: object, _rules: object) -> list[FilePathPattern]:
+    def explode(_self: object, _rules: object) -> list[FilePathExpression]:
         raise RecursionError
 
     monkeypatch.setattr("jigane.languages.file_paths_core._Reader.read", explode)
-    assert file_path_patterns(root, "R.cs") == []
+    assert file_path_expressions(root, "R.cs") == []

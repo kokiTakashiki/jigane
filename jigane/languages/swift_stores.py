@@ -56,12 +56,12 @@ def _side(role: StoreRole, function: str, path: str, touches: list[Touch]) -> St
         return None
     return StoreSide(
         role=role,
-        function=function,
+        function_qualified_name=function,
         path=path,
-        kind=own[0].kind,
+        format=own[0].kind,
         keys=frozenset().union(*(t.keys for t in own)),
-        types=frozenset().union(*(t.types for t in own)),
-        labels=frozenset().union(*(t.labels for t in own)),
+        created_type_names=frozenset().union(*(t.types for t in own)),
+        key_vocabulary_names=frozenset().union(*(t.labels for t in own)),
     )
 
 
@@ -97,7 +97,10 @@ def store_accesses(sources: Mapping[str, str], parse: Callable[[str], Node]) -> 
                     )
                     accesses.append(
                         StoreAccess(
-                            path=path, names=frozenset({name}), pair_owner=None, sides=sides
+                            path=path,
+                            file_names=frozenset({name}),
+                            pair_owner_type_name=None,
+                            sides=sides,
                         )
                     )
         except (RecursionError, MemoryError, ValueError):

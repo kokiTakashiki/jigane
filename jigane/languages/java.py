@@ -15,16 +15,18 @@ from jigane.languages import (
     type_names,
 )
 from jigane.languages.base import (
-    Argument,
+    AddedPublicName,
     BodyBounds,
+    CallArgument,
     CallParts,
     CallSite,
     ConcurrencyStep,
     Declaration,
     DeclarationKind,
     DeferredSite,
-    FilePathPattern,
-    Import,
+    FilePathExpression,
+    FlowStep,
+    ImportedModule,
     Isolation,
     IsolationContext,
     Locals,
@@ -32,15 +34,13 @@ from jigane.languages.base import (
     MemberDecl,
     MemberKind,
     ParameterDecl,
-    PublicName,
     ReceiverKind,
-    RegexScan,
+    RegexSites,
     Sharing,
-    Step,
-    StringComparison,
+    StringLiteralComparison,
+    StringLiteralSet,
     TypeDecl,
-    TypeFields,
-    ValueSet,
+    TypeFieldNames,
     Visibility,
     import_nodes,
     leading_components,
@@ -88,12 +88,14 @@ def _annotation(type_node: Node | None) -> str | None:
     return text_of(type_node)
 
 
-def _arguments(node: Node, captured: Node | None = None) -> tuple[Argument, ...]:
+def _arguments(node: Node, captured: Node | None = None) -> tuple[CallArgument, ...]:
     arguments = captured or node.child_by_field_name("arguments")
     if arguments is None:
         return ()
     # Java に名前付き引数は無い
-    return tuple(Argument(a, None) for a in arguments.named_children if a.type not in _COMMENTS)
+    return tuple(
+        CallArgument(a, None) for a in arguments.named_children if a.type not in _COMMENTS
+    )
 
 
 def _call_parts(call: Node) -> CallParts:
@@ -226,7 +228,7 @@ class _JavaRules(calls_core.RuleDefaults):
     def call_parts(self, call: Node) -> CallParts:
         return _call_parts(call)
 
-    def arguments(self, node: Node) -> tuple[Argument, ...]:
+    def arguments(self, node: Node) -> tuple[CallArgument, ...]:
         return _arguments(node)
 
     def lambda_parameter_names(self, node: Node) -> list[str]:
@@ -290,24 +292,26 @@ class JavaAdapter:
     def composition_type_names(self, _raw: str, /) -> list[str]:
         return []
 
-    def regex_literals(self, root_node: Node, _source: bytes, path: str, /) -> RegexScan:
+    def regex_sites(self, root_node: Node, _source: bytes, path: str, /) -> RegexSites:
         return _regex_scan(root_node, path)
 
-    def value_sets(self, source: str, path: str, /) -> list[ValueSet]:
+    def string_literal_sets(self, source: str, path: str, /) -> list[StringLiteralSet]:
         return java_value_sets.value_sets_of(parse(self, source.encode()).root_node, path)
 
-    def string_comparisons(self, source: str, path: str, /) -> list[StringComparison]:
+    def string_literal_comparisons(
+        self, source: str, path: str, /
+    ) -> list[StringLiteralComparison]:
         return java_string_comparisons.string_comparisons_of(
             parse(self, source.encode()).root_node, path
         )
 
-    def type_fields(self, text: str, path: str, /) -> list[TypeFields]:
+    def type_field_names(self, text: str, path: str, /) -> list[TypeFieldNames]:
         return java_type_fields.type_fields_of(lambda: parse(self, text.encode()).root_node, path)
 
-    def file_path_patterns(
+    def file_path_expressions(
         self, root_node: Node, _source: bytes, path: str, /
-    ) -> list[FilePathPattern]:
-        return java_file_paths.file_path_patterns(root_node, path)
+    ) -> list[FilePathExpression]:
+        return java_file_paths.file_path_expressions(root_node, path)
 
     def added_public_names(
         self,
@@ -315,29 +319,31 @@ class JavaAdapter:
         after: Mapping[str, str],
         changed: Collection[str],
         /,
-    ) -> list[PublicName]:
+    ) -> list[AddedPublicName]:
         return java_public_names.added_public_names_of(
             lambda source: parse(self, source.encode()).root_node, before, after, changed
         )
 
-    def imports(self, root_node: Node, _source: bytes, /) -> list[Import]:
-        found: list[Import] = []
+    def imported_modules(self, root_node: Node, _source: bytes, /) -> list[ImportedModule]:
+        found: list[ImportedModule] = []
         for node in import_nodes(self, root_node):
             module = next(
                 (c for c in node.children if c.type in ("scoped_identifier", "identifier")), None
             )
             if module is not None:
-                found.append(Import(text_of(module), module.start_point.row + 1))
+                found.append(ImportedModule(text_of(module), module.start_point.row + 1))
         return found
 
-    def technology_of(self, module: str) -> str:
+    def technology_name_of(self, module: str) -> str:
         return leading_components(module, 2)
 
-    def imported_names(self, _root_node: Node, _source: bytes, _path: str, /) -> dict[str, str]:
+    def imported_name_origins(
+        self, _root_node: Node, _source: bytes, _path: str, /
+    ) -> dict[str, str]:
         # import は型の名前を束縛するが、索引は単純名で型を引くので、受け手の解決に使う表は持たない
         return {}
 
-    def discriminator_branches(self, body_node: Node, _source: bytes, /) -> list[Step]:
+    def discriminator_flow_steps(self, body_node: Node, _source: bytes, /) -> list[FlowStep]:
         return java_discriminators.discriminator_steps(body_node)
 
     def type_members(
@@ -377,13 +383,13 @@ class JavaAdapter:
         # Java の共有の札は別の段で実装するので、札は出さない
         return Sharing.UNKNOWN
 
-    def body_of(self, member_node: Node) -> Node | None:
+    def body_node_of(self, member_node: Node) -> Node | None:
         return member_node.child_by_field_name("body")
 
     def call_sites(self, body_node: Node, _source: bytes, /) -> list[CallSite | DeferredSite]:
         return calls_core.call_sites(body_node, load_queries(self.grammar), _RULES)
 
-    def receiver_of(self, expression: Node) -> ReceiverKind:
+    def receiver_kind_of(self, expression: Node) -> ReceiverKind:
         return calls_core.receiver_of(expression, _RULES)
 
     def locals_of(self, body_node: Node) -> Locals:

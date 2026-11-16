@@ -229,14 +229,6 @@ def test_claude_launch_failure_without_filename_names_claude(
     assert r"コマンドを起動できませんでした: C:\bin\claude.exe" in raised.value.stderr
 
 
-def test_posix_launches_the_name_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    launches = Launches()
-    monkeypatch.setattr(process, "is_windows", lambda: False)
-    monkeypatch.setattr(subprocess, "run", launches.run)
-    run_command(["git", "status"])
-    assert launches.commands == [["git", "status"]]
-
-
 def test_run_tool_resolves_the_name_like_run_command(monkeypatch: pytest.MonkeyPatch) -> None:
     launches = windows(monkeypatch, {"npm-tool": NPM_TOOL_CMD})
     # 一覧の外の名前でも、Windows の解決は run_command と同じ resolve_command を通る

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from fakes import STARTED_AT
 
 from jigane.commands import failures
 from jigane.git import process
@@ -67,7 +68,8 @@ def test_missing_claude_names_the_tool_and_login_step(tmp_path: Path) -> None:
 def test_logged_out_claude_points_at_the_login_check() -> None:
     # 本物のログイン切れの出力の形は既存のコードに無い。ここでは失敗した起動の一般の形で確かめる
     error = ClaudeInvocationError(
-        "claude の終了コードが 1 でした: Not logged in", parse_record({}, 0.5)
+        "claude の終了コードが 1 でした: Not logged in",
+        parse_record({}, 0.5, started_at=STARTED_AT),
     )
     failure = failures.describe(error)
     assert failure.kind == "claude"

@@ -1,4 +1,3 @@
-import copy
 import json
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from pr_support import commit_all, git
 from jigane.commands.views.review import gate_lines
 from jigane.flaky.catalog import load_catalog
 from jigane.flaky.gates import GATES_FILE, load_gates, update_gates
+from jigane.gates.construct_kind import ConstructKind
 from jigane.gates.entry import (
     GATES_FORMAT,
     GateEntry,
@@ -38,7 +38,7 @@ def _gates(root: Path) -> tuple[Review, Gates]:
     return review, review.gates
 
 
-def test_new_saves_unreadable_warnings_in_format_3(tmp_path: Path) -> None:
+def test_new_saves_unreadable_warnings_in_format_4(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "A.swift").write_text("let a = 1\n" + BROKEN, encoding="utf-8")
     review, gates = _gates(tmp_path)
@@ -53,11 +53,12 @@ def test_new_saves_unreadable_warnings_in_format_3(tmp_path: Path) -> None:
     assert entry.excerpt == "func (x: Int) {}"
     assert entry.source is GateSource.UNREADABLE
     assert entry.severity is GateSeverity.UNREADABLE
-    assert entry.detail == UnreadableDetail(TreeSide.AFTER)
+    assert entry.detail == UnreadableDetail(ConstructKind.SYNTAX_ERROR, TreeSide.AFTER)
     saved = json.loads((review.id.directory() / GATES_FILE).read_text(encoding="utf-8"))
-    assert saved["format"] == GATES_FORMAT == 3
+    assert saved["format"] == GATES_FORMAT == 4
     assert saved["warnings"][0]["source"] == "unreadable"
     assert saved["warnings"][0]["side"] == "after"
+    assert saved["warnings"][0]["kind"] == "syntax_error"
     assert "一部の検査で読まれず、その対象から外れます" in entry.explanation["text"]
     assert review.to_dict()["gates"]["warnings"][0]["id"] == "UNREADABLE-SYNTAX-ERROR"
     assert not gates.blocks_exit
@@ -73,52 +74,32 @@ def test_no_unreadable_construct_leaves_warnings_empty_but_format_is_3(tmp_path:
     review, gates = _gates(tmp_path)
     assert gates.warnings == ()
     saved = json.loads((review.id.directory() / GATES_FILE).read_text(encoding="utf-8"))
-    assert saved["format"] == 3
+    assert saved["format"] == 4
     assert gate_lines(review) == ["ゲート違反 0 件、警告 0 件"]
 
 
-def test_format_2_file_is_read_without_changing_values(tmp_path: Path) -> None:
-    entry = {
-        "number": "W1",
-        "id": "FLK-X",
-        "path": "a.py",
-        "line": 3,
-        "excerpt": "x",
-        "explanation": {"text": "t"},
-        "source": "flaky",
-        "reason": "r",
-        "cause": "c",
-        "confidence": "direct",
-        "origin": "o",
-        "legitimate": "",
-        "detector_note": "",
-    }
-    write_gates_file(tmp_path, {"format": 2, "violations": [], "warnings": [entry]})
-    before = copy.deepcopy(json.loads((tmp_path / GATES_FILE).read_text(encoding="utf-8")))
-    gates = load_gates(tmp_path)
-    assert gates is not None
-    [loaded] = gates.warnings
-    assert (loaded.number, loaded.id, loaded.line, loaded.excerpt) == ("W1", "FLK-X", 3, "x")
-    assert gates.to_json()["warnings"] == before["warnings"]
-    assert gates.to_json()["format"] == 3
-
-
-def test_update_gates_writes_format_3_with_or_without_warnings(tmp_path: Path) -> None:
+def test_update_gates_writes_format_4_with_or_without_warnings(tmp_path: Path) -> None:
     out = tmp_path / "out"
     out.mkdir()
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
-    write_gates_file(out, {"format": 2, "violations": [], "warnings": []})
+    write_gates_file(out, {"violations": [], "warnings": []})
     gates = update_gates(
         out, tmp_path, ["a.py"], [], load_catalog(), renames={}, unreadable_segments=()
     )
     assert gates.warnings == ()
-    assert json.loads((out / GATES_FILE).read_text(encoding="utf-8"))["format"] == 3
+    assert json.loads((out / GATES_FILE).read_text(encoding="utf-8"))["format"] == 4
 
 
-def test_newer_format_is_rejected(tmp_path: Path) -> None:
-    write_gates_file(tmp_path, {"format": 4, "violations": [], "warnings": []})
-    with pytest.raises(ReviewError, match="形の版 4"):
+def test_format_5_gates_stop_as_newer_with_file_name_and_versions(tmp_path: Path) -> None:
+    write_gates_file(tmp_path, {"format": 5, "violations": [], "warnings": []})
+    with pytest.raises(ReviewError) as caught:
         load_gates(tmp_path)
+    message = str(caught.value)
+    assert message.startswith("gates.json は、この jigane より新しいバージョンの jigane が作った")
+    assert "JSON の構造のバージョンは 5 で、この jigane が読み込めるのは 4 までです" in message
+    assert "`uv tool upgrade jigane`" in message
+    assert "`pipx upgrade jigane`" in message
+    assert "形の版" not in message
 
 
 def test_design_doc_style_empty_segments_detect_nothing(tmp_path: Path) -> None:
@@ -191,9 +172,34 @@ def test_unreadable_entry_round_trips_through_json(side: TreeSide) -> None:
         "func (x: Int) {}",
         {"text": "t"},
         GateSeverity.UNREADABLE,
-        UnreadableDetail(side),
+        UnreadableDetail(ConstructKind.SYNTAX_ERROR, side),
     )
     data = entry.to_json()
     assert data["source"] == "unreadable"
     assert data["side"] == str(side)
     assert GateEntry.from_json(data) == entry
+    # kind は必須で、id から補わない
+    del data["kind"]
+    with pytest.raises(KeyError, match="kind"):
+        GateEntry.from_json(data)
+
+
+def test_from_json_rejects_unknown_id_bad_kind_and_mismatch() -> None:
+    entry = GateEntry(
+        "W1",
+        "UNREADABLE-SYNTAX-ERROR",
+        "a.swift",
+        1,
+        "x",
+        {"text": "t"},
+        GateSeverity.UNREADABLE,
+        UnreadableDetail(ConstructKind.SYNTAX_ERROR, TreeSide.AFTER),
+    )
+    data = entry.to_json()
+    cases = (
+        ({**data, "kind": "nope"}, "nope"),
+        ({**data, "kind": "swift_operator_function"}, "食い違"),
+    )
+    for broken, message in cases:
+        with pytest.raises(ValueError, match=message):
+            GateEntry.from_json(broken)

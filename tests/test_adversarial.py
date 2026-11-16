@@ -10,6 +10,7 @@ from legacy_schemas import load_finding_schema
 from pydantic import BaseModel, ValidationError
 
 from jigane.findings.records import AdjudicationKind, Verdict
+from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES
 from jigane.groups.definitions import MACRO
 from jigane.llm_runs import claude
 from jigane.llm_runs.cost import LimitSubstitute
@@ -631,3 +632,18 @@ def test_role_failure_without_a_record_is_recorded_at_the_limit() -> None:
     outcome = verify_with([make_candidate("D1")], invoke)
     first = outcome.invocations[0]
     assert first.record.cost == LimitSubstitute(0.5)
+
+
+def test_excerpt_drops_in_tree_symlink_and_oversized_file(tmp_path: Path) -> None:
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / "real.py").write_text("x\n", encoding="utf-8")
+    (root / "alias.py").symlink_to(root / "real.py")
+    (root / "big.py").write_text("y" * (MAX_REVIEW_FILE_BYTES + 1), encoding="utf-8")
+    checked = [
+        {"path": "alias.py", "start_line": 1, "end_line": 1},
+        {"path": "big.py", "start_line": 1, "end_line": 1},
+        {"path": "real.py", "start_line": 1, "end_line": 1},
+    ]
+    [entry] = excerpts_in(judge_prompt_for(root, checked))
+    assert [e["path"] for e in entry["checked"]] == ["real.py"]

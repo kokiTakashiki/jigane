@@ -45,6 +45,15 @@ def _executable_name(args: list[str]) -> str:
     return PureWindowsPath(args[0]).stem.lower()
 
 
+def _launch_name(command: str) -> str:
+    """一覧と突き合わせる名前。小文字にし、拡張子は ".exe" だけを落とす。
+
+    git.sh や git.cmd は別の実体なので、拡張子ごと残して一覧の外にする。
+    """
+    name = PureWindowsPath(command).name.lower()
+    return name.removesuffix(".exe")
+
+
 def _is_claude(args: list[str]) -> bool:
     """先頭が claude の実行ファイルか。大文字小文字とパスの有無、拡張子を問わない。
 
@@ -75,7 +84,7 @@ def _refuse_unlisted(args: list[str]) -> None:
             "claude は jigane.llm_runs から起動する。同意、予算、--restricted、"
             "秘密のファイルの拒否は、その口だけが付ける",
         )
-    name = _executable_name(args)
+    name = _launch_name(args[0])
     if name not in LAUNCHABLE_EXECUTABLES:
         allowed = "、".join(sorted(LAUNCHABLE_EXECUTABLES))
         raise CommandError(
@@ -88,10 +97,14 @@ def _refuse_unlisted(args: list[str]) -> None:
 def child_environment(args: list[str], env: dict[str, str] | None) -> dict[str, str] | None:
     """git の場所の変数を除いた環境を返す。何も起動しない。"""
     # git 以外には手を付けない。他のコマンドが孫として起こす git へ変数を渡す意図まで消さないため
-    if not args or Path(args[0]).name not in ("git", "git.exe"):
+    if not args or _launch_name(args[0]) != "git":
         return env
     base = os.environ if env is None else env
-    return {k: v for k, v in base.items() if k not in GIT_LOCATION_VARIABLES}
+    cleaned = {k: v for k, v in base.items() if k not in GIT_LOCATION_VARIABLES}
+    # 資格情報の問いで止まらず、ext:: など外のコマンドを使う転送を許さない
+    cleaned["GIT_TERMINAL_PROMPT"] = "0"
+    cleaned["GIT_ALLOW_PROTOCOL"] = "file:https:ssh"
+    return cleaned
 
 
 # cmd.exe が構文として読む文字。.cmd と .bat は cmd.exe を通って起動され、引数の引用符の
@@ -125,33 +138,40 @@ def launch_failure(
     return None
 
 
-def _find_on_windows(name: str, path: str) -> str | None:
+def find_executable(name: str, path: str) -> str | None:
+    """path の絶対パスの項目だけを順に引く。
+
+    POSIX でも PATH の空の項目や相対の項目（direnv の .envrc が足すものなど）は現在の
+    作業ディレクトリを指し、Windows の which は path の前に作業ディレクトリを足す。
+    jigane はレビュー対象の木の中で走りうるので、どちらも項目ごとに自分で引いて避ける。
+    """
     if "\\" in name or "/" in name:
         # 利用者がディレクトリを書いた名前は、その場所だけを which に探させる
         return shutil.which(name)
-    # shutil.which は Windows で path の前に現在のディレクトリを足して探す。jigane は
-    # レビュー対象の木の中で走りうるので、絶対パスの項目だけを自分で順に引く
-    for directory in path.split(";"):
-        if not ntpath.isabs(directory):
+    windows = is_windows()
+    for directory in path.split(";" if windows else os.pathsep):
+        if not (ntpath.isabs(directory) if windows else Path(directory).is_absolute()):
             continue
-        found = shutil.which(ntpath.join(directory, name))
+        candidate = ntpath.join(directory, name) if windows else str(Path(directory) / name)
+        found = shutil.which(candidate)
         if found is not None:
             return found
     return None
 
 
 def resolve_command(args: list[str], env: dict[str, str] | None) -> list[str]:
-    """Windows では先頭を shutil.which で絶対パスに解く。それ以外は args をそのまま返す。
+    """先頭を絶対パスの PATH の項目だけから引いた絶対パスに解く。
 
     CreateProcess が拡張子の無い名前に補うのは .exe だけなので、npm が置く claude.cmd などは
-    PATHEXT を見る which で解かないと起動できない。POSIX の exec は PATH を自分で引く。
+    PATHEXT を見る which で解かないと起動できない。POSIX でも、PATH の相対の項目にある
+    実体を選ばないよう、起動の前に自分で解く。
     """
-    if not args or not is_windows():
+    if not args:
         return args
     path = (os.environ if env is None else env).get("PATH")
     if path is None:
         path = os.environ.get("PATH", "")
-    found = _find_on_windows(args[0], path)
+    found = find_executable(args[0], path)
     if found is None:
         raise CommandError(
             args,
@@ -216,16 +236,12 @@ def run_claude_resolved(
 
 def _resolve_claude(args: list[str], env: dict[str, str] | None) -> list[str]:
     """先頭を claude の実体の絶対パスにした argv。版の確かめと起動に同じ実体を使うため。"""
+    # 引数ごと解く。cmd.exe を通る実体の断りは引数を見るため、版の確かめより先に効かせる
+    resolved = resolve_command(args, env)
     if is_windows():
-        # 引数ごと解く。cmd.exe を通る実体の断りは引数を見るため、版の確かめより先に効かせる
-        return resolve_command(args, env)
-    path = (os.environ if env is None else env).get("PATH", os.environ.get("PATH", ""))
-    found = shutil.which(args[0], path=path)
-    if found is None:
-        missing = f"実行ファイルが見つかりません: {args[0]}"
-        raise CommandError(args, missing, missing_executable=True)
+        return resolved
     # リンクの先ではなく、PATH で見つけた名前のまま起動する
-    return [str(Path(found).absolute()), *args[1:]]
+    return [str(Path(resolved[0]).absolute()), *resolved[1:]]
 
 
 def _require_claude_version(binary: str, kwargs: dict[str, Any]) -> None:
@@ -283,13 +299,32 @@ def _run_resolved(
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(cwd)) from error
 
 
+def _command_error(
+    args: list[str], error: subprocess.CalledProcessError, cwd: Path | None
+) -> CommandError:
+    """CalledProcessError を CommandError にする。バイト列の出力は置換で復号する。"""
+
+    def text(output: str | bytes | None) -> str:
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return output or ""
+
+    return CommandError(
+        args,
+        text(error.stderr),
+        stdout=text(error.stdout),
+        returncode=error.returncode,
+        cwd=cwd,
+    )
+
+
 def run_command(
     args: list[str],
     cwd: Path | None = None,
     stdin: str | None = None,
     env: dict[str, str] | None = None,
 ) -> str:
-    # 検査で差し替える唯一の入口。外部コマンドはすべてここを通す
+    # 検査で差し替える入口（文字列で受ける側）。外部コマンドはここか run_command_bytes を通す
     try:
         completed = run_resolved(
             args,
@@ -302,14 +337,35 @@ def run_command(
             capture_output=True,
         )
     except subprocess.CalledProcessError as error:
-        raise CommandError(
-            args,
-            error.stderr or "",
-            stdout=error.stdout or "",
-            returncode=error.returncode,
-            cwd=cwd,
-        ) from error
+        raise _command_error(args, error, cwd) from error
     return completed.stdout
+
+
+def run_command_bytes(
+    args: list[str],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    stdin: bytes | None = None,
+) -> bytes:
+    """run_command のバイト列版。標準出力を復号せずに返す。
+
+    git show の本文のように、UTF-8 でない中身や NUL を含む中身を、呼ぶ側が検査するために使う。
+    外部コマンドは run_command と同じく、この二つの入口だけが起動する。
+    """
+    try:
+        completed = run_resolved(
+            args,
+            cwd=cwd,
+            input=stdin,
+            env=child_environment(args, env),
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise _command_error(args, error, cwd) from error
+    # run_resolved の注釈は文字列版だが、text を渡さなければ中身はバイト列
+    output: bytes = completed.stdout  # type: ignore[assignment]
+    return output
 
 
 def is_windows() -> bool:

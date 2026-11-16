@@ -27,6 +27,8 @@ from jigane.reviews.lifecycle import Review
 from jigane.skills import micro, pipeline
 from jigane.skills.pipeline import GroupRun, PolicyGroupRun, ShardedGroupRun
 
+STARTED_AT = "2026-01-01T00:00:00+00:00"
+
 RECORD = claude.InvocationRecord(
     1,
     2,
@@ -38,12 +40,21 @@ RECORD = claude.InvocationRecord(
     is_error=False,
     terminal_reason=None,
     permission_denials=0,
+    started_at="2026-11-01T00:00:00+00:00",
     max_budget_usd=0.5,
 )
 RECORD_ROW = {"role": "discovery", "split_index": 0, **RECORD.as_row()}
 LOCATION = {"path": "a.py", "start_line": 1, "end_line": 2}
 # 偽の起動が束ねの役を見分ける印。prompts/bundle_disclosed.md の冒頭の文と合わせる
 PROMPT_MARKER = "開示済みの限界の指摘を、同じ既知の限界ごとに束ねる役"
+
+
+def without_containment(args: list[str]) -> list[str]:
+    """git の起動の入口が付ける 7 要素（-c 三組と --no-pager）を外した argv を返す。"""
+    if args[:1] != ["git"] or "core.fsmonitor=false" not in args:
+        return args
+    start = args.index("core.fsmonitor=false") - 1
+    return [*args[:start], *args[start + 7 :]]
 
 
 def run_command_stub(handler: Callable[[list[str]], str]) -> Callable[..., str]:
@@ -55,7 +66,7 @@ def run_command_stub(handler: Callable[[list[str]], str]) -> Callable[..., str]:
         stdin: str | None = None,  # noqa: ARG001 - 同上
         env: dict[str, str] | None = None,  # noqa: ARG001 - 同上
     ) -> str:
-        return handler(args)
+        return handler(without_containment(args))
 
     return run_command
 

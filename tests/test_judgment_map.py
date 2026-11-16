@@ -1,8 +1,10 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES
 from jigane.judgment_map.classification import (
     BotTouch,
     ChangeKind,
@@ -19,9 +21,9 @@ from jigane.judgment_map.classification import (
 )
 from jigane.judgment_map.configuration import DEFAULT_EXCLUDE, Config, load_config
 from jigane.judgment_map.kinds import LEVEL_OF_KIND, Kind, Level, StoredMode
-from jigane.judgment_map.map_kind import _upgrade_v1
 from jigane.languages.base import Span
 from jigane.preconditions.required import required
+from jigane.storage.review_error import ReviewError
 
 
 def write(root: Path, files: dict[str, str]) -> Path:
@@ -347,6 +349,61 @@ def test_load_config_reads_a_file_with_the_removed_approval_tables(tmp_path: Pat
         'exclude = ["gen/*"]\n\n[[approval]]\npaths = ["src/*"]\ncount = 2\n', encoding="utf-8"
     )
     assert load_config(tmp_path) == Config(exclude=("gen/*",))
+
+
+def test_load_config_stops_on_a_broken_toml(tmp_path: Path) -> None:
+    (tmp_path / ".jigane.toml").write_text("exclude = [\n", encoding="utf-8")
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert ".jigane.toml を読めませんでした" in str(caught.value)
+    assert "直してから" in str(caught.value)
+
+
+def test_load_config_stops_on_a_deeply_nested_toml(tmp_path: Path) -> None:
+    (tmp_path / ".jigane.toml").write_text("a = " + "[" * 5000 + "]" * 5000, encoding="utf-8")
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert ".jigane.toml を読めませんでした" in str(caught.value)
+
+
+def test_load_config_stops_on_a_toml_that_is_not_utf8(tmp_path: Path) -> None:
+    (tmp_path / ".jigane.toml").write_bytes(b'exclude = ["\xff"]\n')
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert "UTF-8 として読めません" in str(caught.value)
+    assert "UTF-8 で保存し直してから" in str(caught.value)
+
+
+@pytest.mark.parametrize("key", ["exclude", "sensitive", "bots"])
+@pytest.mark.parametrize("value", ['"gen/*"', "[1, 2]"])
+def test_load_config_stops_on_a_key_of_the_wrong_type(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    (tmp_path / ".jigane.toml").write_text(f"{key} = {value}\n", encoding="utf-8")
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert f"{key} は文字列の配列" in str(caught.value)
+    assert "直してから" in str(caught.value)
+
+
+def test_load_config_stops_on_a_toml_that_cannot_be_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".jigane.toml").write_text("exclude = []\n", encoding="utf-8")
+
+    real_open = os.open
+
+    def denied(path: str | Path, flags: int, *, dir_fd: int | None = None) -> int:
+        if Path(path).name == ".jigane.toml":
+            raise PermissionError(13, "Permission denied")
+        return real_open(path, flags, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", denied)
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert "開けませんでした" in str(caught.value)
+    assert "Permission denied" in str(caught.value)
+    assert "UTF-8" not in str(caught.value)
 
 
 def build(
@@ -1082,38 +1139,6 @@ def test_csharp_new_overload_is_added(tmp_path: Path) -> None:
     assert {s.change_kind for s in result if s.qualified_name == "A.F"} == {ChangeKind.ADDED}
 
 
-@pytest.mark.parametrize(
-    ("old_span", "new_span", "expected"),
-    [
-        (None, {"start_line": 1, "end_line": 2}, ChangeKind.ADDED),
-        ({"start_line": 1, "end_line": 2}, None, ChangeKind.REMOVED),
-        ({"start_line": 1, "end_line": 2}, {"start_line": 1, "end_line": 3}, ChangeKind.CHANGED),
-    ],
-)
-def test_map_v1_upgrade_fills_change_kind_from_the_spans(
-    old_span: dict[str, int] | None, new_span: dict[str, int] | None, expected: ChangeKind
-) -> None:
-    stored = {
-        "old_path": "a.py",
-        "new_path": "a.py",
-        "old_span": old_span,
-        "new_span": new_span,
-        "qualified_name": "f",
-        "kind": "logic",
-        "level": "confirm",
-        "old_line_count": 2,
-        "new_line_count": 3,
-        "declaration_kind": "function",
-    }
-    old_map = {"mode": "diff", "segments": [stored], "regions": [], "line_counts": {}}
-
-    upgraded = _upgrade_v1(old_map)
-
-    # static_finding_ids は版 4 の欄で、版 1 の移しの範囲ではない
-    segment = {**upgraded["segments"][0], "static_finding_ids": []}
-    assert Segment.from_dict(segment).change_kind is expected
-
-
 def test_comment_added_outside_any_declaration_is_comment_only(tmp_path: Path) -> None:
     result = run(
         tmp_path,
@@ -1263,3 +1288,33 @@ def test_region_summary_for_policy_lists_only_the_finding_count(tmp_path: Path) 
     assert regions[0].kind == Kind.STATIC_FINDING
     assert regions[0].summary == "静的検査の指摘 2 件（`f`）"
     assert "S1" not in json.dumps(regions[0].to_dict(), ensure_ascii=False)
+
+
+def test_load_config_stops_when_config_is_a_symlink(tmp_path: Path) -> None:
+    (tmp_path / "real.toml").write_text('exclude = ["x/*"]\n', encoding="utf-8")
+    (tmp_path / ".jigane.toml").symlink_to(tmp_path / "real.toml")
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert "シンボリックリンク" in str(caught.value)
+    assert "置き換えてから" in str(caught.value)
+
+
+def test_load_config_stops_when_config_is_not_a_regular_file(tmp_path: Path) -> None:
+    (tmp_path / ".jigane.toml").mkdir()
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert "通常のファイルではない" in str(caught.value)
+
+
+def test_load_config_is_silent_when_config_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert load_config(tmp_path) == Config()
+    assert capsys.readouterr().err == ""
+
+
+def test_load_config_stops_on_a_too_large_config(tmp_path: Path) -> None:
+    (tmp_path / ".jigane.toml").write_text("#" * (MAX_REVIEW_FILE_BYTES + 1), encoding="utf-8")
+    with pytest.raises(ReviewError) as caught:
+        load_config(tmp_path)
+    assert "大きすぎます" in str(caught.value)

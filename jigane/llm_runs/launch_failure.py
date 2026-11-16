@@ -84,7 +84,7 @@ class RunRecordKind(StrEnum):
 
     @classmethod
     def of_record(cls, state: dict[str, Any]) -> "RunRecordKind":
-        """記録の種類を読む唯一の場所。欄は版 1 からの移しが埋めるので、必ずある。"""
+        """記録の種類を読む唯一の場所。現行の書き手は必ず欄を書く。"""
         return cls(state["record_kind"])
 
     @property
@@ -155,9 +155,6 @@ class StoredInvocation:
         record = StoredInvocationRecord.from_row(row)
         # 保存された budget_outcome は信じず、記録から導き直す
         outcome = record.budget_outcome(None)
-        if outcome is None and record.max_budget_usd is None and "budget_outcome" in row:
-            # 上限を持たない古い行は導けない。移し（runs.json の版 1）が旧い旗から書いた値を読む
-            outcome = BudgetOutcome(row["budget_outcome"])
         rerun = row.get("rerun")
         version = row.get("prompt_version")
         chars = row.get("prompt_chars")
@@ -408,12 +405,8 @@ def _line(title: str, failure: _FailureFields) -> str:
     return f"{title}、{cost_text(failure.cost)}、理由: {failure.reason}{when}"
 
 
-# 廃止した四回の方針の形が、役なしで書いた発見の失敗を移すときの役の名
-LEGACY_FULL_SHAPE_ROLE = "full"
-
-
 def failure_from_record(record: dict[str, Any]) -> StoredFailure:
-    """記録を stage、scope、role の値で和の型へ読む。scope は移しが埋めた値。
+    """記録を stage、scope、role の値で和の型へ読む。
 
     段階と役の組が実在する型のどれにも当たらない記録は、
     読む側へ曖昧な値を渡さず ValueError にする。

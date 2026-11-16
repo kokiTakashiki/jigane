@@ -1,4 +1,4 @@
-"""gates.json の一件の型が、保存の形と往復し、古い形を読み、終了コードの判定を持つこと。"""
+"""gates.json の一件の型が、保存の形と往復し、古い版で止まり、終了コードの判定を持つこと。"""
 
 import json
 from pathlib import Path
@@ -6,10 +6,9 @@ from typing import Any
 
 import pytest
 from gates_support import write_gates_file
-from store_format_support import check_upgrades
 
 from jigane.flaky.catalog import load_catalog
-from jigane.flaky.gates import _UPGRADES, GATES_FILE, load_gates, update_gates
+from jigane.flaky.gates import GATES_FILE, load_gates, update_gates
 from jigane.gates.entry import (
     GATES_FORMAT,
     Active,
@@ -25,6 +24,7 @@ from jigane.gates.entry import (
     RegexDetail,
 )
 from jigane.storage.review_error import ReviewError
+from jigane.storage.store_format import OlderFormatError
 
 FLAKY_SOURCE = "import time\n\n\ndef test_a():\n    time.sleep(1)\n"
 REGEX_SOURCE = 'import re\n\nPATTERN = re.compile(r"(a+)+$")\n'
@@ -75,92 +75,51 @@ def test_json_keeps_the_keys_readers_use(tmp_path: Path) -> None:
     assert (regex["source"], regex["severity"]) == ("regex", "warning")
 
 
-V1_KEYS = [
-    "cause", "confidence", "detector_note", "excerpt", "id", "legitimate",
-    "line", "number", "path", "reason", "remedy", "source",
-]  # fmt: skip
 CITATION = "jigane: allow-flaky の注記の書式"
-
-
-def _v1_entry() -> dict[str, Any]:
-    entry: dict[str, Any] = {
-        "number": "G1",
-        "id": "FLK-ASYNC-WAIT",
-        "path": "tests/test_a.py",
-        "line": 5,
-        "excerpt": "time.sleep(1)",
-        "reason": "r",
-        "cause": "c",
-        "confidence": "direct",
-        "legitimate": "",
-        "detector_note": "",
-        "remedy": "知らない鍵は読み捨てる",
-        "source": CITATION,
-    }
-    return entry
 
 
 def _write(tmp_path: Path, state: dict[str, Any]) -> None:
     write_gates_file(tmp_path, state)
 
 
-def test_version_1_file_with_the_real_key_order_is_read_and_rewritten_as_version_2(
-    tmp_path: Path,
-) -> None:
-    entry = _v1_entry()
-    assert sorted(entry) == V1_KEYS
-    _write(tmp_path, {"violations": [entry], "warnings": []})
-    gates = load_gates(tmp_path)
-    assert gates is not None
-    loaded = gates.violations[0]
-    assert loaded.source is GateSource.FLAKY
-    assert isinstance(loaded.detail, FlakyDetail)
-    assert loaded.detail.origin == CITATION
-    assert loaded.explanation  # 目録を引いて補う
-    saved = loaded.to_json()
-    assert (saved["source"], saved["origin"]) == ("flaky", CITATION)
-    assert "remedy" not in saved
-    assert gates.to_json()["format"] == 3
-
-
-def test_version_1_entry_missing_fields_is_filled_from_the_catalog(tmp_path: Path) -> None:
-    item = next(i for i in load_catalog() if i.id == "FLK-ASYNC-WAIT")
-    keep = ("number", "id", "path", "line", "excerpt")
-    bare = {k: v for k, v in _v1_entry().items() if k in keep}
-    _write(tmp_path, {"violations": [bare], "warnings": []})
-    gates = load_gates(tmp_path)
-    assert gates is not None
-    detail = gates.violations[0].detail
-    assert isinstance(detail, FlakyDetail)
-    assert (detail.cause, detail.confidence, detail.legitimate) == (
-        item.cause,
-        item.confidence,
-        item.legitimate,
-    )
-    assert (detail.origin, detail.reason, detail.detector_note) == (item.source, "", "")
-    assert detail.equivalent is None
-
-
-def test_version_1_entry_of_an_unknown_id_gets_empty_defaults(tmp_path: Path) -> None:
-    bare = {"number": "G1", "id": "FLK-GONE", "path": "a.py", "line": 1, "excerpt": "x"}
-    _write(tmp_path, {"violations": [bare], "warnings": []})
-    gates = load_gates(tmp_path)
-    assert gates is not None
-    assert gates.violations[0].detail == FlakyDetail("", "", "", "", "")
-
-
-def test_version_2_entry_with_an_invalid_source_is_an_error(tmp_path: Path) -> None:
+def test_an_entry_with_an_invalid_source_is_an_error(tmp_path: Path) -> None:
     detail = FlakyDetail("", "c", "d", "o", "")
     entry = GateEntry("G1", "X", "a.py", 1, "x", {}, GateSeverity.FLAKY, detail)
     broken = {**entry.to_json(), "source": CITATION}
-    _write(tmp_path, {"format": 2, "violations": [broken], "warnings": []})
+    _write(tmp_path, {"format": GATES_FORMAT, "violations": [broken], "warnings": []})
     with pytest.raises(ValueError, match="flaky"):
         load_gates(tmp_path)
 
 
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_an_older_gates_file_stops_with_the_rebuild_hint(tmp_path: Path, version: int) -> None:
+    _write(tmp_path, {"format": version, "violations": [], "warnings": []})
+    with pytest.raises(OlderFormatError) as caught:
+        load_gates(tmp_path)
+    message = str(caught.value)
+    assert GATES_FILE in message
+    assert f"バージョンは {version}" in message
+    assert "jigane new" in message
+    assert "引き継がれません" in message
+
+
+def test_a_gates_file_without_a_format_is_read_as_version_1_and_stops(tmp_path: Path) -> None:
+    path = tmp_path / GATES_FILE
+    path.write_text(json.dumps({"violations": [], "warnings": []}), encoding="utf-8")
+    with pytest.raises(OlderFormatError, match="バージョンは 1 "):
+        load_gates(tmp_path)
+
+
+def test_a_broken_gates_version_is_a_plain_review_error(tmp_path: Path) -> None:
+    _write(tmp_path, {"format": "4", "violations": [], "warnings": []})
+    with pytest.raises(ReviewError, match="整数ではありません") as caught:
+        load_gates(tmp_path)
+    assert not isinstance(caught.value, OlderFormatError)
+
+
 def test_unknown_version_is_an_error(tmp_path: Path) -> None:
-    _write(tmp_path, {"format": 4, "violations": [], "warnings": []})
-    with pytest.raises(ReviewError, match="版"):
+    _write(tmp_path, {"format": 5, "violations": [], "warnings": []})
+    with pytest.raises(ReviewError, match="バージョン"):
         load_gates(tmp_path)
 
 
@@ -279,7 +238,7 @@ def test_a_ledger_cannot_be_changed_after_it_is_made() -> None:
 
 @pytest.mark.parametrize("lost", ["next_violation", "next_warning", "keys"])
 def test_a_gates_json_without_a_ledger_key_is_an_error(tmp_path: Path, lost: str) -> None:
-    state = {**NumberLedger().to_json(), "format": 2, "violations": [], "warnings": []}
+    state = {**NumberLedger().to_json(), "format": GATES_FORMAT, "violations": [], "warnings": []}
     del state[lost]
     (tmp_path / GATES_FILE).write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match=lost):
@@ -324,38 +283,3 @@ def test_every_source_takes_its_number_from_the_one_ledger(
     flaky_numbers = {e.number for e in flaky.violations}
     regex_numbers = {e.number for e in regex.violations}
     assert flaky_numbers.isdisjoint(regex_numbers)
-
-
-def test_numbers_are_carried_from_a_version_1_file(tmp_path: Path) -> None:
-    first = _saved(tmp_path, "first", with_base=True)
-    saved = json.loads((tmp_path / "first" / GATES_FILE).read_text(encoding="utf-8"))
-    bumped = {key: f"G{int(num[1:]) + 10}" for key, num in saved["keys"].items()}
-    v1 = {
-        "next_violation": 50,
-        "next_warning": 1,
-        "keys": bumped,
-        "violations": [],
-        "warnings": [],
-    }
-    out = tmp_path / "second"
-    out.mkdir()
-    _write(out, v1)
-    second = update_gates(
-        out,
-        tmp_path,
-        ["tests/test_a.py"],
-        [],
-        load_catalog(),
-        renames={},
-        base_root=tmp_path / "base",
-        unreadable_segments=(),
-    )
-    assert [e.number for e in second.violations] == [
-        f"G{int(e.number[1:]) + 10}" for e in first.violations
-    ]
-    assert json.loads((out / GATES_FILE).read_text(encoding="utf-8"))["format"] == 3
-    assert second.ledger.next_violation == 50
-
-
-def test_upgrade_table_has_every_step() -> None:
-    check_upgrades(GATES_FILE, GATES_FORMAT, _UPGRADES)

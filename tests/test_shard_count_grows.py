@@ -12,6 +12,7 @@ from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import discovery_errors, estimator, micro, sharded, shards
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
+from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import NO_MCP
 
 FILE_BYTES = 50_000
@@ -110,10 +111,10 @@ def test_run_estimate_and_consent_use_the_same_grown_count(seven_files: Path) ->
     fake = MicroFake({number: [] for number in range(1, 8)})
 
     estimate = micro.estimate_micro(assembly, MICRO, budget)
-    assert estimator.estimate_of(assembly, MICRO, budget=budget).discovery_calls == 7
+    assert estimator.estimate_of(LaunchInput(assembly, MICRO, budget=budget)).discovery_calls == 7
     settings = settings_for(fake, max_budget_usd=limit)
     plan = consent.launch_plan(
-        estimator.estimate_of(assembly, MICRO, budget=settings.budget),
+        estimator.estimate_of(LaunchInput(assembly, MICRO, budget=settings.budget)),
         GroupExpectation(0.2, 2.5, VerifierMultiplierSource.DEFAULT),
         MICRO,
         settings,

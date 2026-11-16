@@ -1,6 +1,5 @@
 """最終的な指摘の記録（selection.json）。"""
 
-import copy
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping
@@ -9,7 +8,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from jigane.findings.discarded_nits import LEGACY_NOT_SELECTABLE, is_legacy_nit_id
 from jigane.findings.records import (
     FindingBody,
     HistoryLoad,
@@ -23,10 +21,10 @@ from jigane.groups.viewpoints import viewpoint_fields
 from jigane.reviews.lifecycle import ReviewError
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
-from jigane.storage.store_format import Upgrade, upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 SELECTION_FILE = "selection.json"
-# selection.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
+# selection.json の形の版。保存物の形を変えたら一つ上げる
 SELECTION_FORMAT = 4
 _FINDING_PATTERN = re.compile(r"^F[1-9][0-9]*$")
 _THEME_PATTERN = re.compile(r"^B[1-9][0-9]*$")
@@ -85,21 +83,34 @@ SelectionOrigin = RoundOrigin | UnknownOrigin
 
 @dataclass(frozen=True)
 class Picked:
-    """最終的な指摘に入れる。origin が UNKNOWN_ORIGIN なのは、版 3 から移した扱い。"""
+    """最終的な指摘に入れる。origin が UNKNOWN_ORIGIN なのは、出所を記録しなかった扱い。"""
 
     origin: SelectionOrigin = UNKNOWN_ORIGIN
+
+
+class NoHoldReason(Enum):
+    """保留に理由を付けていない（理由を持たない古い記録を含む）ことを表す、ただ一つの値。"""
+
+    ABSENT = "no_hold_reason"
+
+
+# 呼ぶ側が使う名前はこれだけ。列挙の値は直接参照しない
+NO_HOLD_REASON = NoHoldReason.ABSENT
+
+HoldReason = str | NoHoldReason
 
 
 @dataclass(frozen=True)
 class Held:
-    """判断を保留にする。origin が UNKNOWN_ORIGIN なのは、出所を持たない版 3 から移した扱い。"""
+    """判断を保留にする。理由は任意。origin が UNKNOWN_ORIGIN なのは、出所を記録しなかった扱い。"""
 
     origin: SelectionOrigin = UNKNOWN_ORIGIN
+    reason: HoldReason = NO_HOLD_REASON
 
 
 @dataclass(frozen=True)
 class Objected:
-    """指摘に同意しない。理由を持つ。origin が UNKNOWN_ORIGIN なのは、版 3 から移した扱い。"""
+    """指摘に同意しない。理由を持つ。origin が UNKNOWN_ORIGIN なのは、出所を記録しなかった扱い。"""
 
     reason: str
     origin: SelectionOrigin = UNKNOWN_ORIGIN
@@ -134,9 +145,23 @@ class Selection:
             if isinstance(v, Objected)
         }
 
+    @property
+    def hold_reasons(self) -> dict[str, str]:
+        """理由を持つ保留だけ。理由の無い保留は含まない。"""
+        return {
+            n: v.reason
+            for n, v in sorted(self.verdicts.items(), key=lambda item: int(item[0][1:]))
+            if isinstance(v, Held) and isinstance(v.reason, str)
+        }
+
     def to_dict(self) -> dict[str, Any]:
         # --json の出力の契約
-        return {"picked": self.picked, "held": self.held, "objections": self.objections}
+        return {
+            "picked": self.picked,
+            "held": self.held,
+            "objections": self.objections,
+            "hold_reasons": self.hold_reasons,
+        }
 
 
 def _dump_ran_at(ran_at: RanAt) -> str | None:
@@ -159,8 +184,11 @@ def _dump_verdict(verdict: SelectionVerdict) -> dict[str, Any]:
     match verdict:
         case Picked(origin):
             return {"kind": "picked", "round": _dump_origin(origin)}
-        case Held(origin):
-            return {"kind": "held", "round": _dump_origin(origin)}
+        case Held(origin, reason):
+            dumped: dict[str, Any] = {"kind": "held", "round": _dump_origin(origin)}
+            if isinstance(reason, str):
+                dumped["reason"] = reason
+            return dumped
         case Objected(reason, origin):
             return {"kind": "objected", "reason": reason, "round": _dump_origin(origin)}
 
@@ -175,6 +203,14 @@ def _parse_origin(number: str, raw: object) -> SelectionOrigin:
     raise ReviewError(f"{SELECTION_FILE} の指摘 {number} の回の出所が読めません: {raw!r}")
 
 
+def _parse_hold_reason(number: str, raw: Mapping[str, Any]) -> HoldReason:
+    if "reason" not in raw:
+        return NO_HOLD_REASON
+    if isinstance(raw["reason"], str):
+        return raw["reason"]
+    raise ReviewError(f"{SELECTION_FILE} の指摘 {number} の保留の理由が読めません: {raw!r}")
+
+
 def _parse_verdict(number: str, raw: object) -> SelectionVerdict:
     kind = raw.get("kind") if isinstance(raw, Mapping) else None
     if isinstance(raw, Mapping) and "round" in raw:
@@ -182,7 +218,7 @@ def _parse_verdict(number: str, raw: object) -> SelectionVerdict:
         if kind == "picked":
             return Picked(origin)
         if kind == "held":
-            return Held(origin)
+            return Held(origin, _parse_hold_reason(number, raw))
         if kind == "objected" and isinstance(raw.get("reason"), str):
             return Objected(raw["reason"], origin)
     raise ReviewError(f"{SELECTION_FILE} の指摘 {number} の扱いが読めません: {raw!r}")
@@ -196,61 +232,9 @@ def dump_selection(selection: Selection) -> dict[str, Any]:
     }
 
 
-def _upgrade_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の selection.json を次の版へ移す。
-
-    版 1 は版 2 と鍵も値も同じで、版の鍵が無いだけである。
-    """
-    return copy.deepcopy(dict(raw))
-
-
-def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の selection.json を次の版へ移す。
-
-    三つの集まりを、番号ごとに一つの扱いへ畳む。二つ以上の扱いに入っている番号は
-    どれを残すか決められないので、保存物が読めない誤りとして止める。
-    """
-    held = {number: {"kind": "held"} for number in raw["held"]}
-    picked = {number: {"kind": "picked"} for number in raw["picked"]}
-    objected = {
-        number: {"kind": "objected", "reason": reason}
-        for number, reason in raw["objections"].items()
-    }
-    verdicts: dict[str, dict[str, str]] = {}
-    for number in {*picked, *held, *objected}:
-        kinds = [
-            name
-            for name, group in (("picked", picked), ("held", held), ("objections", objected))
-            if number in group
-        ]
-        if len(kinds) > 1:
-            raise ReviewError(
-                f"{SELECTION_FILE} の指摘 {number} が複数の扱いに入っています: {', '.join(kinds)}"
-            )
-        verdicts[number] = (picked | held | objected)[number]
-    return {"verdicts": verdicts}
-
-
-def _upgrade_v3(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 3 の selection.json を次の版へ移す。
-
-    扱いはそのまま写す。版 3 は出所を持たないので、出所の項目そのものを null（不明）にする。
-    """
-    return {
-        "verdicts": {
-            number: {**verdict, "round": None} if isinstance(verdict, Mapping) else verdict
-            for number, verdict in raw["verdicts"].items()
-        }
-    }
-
-
-# 保存された版から次の版への移し。parse_selection が SELECTION_FORMAT まで順に回す
-_UPGRADES: dict[int, Upgrade] = {1: _upgrade_v1, 2: _upgrade_v2, 3: _upgrade_v3}
-
-
 def parse_selection(raw: Mapping[str, Any]) -> Selection:
-    """selection.json を読む境の一か所。保存された版から今の版まで移してから型へ読む。"""
-    stored = upgrade_mapping(SELECTION_FILE, raw, current=SELECTION_FORMAT, upgrades=_UPGRADES)
+    """selection.json を読む境の一か所。今の版だけを読み、古い版は OlderFormatError で止める。"""
+    stored = require_current_version(SELECTION_FILE, raw, current=SELECTION_FORMAT)
     return Selection({n: _parse_verdict(n, v) for n, v in stored["verdicts"].items()})
 
 
@@ -392,16 +376,9 @@ def _require_unique(known: _Known, numbers: Iterable[str]) -> None:
 
 
 def _unknown_error(known: _Known, tokens: list[str]) -> ReviewError:
-    """番号を受け付けない誤り。古い記録の候補の番号は、知らないのでなく選べないと分けて言う。"""
-    legacy = [t for t in tokens if is_legacy_nit_id(t)]
-    unknown = [t for t in tokens if not is_legacy_nit_id(t)]
-    parts: list[str] = []
-    if legacy:
-        parts.append(f"{LEGACY_NOT_SELECTABLE}: {', '.join(legacy)}")
-    if unknown:
-        note = "" if known.history_readable else _HISTORY_UNREADABLE_NOTE
-        parts.append(f"知らない指摘の番号です: {', '.join(unknown)}{note}")
-    return ReviewError("。".join(parts))
+    """番号を受け付けない誤り。"""
+    note = "" if known.history_readable else _HISTORY_UNREADABLE_NOTE
+    return ReviewError(f"知らない指摘の番号です: {', '.join(tokens)}{note}")
 
 
 def _locate(directory: Path, inputs: PastRoundInputs) -> _Known:
@@ -472,32 +449,29 @@ class Removal:
     via_theme: bool
 
 
+class LostKind(Enum):
+    """消えた理由が、異議のものか保留のものか。値は注に出す語。"""
+
+    OBJECTION = "異議"
+    HOLD = "保留"
+
+
 @dataclass(frozen=True)
 class LostReason:
-    """置き換えで消えた異議の理由。"""
+    """置き換えで消えた異議または保留の理由。"""
 
     number: str
+    kind: LostKind
     reason: str
 
 
 _KindOfVerdict = type[Picked] | type[Held] | type[Objected]
 
-
-@dataclass(frozen=True)
-class _KindSpec:
-    """扱いの種類ごとの作り方と、外せない番号を拒むときの文の頭。"""
-
-    build: Callable[[RoundOrigin, str], SelectionVerdict]
-    mismatch_head: str
-
-
-# reason を使うのは Objected だけ。他の作り方は受け取って捨てる
-_KINDS: dict[_KindOfVerdict, _KindSpec] = {
-    Picked: _KindSpec(lambda origin, _reason: Picked(origin), "pickedではない指摘の番号です"),
-    Held: _KindSpec(lambda origin, _reason: Held(origin), "heldではない指摘の番号です"),
-    Objected: _KindSpec(
-        lambda origin, reason: Objected(reason, origin), "異議の無い指摘の番号です"
-    ),
+# 外せない番号を拒むときの文の頭
+_MISMATCH_HEAD: dict[_KindOfVerdict, str] = {
+    Picked: "pickedではない指摘の番号です",
+    Held: "heldではない指摘の番号です",
+    Objected: "異議の無い指摘の番号です",
 }
 
 
@@ -505,17 +479,17 @@ def _replace(
     known: _Known,
     selection: Selection,
     ids: list[str],
-    kind: _KindOfVerdict,
-    reason: str = "",
+    make: Callable[[RoundOrigin], SelectionVerdict],
 ) -> list[LostReason]:
-    """番号の扱いを kind に置き換える。reason は kind が Objected のときの異議の理由。"""
-    build = _KINDS[kind].build
+    """番号の扱いを make が作る扱いに置き換える。消える異議と保留の理由を返す。"""
     lost: list[LostReason] = []
     for number in ids:
         previous = selection.verdicts.get(number)
         if isinstance(previous, Objected):
-            lost.append(LostReason(number, previous.reason))
-        selection.verdicts[number] = build(known.origins[number], reason)
+            lost.append(LostReason(number, LostKind.OBJECTION, previous.reason))
+        elif isinstance(previous, Held) and isinstance(previous.reason, str):
+            lost.append(LostReason(number, LostKind.HOLD, previous.reason))
+        selection.verdicts[number] = make(known.origins[number])
     return lost
 
 
@@ -527,7 +501,7 @@ def _remove(
     F の番号は一つでも扱いが違えば何も外さず ReviewError にする。
     B の所属は扱いが合うものだけを外し、一件も外せなければ ReviewError にする。
     """
-    mismatch = _KINDS[kind].mismatch_head
+    mismatch = _MISMATCH_HEAD[kind]
     direct, members = _split_tokens(known, tokens)
     wrong = [n for n in direct if not isinstance(selection.verdicts.get(n), kind)]
     if wrong:
@@ -579,12 +553,27 @@ def hold(
     directory: Path,
     tokens: list[str],
     read_inputs: PastRoundReader,
+    reason: HoldReason = NO_HOLD_REASON,
 ) -> tuple[Selection, list[LostReason]]:
+    """前の扱いを held に置き換える。reason は並べた全指摘に同じものを記録する。"""
     with review_lock(directory):
+        if isinstance(reason, str) and not reason.strip():
+            raise ReviewError(
+                "保留の理由が空です。理由を書くか、--reason を付けずに実行してください。"
+            )
         known = _locate(directory, read_inputs())
         ids = _expand(known, tokens)
         selection = load_selection(directory)
-        lost = _replace(known, selection, ids, Held)
+        # GUI は理由を渡せず、CLI で付けた理由を保留の指摘への再度の hold で消さないため
+        keeps_reason = reason is NO_HOLD_REASON
+        targets = [
+            n for n in ids if not (keeps_reason and isinstance(selection.verdicts.get(n), Held))
+        ]
+        lost = _replace(known, selection, targets, lambda origin: Held(origin, reason))
+        # 同じ理由での書き換えでは何も消えない
+        lost = [
+            item for item in lost if not (item.kind is LostKind.HOLD and item.reason == reason)
+        ]
         save_selection(directory, selection)
         return selection, lost
 
@@ -616,7 +605,7 @@ def object_to(
             raise _unknown_error(known, [token])
         _require_unique(known, [token])
         selection = load_selection(directory)
-        lost = _replace(known, selection, [token], Objected, reason)
+        lost = _replace(known, selection, [token], lambda origin: Objected(reason, origin))
         save_selection(directory, selection)
         return selection, lost
 

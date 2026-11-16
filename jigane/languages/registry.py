@@ -1,6 +1,5 @@
 import sys
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Callable, Sequence
 from fnmatch import fnmatchcase
 from importlib.metadata import entry_points
 from importlib.resources.abc import Traversable
@@ -16,7 +15,7 @@ from jigane.languages.data_places import (
     PLUGIN_QUERIES_PARTS,
     descend,
 )
-from jigane.languages.enabled import ENABLED_FILE, EnabledFileError, load_enabled
+from jigane.languages.enabled import ENABLED_FILE, EnabledFileError, OlderRecordError, load_enabled
 from jigane.languages.java import JavaAdapter
 from jigane.languages.plugin import (
     PLUGIN_API_VERSION,
@@ -36,6 +35,7 @@ from jigane.languages.states import (
 )
 from jigane.languages.swift import SwiftAdapter
 from jigane.storage.store import data_home
+from jigane.text.path_suffix import suffix_of
 from jigane.text.terminal import sanitize_text
 
 
@@ -68,23 +68,12 @@ class LanguagePluginUnavailableError(Exception):
 _states: tuple[LanguageState, ...] | None = None
 
 
-class _GrammarBound:
-    """追加の言語のアダプタを包み、照合に通った文法の対象を結ぶ。他の口は包んだアダプタへ委ねる。"""
-
-    def __init__(self, inner: LanguageAdapter, target: grammars.GrammarTarget) -> None:
-        self._inner = inner
-        self.grammar_target = target
-
-    def __getattr__(self, name: str) -> object:
-        # 写しや再構成の途中は _inner がまだ無い。引くと __getattr__ が自分を呼び続ける
-        if name == "_inner":
-            raise AttributeError(name)
-        return getattr(self._inner, name)
-
-
 def _discovered_states() -> tuple[LanguageState, ...]:
     try:
         enabled = load_enabled(data_home() / ENABLED_FILE)
+    except OlderRecordError as error:
+        # 文が消す手順まで示すので、外す手順は足さない
+        raise LanguagePluginUnavailableError(str(error)) from error
     except EnabledFileError as error:
         raise LanguagePluginUnavailableError(
             f"{error}\n外す手順: {ENABLED_FILE} を直すか、消してからもう一度実行してください"
@@ -144,8 +133,8 @@ def _check_grammars(states: tuple[LanguageState, ...]) -> tuple[LanguageState, .
                     )
                 )
         else:
-            bound = replace(plugin, adapter=_GrammarBound(plugin.adapter, target))  # type: ignore[arg-type]
-            checked.append(LanguageReady(bound))
+            grammars.bind(plugin.adapter, target)
+            checked.append(LanguageReady(plugin))
     return tuple(checked)
 
 
@@ -161,13 +150,18 @@ def set_states(value: tuple[LanguageState, ...] | None) -> None:
     """状態を差し替える。None で次の `states()` が求め直す。テストが偽の状態を差し込む。"""
     global _states  # noqa: PLW0603 -- 一度だけ求める値を、テストが偽の状態で差し替える口
     _states = value
+    # 登録は照合に通った状態に結ぶ物なので、状態を求め直すときに捨てる
+    grammars.unbind_all()
 
 
-def require_ready() -> None:
+def require_ready(
+    detail_of: Callable[[LanguageUnavailable], str] = lambda state: state.detail,
+) -> None:
     """どの言語の文法も無い、文法が合わない、または有効にした追加の言語に使えないものがあれば止める。
 
     一部の言語の文法が無いだけなら止めず、無い言語の名前を標準エラーに知らせる。
-    起動のときに副コマンドの前で呼ぶ。
+    起動のときに副コマンドの前で呼ぶ。detail_of は、使えない言語の理由の文を作る。
+    languages は core で commands を読めないので、案内先の URL を足す表示側が渡す。
     """
     root = grammars.cache_root()
     current = states()
@@ -190,7 +184,7 @@ def require_ready() -> None:
     failed = [state for state in current if isinstance(state, LanguageUnavailable)]
     if failed:
         lines = [
-            f"言語 {state.name} を使えません（{state.reason_kind}）: {state.detail}\n"
+            f"言語 {state.name} を使えません（{state.reason_kind}）: {detail_of(state)}\n"
             f"外す手順: jigane languages disable {state.name}"
             for state in failed
         ]
@@ -289,12 +283,14 @@ def grammar_target_named(grammar: str) -> grammars.GrammarTarget:
     return grammars.BuiltinGrammar(grammar)
 
 
-def _suffix_of(path: str) -> str:
-    return PurePosixPath(path.replace("\\", "/")).suffix.lower()
-
-
 def adapter_for(path: str) -> LanguageAdapter | None:
-    suffix = _suffix_of(path)
+    """拡張子だけでアダプタを引く。ビルドのファイルかは見ない。
+
+    パスから言語を引く関数は役割が違う。`parsing_adapter_for` はビルドのファイルを除いて引き、
+    `is_parsed_or_build` は引けるかビルドのファイルかを真偽で返す。
+    `is_test_path` と `is_build_path` は拡張子ではなく、全アダプタのパターンでパスを分類する。
+    """
+    suffix = suffix_of(path)
     for plugin in _all_plugins():
         if suffix in plugin.adapter.suffixes:
             return plugin.adapter
@@ -320,7 +316,7 @@ def language_for_suffix(path: str) -> LanguageReady | LanguageGrammarAbsent | No
     当たらない、有効でない、または使えない言語（`LanguageUnavailable`）なら None。
     `states()` を読むだけで、文法の確認は呼び直さない。本体の内側の口で、プラグインには出さない。
     """
-    suffix = _suffix_of(path)
+    suffix = suffix_of(path)
     for state in states():
         if isinstance(state, (LanguageReady, LanguageGrammarAbsent)):
             if suffix in state.plugin.adapter.suffixes:
@@ -346,6 +342,7 @@ COMMON_BUILD_PATH_PATTERNS = (
 
 
 def is_test_path(path: str, adapters: Sequence[LanguageAdapter]) -> bool:
+    """テストのディレクトリ名かファイル名のパターンに当たるか。言語は問わず渡したアダプタ全部で見る。"""
     parts = PurePosixPath(path.replace("\\", "/")).parts
     directories = collect_patterns(adapters, "test_directory_names")
     files = collect_patterns(adapters, "test_file_patterns")
@@ -353,6 +350,7 @@ def is_test_path(path: str, adapters: Sequence[LanguageAdapter]) -> bool:
 
 
 def is_build_path(path: str, adapters: Sequence[LanguageAdapter]) -> bool:
+    """ビルドと CI の定義か。拡張子を持たないため、渡したアダプタ全部と共通のパターンで見る。"""
     # pyproject.toml など、ビルドの定義は言語の拡張子を持たない。
     # そのため言語を問わず全アダプタのパターンで判定する
     posix = path.replace("\\", "/")

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fakes import STARTED_AT
 
 from jigane import commands
 from jigane.commands import failures
@@ -16,6 +17,7 @@ from jigane.storage.atomic_write import StoredFileInUseError
 from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
 from jigane.storage.store import ReviewId, ReviewKind
+from jigane.storage.symlink_guard import StoredFileSymlinkError
 
 MINE = ReviewId("o", "r", "mine", ReviewKind.RANGE)
 
@@ -23,9 +25,10 @@ LISTED = [
     ReviewError("r"),
     ReviewExistsError(MINE),
     CommandError(["tool", "x"], "e"),
-    ClaudeInvocationError("c", parse_record({}, 0.5)),
+    ClaudeInvocationError("c", parse_record({}, 0.5, started_at=STARTED_AT)),
     LockTimeoutError("l"),
     StoredFileInUseError("u"),
+    StoredFileSymlinkError(Path("p")),
     SecurityConfigError("s"),
     DiscoveryError(MACRO, "m"),
     CatalogError("c"),
@@ -53,6 +56,10 @@ def test_every_listed_type_maps_to_a_specific_kind(error: Exception) -> None:
 )
 def test_discovery_failure_title_names_the_group(group: GroupId, title: str) -> None:
     assert failures.describe(DiscoveryError(group, "x")).title == title
+
+
+def test_stored_file_symlink_maps_to_its_own_kind_before_os_error() -> None:
+    assert failures.describe(StoredFileSymlinkError(Path("p"))).kind == "stored_file_symlink"
 
 
 def test_kinds_are_distinct_per_type() -> None:

@@ -1,4 +1,3 @@
-import copy
 import json
 import logging
 import re
@@ -18,17 +17,11 @@ from jigane.findings.records import (
     HISTORY_FILE,
     GroupResult,
     HistoryCorruptError,
-    HistoryFile,
     HistoryRound,
     ReplacedRun,
     ThemeUpdate,
-    _upgrade_finding_v1,
-    _upgrade_finding_v2,
-    _upgrade_history_v1,
-    _upgrade_history_v2,
     load_history_checked,
     merge_group,
-    read_findings_json,
     read_history_json,
     read_stored_state,
 )
@@ -64,9 +57,12 @@ def _finding(number: int) -> dict[str, Any]:
     }
 
 
-def v1_history(findings: list[dict[str, Any]]) -> dict[str, Any]:
-    """format を持たない版 1 の履歴。"""
-    return {"groups": {"macro": [{"ran_at": "t1", "findings": findings}]}}
+def current_history(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """今の版の履歴。"""
+    return {
+        "format": FINDINGS_FORMAT,
+        "groups": {"macro": [{"ran_at": "t1", "findings": findings}]},
+    }
 
 
 def test_replaced_findings_move_to_the_history_with_the_run_time(tmp_path: Path) -> None:
@@ -284,20 +280,6 @@ def test_history_file_round_trips_through_json() -> None:
     assert parsed.to_json() == raw
 
 
-def test_history_file_writes_only_the_current_nit_form() -> None:
-    legacy = {
-        "id": "F1",
-        "severity": "nit",
-        "viewpoint": "discarded",
-        "claim": "A",
-        "discard_kind": "other",
-    }
-    written = read_history_json(v1_history([legacy]))
-    [finding] = written.groups[MACRO][0].to_json()["findings"]
-    assert "discard_kind" not in finding
-    assert finding["nit_reason"]["kind"] == "other"
-
-
 @pytest.mark.whole_tree
 def test_only_findings_module_reads_the_history_file() -> None:
     root = Path(__file__).parent.parent / "jigane"
@@ -305,57 +287,9 @@ def test_only_findings_module_reads_the_history_file() -> None:
     assert readers == ["findings/records.py"]
 
 
-def _legacy_nit() -> dict[str, Any]:
-    return {
-        "id": "F1",
-        "viewpoint": "discarded",
-        "claim": "A",
-        "discard_kind": "other",
-        "concern": "C",
-    }
-
-
-def test_from_json_migrates_legacy_nit_fields_without_touching_the_input() -> None:
-    raw = v1_history([_legacy_nit()])
-    before = copy.deepcopy(raw)
-    parsed = read_history_json(raw)
-    assert raw == before
-    migrated = parsed.groups[MACRO][0].findings[0].to_json()
-    assert "discard_kind" not in migrated
-    assert "concern" not in migrated
-    assert migrated["nit_reason"]["kind"] == "other"
-    parsed.to_json()
-
-
-def test_append_history_writes_legacy_findings_in_the_current_form(tmp_path: Path) -> None:
-    merge_group(tmp_path, MACRO, group_result([_legacy_nit()]), None)
-    merge_group(tmp_path, MACRO, GroupResult(()), None)
-    written = json.loads((tmp_path / HISTORY_FILE).read_text(encoding="utf-8"))
-    stored = written["groups"]["macro"][0]["findings"][0]
-    assert "discard_kind" not in stored
-    assert "concern" not in stored
-    assert "nit_reason" in stored
-
-
-def test_v1_history_moves_to_the_current_form() -> None:
-    raw = v1_history([{"id": "F1", "adjudication": None}])
-    moved = _upgrade_history_v2(_upgrade_history_v1(raw))
-    assert moved["format"] == 3
-    [finding] = moved["groups"]["macro"][0]["findings"]
-    assert finding == _upgrade_finding_v2(_upgrade_finding_v1({"id": "F1", "adjudication": None}))
-    assert HistoryFile.from_json(moved).to_json() == {**moved, "format": FINDINGS_FORMAT}
-
-
-def test_findings_json_and_history_share_the_finding_upgrade() -> None:
-    legacy = _legacy_nit()
-    in_history = read_history_json(v1_history([legacy])).groups[MACRO][0].findings[0]
-    in_findings = read_findings_json({"groups": {"macro": [legacy]}}).groups[MACRO][0]
-    assert in_history == in_findings
-
-
 @pytest.mark.parametrize("version", [0, 5, 99, "3", 3.0, True, None])
 def test_an_unsupported_history_version_fails_with_a_clear_error(version: object) -> None:
-    raw = {**v1_history([]), "format": version}
+    raw = {**current_history([]), "format": version}
     with pytest.raises(ReviewError, match=re.escape(HISTORY_FILE)):
         read_history_json(raw)
 
@@ -372,23 +306,11 @@ def test_a_history_of_an_unknown_version_is_a_warning_and_is_not_overwritten(
     assert json.loads(path.read_text(encoding="utf-8"))["format"] == 99
 
 
-def test_reading_a_v1_history_does_not_write_back_and_saving_writes_the_current_version(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / HISTORY_FILE
-    path.write_text(json.dumps(v1_history([{"id": "F1"}])), encoding="utf-8")
-    original = path.read_text(encoding="utf-8")
-    assert load_history_checked(tmp_path).warnings == ()
-    assert path.read_text(encoding="utf-8") == original
-    merge_group(tmp_path, MACRO, group_result([_finding(2)]), None)
-    merge_group(tmp_path, MACRO, GroupResult(()), None)
-    assert json.loads(path.read_text(encoding="utf-8"))["format"] == FINDINGS_FORMAT
-
-
-def test_a_version_1_history_with_an_unknown_group_reads_as_corrupt(tmp_path: Path) -> None:
-    # 移しは群の名前を弾かない。型へ読む段で、現行に無い群の名前は壊れた履歴になる
+def test_a_current_history_with_an_unknown_group_reads_as_corrupt(tmp_path: Path) -> None:
+    # 版の検査は群の名前を弾かない。型へ読む段で、現行に無い群の名前は壊れた履歴になる
     stored = {
-        "groups": {"no_such_group": [{"ran_at": "2026-01-01T00:00:00+00:00", "findings": []}]}
+        "format": FINDINGS_FORMAT,
+        "groups": {"no_such_group": [{"ran_at": "2026-01-01T00:00:00+00:00", "findings": []}]},
     }
     (tmp_path / HISTORY_FILE).write_text(json.dumps(stored), encoding="utf-8")
     loaded = load_history_checked(tmp_path)
@@ -483,3 +405,18 @@ def test_an_undoing_operation_names_the_removed_finding_and_hides_the_stale_body
     assert "古い選択 1 件（今の指摘に無い番号）: F1。本文は jigane show で確かめられます" in out
     assert "claim1" not in out
     assert "body1" not in out
+
+
+@pytest.mark.parametrize("stored", [{"groups": {}}, {"format": 3, "groups": {}}])
+def test_an_older_history_is_a_warning_with_the_rebuild_hint_and_is_not_overwritten(
+    tmp_path: Path, stored: dict[str, Any]
+) -> None:
+    path = tmp_path / HISTORY_FILE
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    original = path.read_text(encoding="utf-8")
+    [warning] = load_history_checked(tmp_path).warnings
+    assert "jigane new" in warning.description()
+    merge_group(tmp_path, MACRO, group_result([_finding(1)]), None)
+    with pytest.raises(HistoryCorruptError):
+        merge_group(tmp_path, MACRO, GroupResult(()), None)
+    assert path.read_text(encoding="utf-8") == original

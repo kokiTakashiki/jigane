@@ -6,8 +6,6 @@
 #   黙って落ちるコマンドがあっても、どの段で止まったかが出力に残る。
 # [[task]] の posix_commands は、commands の後に Makefile（macOS・Linux）にだけ続けて走らせるコマンド。
 #   justfile（Windows）には出さない。POSIX の仕組みに頼る試験の置き場（tests_posix）を走らせるのに使う。
-# [[task]] の omit_from_public_copy = true は、公開の写しの入口に出さない作業。
-#   scripts/export_public.py が、写しの entrypoints.toml からこの作業を外して入口を作り直す。
 # [[task]] の commands の中の置換:
 #   {args}           呼び出し側が渡した引数（make は ARGS="..."、just は後ろに続けた引数）
 #   {invocation_dir} 呼び出した場所
@@ -28,13 +26,25 @@ description = "jigane の副コマンドを、呼び出した場所で走らせ�
 commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane {args}"]
 
 [[task]]
+name = "debug-errors"
+description = "jigane が返す失敗の種類を一覧する（引数はそのまま jigane debug errors へ通す。--json で機械が読む形。出力は暫定）"
+commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane debug errors {args}"]
+
+[[task]]
+name = "debug-review-id"
+description = "レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）"
+commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane debug review-id {args}"]
+
+[[task]]
 name = "setup"
 show_commands = true
 description = "依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）"
 commands = [
   "uv sync --locked",
+  "uv run --locked python scripts/grammar_bundle_cache.py seed",
   "uv run --locked python -m jigane.languages.fetch_main fetch",
   "uv run --locked python scripts/fetch_example_grammars.py",
+  "uv run --locked python scripts/grammar_bundle_cache.py save",
   "uv run --locked python scripts/gate_stamp.py install-hook",
 ]
 

@@ -10,8 +10,15 @@ from dataclasses import dataclass
 
 from jigane.languages.api import capabilities
 from jigane.languages.base import LanguageAdapter
+from jigane.languages.interface_keys import INTERFACE_KEYS
 from jigane.languages.plugin import LanguagePlugin
-from jigane.skills.policy_figures import LANGUAGE_AGNOSTIC, REGISTRY, FigureKey, PolicyFigure
+from jigane.skills.policy_figures import (
+    LANGUAGE_AGNOSTIC,
+    REGISTRY,
+    FigureKey,
+    PolicyFigure,
+    implements_interface,
+)
 
 
 def _interfaces() -> tuple[type, ...]:
@@ -23,7 +30,7 @@ def _interfaces() -> tuple[type, ...]:
         and value is not LanguageAdapter
         and LanguageAdapter in value.__mro__
     ]
-    return tuple(sorted(found, key=lambda interface: interface.__name__))
+    return tuple(sorted(found, key=lambda interface: INTERFACE_KEYS[interface]))
 
 
 INTERFACES: tuple[type, ...] = _interfaces()
@@ -31,7 +38,7 @@ INTERFACES: tuple[type, ...] = _interfaces()
 
 @dataclass(frozen=True)
 class InterfaceSupport:
-    """口一つへの対応。interface は Protocol の名前。"""
+    """口一つへの対応。interface は固定の識別子（`INTERFACE_KEYS` のキー）。"""
 
     interface: str
     supported: bool
@@ -66,14 +73,13 @@ class LanguageSupport:
 
 
 def _supports(plugin: LanguagePlugin, figure: PolicyFigure) -> bool:
-    interface = figure.interface
-    return not isinstance(interface, type) or isinstance(plugin.adapter, interface)
+    return implements_interface(plugin.adapter, figure.interface)
 
 
 def support_of(plugin: LanguagePlugin) -> LanguageSupport:
     adapter = plugin.adapter
     interfaces = tuple(
-        InterfaceSupport(interface.__name__, isinstance(adapter, interface))
+        InterfaceSupport(INTERFACE_KEYS[interface], isinstance(adapter, interface))
         for interface in INTERFACES
     )
     figures = tuple(

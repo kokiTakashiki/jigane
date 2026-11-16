@@ -1,0 +1,23 @@
+id: no-git-argv-outside-entrance
+language: python
+severity: error
+message: git の argv は jigane.git.invocation と jigane.git.command_line の入口（build_git_command、git_command、git_version）が組む。先頭が "git" のリストやタプルをここで組まず、入口を通す。
+# 製品のコード（jigane/）だけに掛ける。scripts/ は check_egress が別に見ており、tests/ は検査の対象外
+note: 拾うのは、先頭が文字列リテラル "git" のリストとタプルだけである。変数に入れた "git"、"git.exe"、shutil.which で得た実行ファイル、subprocess に文字列で渡す形は拾わない。
+ignores:
+  - tests/**
+  - tests_posix/**
+  - tests_windows/**
+  - scripts/**
+  - docs/**
+  # 入口の定義そのもの
+  - jigane/git/invocation.py
+  - jigane/git/command_line.py
+rule:
+  kind: string
+  regex: ^[rRbBfFuU]{0,2}["']git["']$
+  nthChild: 1
+  inside:
+    any:
+      - kind: list
+      - kind: tuple

@@ -31,7 +31,8 @@ from jigane.git.tree_files import read_tree_bytes, work_files
 from jigane.judgment_map.classification import matches_any
 from jigane.judgment_map.configuration import load_config
 from jigane.languages import registry
-from jigane.languages.base import StringConstant, StringConstantReader
+from jigane.languages.base import TopLevelStringConstant, TopLevelStringConstantExtractor
+from jigane.languages.kinds import LocationKind
 from jigane.languages.python_ast import read_python
 from jigane.sequence.index import Member, TypeInfo, TypeKey
 from jigane.sequence.indexes import Indexes
@@ -84,61 +85,6 @@ class Trace(StrEnum):
                 return CandidateKind.ONE_STEP
             case Trace.ACCESSOR_CALLER:
                 return CandidateKind.TWO_STEP
-            case _ as unreachable:
-                assert_never(unreachable)
-
-
-class LocationKind(StrEnum):
-    """引き当てた先の種類の唯一の定義。行を持つかどうかも種類から決まる。"""
-
-    # 型の宣言（TypeKind と値が揃う）
-    CLASS = "class"
-    STRUCT = "struct"
-    RECORD = "record"
-    INTERFACE = "interface"
-    ENUM = "enum"
-    DELEGATE = "delegate"
-    MODULE = "module"
-    # 型の中、またはモジュール直下の宣言（MemberKind と値が揃う。FUNCTION はモジュール直下の関数）
-    FUNCTION = "function"
-    METHOD = "method"
-    CONSTRUCTOR = "constructor"
-    FIELD = "field"
-    PROPERTY = "property"
-    PARAMETER = "parameter"
-    VARIABLE = "variable"
-    # 宣言以外
-    FILE = "file"
-    DIRECTORY = "directory"
-    SUBCOMMAND = "subcommand"
-    OPTION = "option"
-    STORED_FILE = "stored_file"
-
-    @property
-    def has_line(self) -> bool:
-        match self:
-            case LocationKind.FILE | LocationKind.DIRECTORY:
-                return False
-            case (
-                LocationKind.CLASS
-                | LocationKind.STRUCT
-                | LocationKind.RECORD
-                | LocationKind.INTERFACE
-                | LocationKind.ENUM
-                | LocationKind.DELEGATE
-                | LocationKind.MODULE
-                | LocationKind.FUNCTION
-                | LocationKind.METHOD
-                | LocationKind.CONSTRUCTOR
-                | LocationKind.FIELD
-                | LocationKind.PROPERTY
-                | LocationKind.PARAMETER
-                | LocationKind.VARIABLE
-                | LocationKind.SUBCOMMAND
-                | LocationKind.OPTION
-                | LocationKind.STORED_FILE
-            ):
-                return True
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -346,7 +292,7 @@ class _World:
         self._indexes: Indexes | None = None
         self._edges: _Edges | None = None
         self._texts: dict[str, str] = {}
-        self._constants: dict[str, tuple[StringConstant, ...]] = {}
+        self._constants: dict[str, tuple[TopLevelStringConstant, ...]] = {}
 
     def is_untracked(self, path: str) -> bool:
         return path in self._untracked
@@ -357,13 +303,13 @@ class _World:
             self._indexes = Indexes(self.root, self.source_paths)
         return self._indexes
 
-    def constants(self, path: str) -> tuple[StringConstant, ...]:
+    def constants(self, path: str) -> tuple[TopLevelStringConstant, ...]:
         """ファイル直下の文字列定数。読む口を持たない言語のファイルは空。"""
         if path not in self._constants:
             adapter = registry.adapter_for(path)
             self._constants[path] = (
-                tuple(adapter.string_constants(self.text(path)))
-                if isinstance(adapter, StringConstantReader)
+                tuple(adapter.top_level_string_constants(self.text(path)))
+                if isinstance(adapter, TopLevelStringConstantExtractor)
                 else ()
             )
         return self._constants[path]

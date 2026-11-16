@@ -1,6 +1,5 @@
 """実装と方針のスキルが共有する、候補の正規化と実行の保存。"""
 
-import copy
 import json
 import logging
 import math
@@ -42,16 +41,11 @@ from jigane.groups.definitions import GroupId
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude, finding_model
 from jigane.llm_runs.claude import StoredInvocationRecord
-from jigane.llm_runs.cost import BudgetOutcome, Cost, total_by_source
+from jigane.llm_runs.cost import Cost, total_by_source
 from jigane.llm_runs.finding_model import Finding
 from jigane.llm_runs.launch_failure import (
-    LEGACY_FULL_SHAPE_ROLE,
-    FailureRound,
-    FailureScope,
     RerunKind,
-    RunRecordKind,
     SelectedFailure,
-    Stage,
     StoredFailure,
     StoredInvocation,
     as_earlier,
@@ -68,7 +62,7 @@ from jigane.reviews.lifecycle import Review
 from jigane.skills.input_budget import StoredBudgetStop
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
-from jigane.storage.store_format import upgrade_mapping
+from jigane.storage.store_format import require_current_version
 
 LOGGER = logging.getLogger(__name__)
 
@@ -582,7 +576,7 @@ class RunsFile:
 
     版を知らない読み書きなので、本体では load_runs と dump_runs だけが
     from_json と to_json を呼ぶ。
-    版の検査と移しはその二つが受け持つ。
+    版の検査はその二つが受け持つ。
     """
 
     groups: Mapping[GroupId, GroupRun]
@@ -600,66 +594,13 @@ class RunsFile:
         return {group: item.to_json() for group, item in self.groups.items()}
 
 
-# runs.json の形の版。保存物の形を変えたら一つ上げ、_UPGRADES に前の版からの移しを足す
-RUNS_FORMAT = 3
-
-
-def _upgrade_failure_v1(record: dict[str, Any]) -> None:
-    """launch_failures の一件を今の版の鍵へ埋める。record は書き換える。"""
-    record.setdefault("cost_source", "measured")
-    record.setdefault("scope", FailureScope.LAUNCH.value)
-    record.setdefault("round", FailureRound.CURRENT.value)
-    record.setdefault("ran_at", None)
-    if (
-        record["scope"] == FailureScope.LAUNCH.value
-        and record["stage"] == Stage.DISCOVERY.value
-        and record["role"] is None
-    ):
-        # 廃止した四回の方針の形は、発見の失敗を役なしで書いた
-        record["role"] = LEGACY_FULL_SHAPE_ROLE
-    if record["scope"] == FailureScope.MISSING_CANDIDATES.value:
-        # 候補の番号を持たない古い記録は、番号が分からないので空の列にする
-        record.setdefault("candidates", [])
-
-
-def _upgrade_invocation_v1(row: dict[str, Any]) -> None:
-    """invocations の一行を今の版の鍵へ埋める。row は書き換える。"""
-    row.setdefault("cost_source", "measured")
-    # 旧い旗は、上限を持たない行のうち費用が上限を超えた成功の行だけが持っていた
-    if row.pop("over_budget", False) and "max_budget_usd" not in row:
-        row["budget_outcome"] = BudgetOutcome.EXCEEDED_AFTER_SUCCESS.value
-
-
-def _upgrade_v1(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 1 の runs.json を次の版へ移す。鍵の欠けは、移す前の読み口が使っていた値で埋める。"""
-    upgraded = copy.deepcopy(dict(raw))
-    macro_run = upgraded.get(GroupId.MACRO.value)
-    if macro_run is not None:
-        # 欄の無い方針の記録は成功した回だけのもの。launch_failures を足す書き手は必ず欄を付けた
-        macro_run.setdefault("record_kind", RunRecordKind.SUCCEEDED.value)
-    for run in upgraded.values():
-        for row in run.get("invocations") or ():
-            _upgrade_invocation_v1(row)
-        for record in run.get("launch_failures") or ():
-            _upgrade_failure_v1(record)
-    return upgraded
-
-
-def _upgrade_v2(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """版 2 の runs.json を次の版へ移す。行の欄は変わらないので、足す鍵は無い。"""
-    return copy.deepcopy(dict(raw))
-
-
-# 保存された版から次の版への移し。load_runs が RUNS_FORMAT まで順に回す
-_UPGRADES: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
-    1: _upgrade_v1,
-    2: _upgrade_v2,
-}
+# runs.json の形の版。保存物の形を変えたら一つ上げる。古い版は読まずに止める
+RUNS_FORMAT = 4
 
 
 def load_runs(raw: Mapping[str, Any]) -> RunsFile:
-    """runs.json を読む境の一か所。保存された版から今の版まで移してから、今の版の型へ読む。"""
-    stored = upgrade_mapping(RUNS_FILE, raw, current=RUNS_FORMAT, upgrades=_UPGRADES)
+    """runs.json を読む境の一か所。今の版以外は止め、今の版の型へ読む。"""
+    stored = require_current_version(RUNS_FILE, raw, current=RUNS_FORMAT)
     return RunsFile.from_json(stored)
 
 

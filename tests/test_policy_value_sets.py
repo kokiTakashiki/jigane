@@ -5,7 +5,7 @@ import pytest
 from review_fakes import make_review
 from test_policy_classes import whole
 
-from jigane.languages.base import ComparisonKind, DefinitionKind, StringComparison
+from jigane.languages.base import ComparisonKind, DefinitionKind, StringLiteralComparison
 from jigane.policy_materials import value_sets
 from jigane.policy_materials.value_sets import (
     FileCounts,
@@ -13,7 +13,7 @@ from jigane.policy_materials.value_sets import (
     ValueSetRow,
 )
 from jigane.reviews.lifecycle import Review
-from jigane.reviews.review_formats import PAIRS_FILE
+from jigane.reviews.review_formats import PAIRS_FILE, PAIRS_FORMAT
 from jigane.skills import policy_value_sets
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.macro_principles_run import estimate_policy
@@ -189,7 +189,7 @@ def test_touch_cell_definition_added(tmp_path: Path) -> None:
 
 
 def test_touch_cell_comparison_added(tmp_path: Path) -> None:
-    row = _row(comparisons=(StringComparison("aa", ComparisonKind.EQUALS, "c.py", 5),))
+    row = _row(comparisons=(StringLiteralComparison("aa", ComparisonKind.EQUALS, "c.py", 5),))
     assert policy_value_sets._touch_cell(row, {"c.py": {5: 'v == "aa"'}}, tmp_path) == "比較"
 
 
@@ -216,7 +216,7 @@ def test_touch_cell_does_not_count_definition_line_value_as_reference(tmp_path: 
 
 
 def test_touch_cell_joins_in_definition_reference_comparison_order(tmp_path: Path) -> None:
-    row = _row(comparisons=(StringComparison("aa", ComparisonKind.EQUALS, "c.py", 5),))
+    row = _row(comparisons=(StringLiteralComparison("aa", ComparisonKind.EQUALS, "c.py", 5),))
     added = {"d.py": {1: "X"}, "c.py": {5: 'v == "aa"'}, "u.py": {2: "f('bb')"}}
     assert policy_value_sets._touch_cell(row, added, tmp_path) == "定義、参照、比較"
 
@@ -225,7 +225,9 @@ def test_added_lines_read_from_the_saved_diff(tmp_path: Path) -> None:
     review = make_review(tmp_path, ["a.py"], kind=ReviewKind.RANGE, base_tree=tmp_path / "base")
     directory = review.id.directory()
     directory.mkdir(parents=True)
-    (directory / PAIRS_FILE).write_text(json.dumps([["a.py", "a.py"]]), encoding="utf-8")
+    (directory / PAIRS_FILE).write_text(
+        json.dumps({"format": PAIRS_FORMAT, "pairs": [["a.py", "a.py"]]}), encoding="utf-8"
+    )
     diff = "--- a/a.py\n+++ b/a.py\n@@ -1,3 +1,4 @@\n keep\n-old\n+new\n+newer\n tail\n"
     (directory / "changes.diff").write_text(diff, encoding="utf-8")
     assert policy_value_sets._added_lines(review) == {"a.py": {2: "new", 3: "newer"}}

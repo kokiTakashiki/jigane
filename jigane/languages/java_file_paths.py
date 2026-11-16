@@ -7,9 +7,9 @@
 
 from tree_sitter import Node
 
-from jigane.languages.base import FilePathPattern, FileUsage
+from jigane.languages.base import FilePathExpression, FileUsage
 from jigane.languages.file_paths_core import Rules, text
-from jigane.languages.file_paths_core import file_path_patterns as core_file_path_patterns
+from jigane.languages.file_paths_core import file_path_expressions as core_file_path_expressions
 from jigane.languages.java_nodes import METHOD_NODES, TYPE_NODES
 
 _FILES = "Files"
@@ -139,5 +139,5 @@ _RULES = Rules(
 )
 
 
-def file_path_patterns(root: Node, path: str) -> list[FilePathPattern]:
-    return core_file_path_patterns(root, path, _RULES)
+def file_path_expressions(root: Node, path: str) -> list[FilePathExpression]:
+    return core_file_path_expressions(root, path, _RULES)
