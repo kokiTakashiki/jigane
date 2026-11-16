@@ -20,6 +20,7 @@ class GitSubcommand(StrEnum):
     REV_PARSE = "rev-parse"
     SYMBOLIC_REF = "symbolic-ref"
     REMOTE = "remote"
+    REV_LIST = "rev-list"
 
 
 def build_git_invocation(

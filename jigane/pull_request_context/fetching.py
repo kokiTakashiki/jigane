@@ -225,8 +225,49 @@ def _read_blobs(git_dir: Path, object_ids: list[str]) -> dict[str, bytes]:
     return blobs
 
 
+def _prefetch_missing_blobs(git_dir: Path, tree: CommitSha) -> None:
+    """blobless の複製に無いブロブを、origin から 1 回の fetch でまとめて取る。
+
+    cat-file --batch は無いブロブを 1 件ずつ遅延で fetch し、ファイルの数だけ通信が起きる。
+    rev-list の --missing=print は遅延の fetch を起こさずに、無いオブジェクトを `?` の行で返す。
+    --no-walk で履歴を歩かず、起点のコミットの木に限る。
+    """
+    # --objects の行はパス名を含み、UTF-8 として読めないことがあるのでバイト列で受ける
+    listing = process.run_command_bytes(
+        build_git_command(
+            GitSubcommand.REV_LIST,
+            options=["--objects", "--no-walk", "--missing=print"],
+            revisions=[tree],
+        ),
+        cwd=git_dir,
+    )
+    missing = [line[1:].decode("ascii") for line in listing.splitlines() if line.startswith(b"?")]
+    if not missing:
+        # 全部が手元にある。fetch を起動しない
+        return
+    # git が遅延の fetch で中から打つ形と同じ引数を、まとめて 1 回で渡す
+    # 文字列の stdin は Windows で改行が \r\n になり、git が refspec として拒む
+    process.run_command_bytes(
+        build_git_command(
+            GitSubcommand.FETCH,
+            global_options=["-c", "fetch.negotiationAlgorithm=noop"],
+            options=[
+                "--no-tags",
+                "--no-write-fetch-head",
+                "--recurse-submodules=no",
+                "--filter=blob:none",
+                "--stdin",
+            ],
+            fixed_values=["origin"],
+        ),
+        cwd=git_dir,
+        stdin="".join(f"{object_id}\n" for object_id in missing).encode("ascii"),
+    )
+
+
 def _read_tree(git_dir: Path, tree: CommitSha) -> list[_TreeEntry]:
     """起点の木の項目とブロブを読む。ファイルシステムには触れない。"""
+    _prefetch_missing_blobs(git_dir, tree)
     listing = _tree_listing(git_dir, tree)
     blobs = _read_blobs(git_dir, [object_id for _, object_id, _ in listing])
     return [_TreeEntry(mode, path, blobs[object_id]) for mode, object_id, path in listing]

@@ -525,3 +525,61 @@ def test_link_chain_too_long_to_trace_is_treated_as_escaping() -> None:
     assert pull_request._link_escapes(chain, "l0")
     assert pull_request._link_escapes({"a": "b", "b": "a"}, "a")
     assert not pull_request._link_escapes({"a": "dir/b"}, "a")
+
+
+def _fetch_count(trace: Path) -> int:
+    if not trace.exists():
+        # どの git も fetch を起動しなかった
+        return 0
+    return trace.read_text(encoding="utf-8").count("built-in: git fetch")
+
+
+def test_extract_from_blobless_clone_fetches_missing_blobs_at_once(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "file0.txt").write_text("old version\n")
+    old_blob = git(repo, "hash-object", "file0.txt")
+    commit_all(repo, "old version")
+    for index in range(20):
+        (repo / f"file{index}.txt").write_text(f"content {index}\n")
+    commit = commit_all(repo, "many files")
+    git(repo, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "clone.git"
+    git(tmp_path, "clone", "--bare", "--filter=blob:none", f"file://{repo}", str(clone))
+    trace = tmp_path / "trace.log"
+    monkeypatch.setenv("GIT_TRACE", str(trace))
+
+    extract_tree(clone, _sha(commit), tmp_path / "first")
+    assert _fetch_count(trace) == 1
+    assert (tmp_path / "first" / "file19.txt").read_text() == "content 19\n"
+    # 起点の木に無い過去の版は取らない
+    missing = git(clone, "rev-list", "--objects", "--all", "--missing=print")
+    assert f"?{old_blob}" in missing.splitlines()
+
+    # 全部が手元に揃った後は fetch を起動しない
+    extract_tree(clone, _sha(commit), tmp_path / "second")
+    assert _fetch_count(trace) == 1
+
+
+def test_prefetch_passes_object_ids_to_fetch_as_bytes(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "a.txt").write_text("a\n")
+    commit = commit_all(repo, "one file")
+    git(repo, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "clone.git"
+    git(tmp_path, "clone", "--bare", "--filter=blob:none", f"file://{repo}", str(clone))
+    real = process.run_command_bytes
+    fetch_inputs: list[object] = []
+
+    def recording(args: list[str], **kwargs: object) -> bytes:
+        if "fetch" in args:
+            fetch_inputs.append(kwargs.get("stdin"))
+        return real(args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(process, "run_command_bytes", recording)
+    extract_tree(clone, _sha(commit), tmp_path / "out")
+    # 文字列で渡すと Windows で改行が \r\n になり、git が refspec として拒む
+    assert len(fetch_inputs) == 1
+    assert isinstance(fetch_inputs[0], bytes)
+    assert b"\r" not in fetch_inputs[0]

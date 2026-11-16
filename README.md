@@ -213,6 +213,7 @@ pipx upgrade jigane
 - [言語を追加する](docs/adding-languages.md)：追加の言語の足し方
 - [データの送り先](docs/data-destinations.md)：外へ送る相手、gh のコマンド、文法の取得
 - [配布物を検証する](docs/verify-distribution.md)：配布物の検証の手順
+- [対応する Python のバージョン](docs/python-versions.md)：対応するバージョンと、それを決める設定の役割
 
 ## データの送り先と利用の条件
 
