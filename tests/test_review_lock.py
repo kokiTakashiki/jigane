@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from functools import partial
 from pathlib import Path
@@ -124,8 +125,14 @@ def test_lock_held_by_crashed_process_is_released(tmp_path: Path) -> None:
         holder.kill()
         holder.wait()
         # Windows は持ち主の終了の後、ロックを非同期に外す。wait が返っても外れているとは限らない
-        # ので、偽の時計にせず本物の時計で、取れるまで既定の上限まで待つ
-        with review_lock(tmp_path):
+        # ので、取れるまで実時間の期限つきで取り直す。間隔は決して立たない Event の待ちで置く。
+        # 固定時間の sleep で完了を仮定せず、取れた時点で抜ける
+        never_set = threading.Event()
+
+        def wait_for_release(seconds: float) -> None:
+            never_set.wait(seconds)
+
+        with review_lock(tmp_path, timeout=30.0, poll=0.05, sleep=wait_for_release):
             pass
     finally:
         holder.kill()

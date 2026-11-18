@@ -17,7 +17,7 @@ from jigane.storage.atomic_write import StoredFileInUseError
 from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
 from jigane.storage.store import ReviewId, ReviewKind
-from jigane.storage.symlink_guard import StoredFileSymlinkError
+from jigane.storage.symlink_guard import StoredFileNotRegularError, StoredFileSymlinkError
 
 MINE = ReviewId("o", "r", "mine", ReviewKind.RANGE)
 
@@ -29,6 +29,7 @@ LISTED = [
     LockTimeoutError("l"),
     StoredFileInUseError("u"),
     StoredFileSymlinkError(Path("p")),
+    StoredFileNotRegularError(Path("p")),
     SecurityConfigError("s"),
     DiscoveryError(MACRO, "m"),
     CatalogError("c"),
@@ -60,6 +61,11 @@ def test_discovery_failure_title_names_the_group(group: GroupId, title: str) -> 
 
 def test_stored_file_symlink_maps_to_its_own_kind_before_os_error() -> None:
     assert failures.describe(StoredFileSymlinkError(Path("p"))).kind == "stored_file_symlink"
+
+
+def test_stored_file_not_regular_maps_to_its_own_kind_before_os_error() -> None:
+    kind = failures.describe(StoredFileNotRegularError(Path("p"))).kind
+    assert kind == "stored_file_not_regular"
 
 
 def test_kinds_are_distinct_per_type() -> None:

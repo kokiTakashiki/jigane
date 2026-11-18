@@ -82,6 +82,24 @@ def test_ensure_data_home_creates_missing_root_with_mode_0700(
     assert stat.S_IMODE(home.stat().st_mode) == 0o700
 
 
+def test_ensure_data_home_creates_missing_ancestors_with_mode_0700_and_keeps_existing_parent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing"
+    existing.mkdir()
+    existing.chmod(0o755)
+    home = existing / "a" / "b" / "jigane"
+    monkeypatch.setenv("JIGANE_HOME", str(home))
+    previous = os.umask(0o022)
+    try:
+        store.ensure_data_home()
+    finally:
+        os.umask(previous)
+    for created in (existing / "a", existing / "a" / "b", home):
+        assert stat.S_IMODE(created.stat().st_mode) == 0o700
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o755
+
+
 def test_ensure_data_home_skips_check_on_windows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

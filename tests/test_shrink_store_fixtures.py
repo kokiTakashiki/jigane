@@ -1,18 +1,10 @@
-import importlib.util
-from pathlib import Path
 from types import ModuleType
 
-ROOT = Path(__file__).resolve().parent.parent
+from script_loader import import_script
 
 
 def load_shrinker() -> ModuleType:
-    path = ROOT / "scripts" / "shrink_store_fixtures.py"
-    spec = importlib.util.spec_from_file_location("shrink_store_fixtures", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("shrink_store_fixtures")
 
 
 def test_shrink_keeps_every_line_counts_key() -> None:

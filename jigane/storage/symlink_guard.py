@@ -17,6 +17,17 @@ class StoredFileSymlinkError(OSError):
         self.path = path
 
 
+class StoredFileNotRegularError(OSError):
+    """保存先のファイルが通常のファイルではなかった（FIFO、デバイス、ディレクトリなど）。
+
+    読まずに止める。FIFO は書き手が現れるまで open や read が戻らないためである。
+    """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"{path} は通常のファイルではありません。読まずに止めます。")
+        self.path = path
+
+
 def is_link_like(path: Path) -> bool:
     """path が symlink か、Windows のリパースポイントか。無ければ False。
 

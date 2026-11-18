@@ -75,7 +75,7 @@ def test_invalid_max_usd_is_usage_error(review_name: str, value: str) -> None:
     assert fake.calls == []
 
 
-def test_within_max_usd_launches_and_json_has_three_keys(
+def test_within_max_usd_launches_and_json_has_the_result_keys(
     review_name: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = MicroFake({1: []})

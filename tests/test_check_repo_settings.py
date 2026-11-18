@@ -1,4 +1,3 @@
-import importlib.util
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -6,19 +5,14 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from script_loader import import_script
 from workflow_yaml import load_yaml, uses_values
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_checker() -> ModuleType:
-    path = ROOT / "scripts" / "check_repo_settings.py"
-    spec = importlib.util.spec_from_file_location("check_repo_settings", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_repo_settings")
 
 
 checker = load_checker()

@@ -24,6 +24,7 @@ from jigane.reviews.catalog import scope_files
 from jigane.reviews.lifecycle import Review
 from jigane.reviews.stored_pairs import load_pairs
 from jigane.skills.assembly import AssemblyInput
+from jigane.storage.review_access import read_stored_file
 
 SECTION_VALUE_SETS = "値の組の表"
 INTRO = (
@@ -78,7 +79,7 @@ def _added_lines(review: Review) -> dict[str, dict[int, str]]:
         # ファイルのレビューには差分が無く、足した行という見方が成り立たない
         return {}
     directory = review.id.directory()
-    changes = (directory / CHANGES_FILE).read_text(encoding="utf-8")
+    changes = read_stored_file(directory, CHANGES_FILE)
     pairs = load_pairs(review.id)
     added: dict[str, dict[int, str]] = {}
     for pair, section in zip(pairs, split_file_sections(changes, pairs), strict=True):

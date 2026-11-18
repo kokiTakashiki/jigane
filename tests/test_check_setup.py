@@ -1,22 +1,15 @@
-import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from script_loader import import_script
 
 from jigane.languages import grammars
 
-SCRIPT = Path(__file__).parent.parent / "scripts" / "check_setup.py"
-
 
 def load_script() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_setup", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_setup")
 
 
 def test_missing_virtualenv_stops_with_one_line_guidance(

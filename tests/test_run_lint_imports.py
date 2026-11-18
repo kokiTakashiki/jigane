@@ -1,22 +1,13 @@
-import importlib.util
 import io
 import sys
-from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-ROOT = Path(__file__).resolve().parent.parent
+from script_loader import import_script
 
 
 def load_script() -> ModuleType:
-    path = ROOT / "scripts" / "run_lint_imports.py"
-    spec = importlib.util.spec_from_file_location("run_lint_imports", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("run_lint_imports")
 
 
 run_lint_imports = load_script()

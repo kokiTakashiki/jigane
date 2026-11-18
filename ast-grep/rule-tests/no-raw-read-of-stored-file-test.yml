@@ -1,0 +1,32 @@
+id: no-raw-read-of-stored-file
+valid:
+  - read_stored_file(directory, REVIEW_FILE)
+  - read_stored_file_if_present(directory, MAP_FILE)
+  - read_stored_text(review_id, PAIRS_FILE)
+  # 保存先でない定数
+  - (directory / CONFIG_FILE_NAME).read_text(encoding="utf-8")
+  - (directory / SETTINGS_FILE).read_bytes()
+  - open(directory / MCP_CONFIG_FILE)
+  # 存在の確認や書き込みは読みでない
+  - (directory / REVIEW_FILE).exists()
+  - (directory / REVIEW_FILE).write_text(text, encoding="utf-8")
+  # 以下は拾えない形。誤って拾うようになったら note を直す
+  - |
+    path = directory / REVIEW_FILE
+    path.read_text(encoding="utf-8")
+  - (directory / "review.json").read_text(encoding="utf-8")
+  - (directory / store.REVIEW_FILE).read_text(encoding="utf-8")
+  - (directory / REVIEW).read_text(encoding="utf-8")
+  - |
+    from jigane.storage.store import REVIEW_FILE as FILE_NAME
+    (directory / FILE_NAME).read_text(encoding="utf-8")
+invalid:
+  - (directory / REVIEW_FILE).read_text(encoding="utf-8")
+  - (review_id.directory() / MAP_FILE).read_text()
+  - (directory / FINDINGS_FILE).read_bytes()
+  - (directory / HISTORY_FILE).open("rb")
+  - open(directory / CHANGES_FILE, encoding="utf-8")
+  - open(directory / STATIC_FINDINGS_FILE)
+  - (directory / BOT_COMMENTS_FILE).read_text(
+        encoding="utf-8",
+    )

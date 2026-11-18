@@ -97,6 +97,7 @@ from jigane.static_analysis.intake import (
     static_warnings,
 )
 from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.review_creation import (
     SaveTarget,
     direct_save_target,
@@ -503,8 +504,9 @@ def _assign_numbers(
     """内部の識別（key）に表示の番号を割り当てる。番号は再利用しない。"""
     path = directory / REGIONS_FILE
     state: dict[str, Any] = {"next_number": 1, "regions": {}}
-    if path.is_file():
-        state = load_regions(json.loads(path.read_text(encoding="utf-8")))
+    text = read_stored_file_if_present(directory, REGIONS_FILE)
+    if text is not None:
+        state = load_regions(json.loads(text))
     added: list[str] = []
     changed: list[str] = []
     numbered: list[Region] = []

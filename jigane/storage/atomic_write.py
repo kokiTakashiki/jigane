@@ -63,7 +63,11 @@ def write_text_atomic(path: Path, text: str) -> None:
     )
     temporary = Path(temporary_name)
     try:
+        # mkstemp の既定の 0600 に任せず、ここで明示する。os.fchmod は Windows の Python では
+        # 3.13 から使え、それより前の版には属性が無いので、その場合は呼ばない
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            if hasattr(os, "fchmod"):
+                os.fchmod(stream.fileno(), 0o600)
             stream.write(text)
         _replace_retrying(temporary, path)
     except BaseException:

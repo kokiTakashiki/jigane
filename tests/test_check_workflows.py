@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import io
 import re
 import tarfile
@@ -9,6 +8,7 @@ from types import ModuleType
 
 import pytest
 from dev_launch import run_tool
+from script_loader import import_script
 from workflow_yaml import load_yaml
 
 from jigane.git.process import CommandError
@@ -41,13 +41,7 @@ TITLE_IN_RUN = """      - run: echo ${{ github.event.pull_request.title }}
 
 
 def load_checker() -> ModuleType:
-    path = ROOT / "scripts" / "check_workflows.py"
-    spec = importlib.util.spec_from_file_location("check_workflows", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_workflows")
 
 
 def write_workflow(tmp_path: Path, body: str, header: str = HEADER) -> Path:

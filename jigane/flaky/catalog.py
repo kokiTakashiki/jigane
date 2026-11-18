@@ -173,7 +173,7 @@ def _equivalents(
 def _item(entry: dict[str, Any], queries: tuple[QuerySpec, ...]) -> Item:
     where = str(entry.get("id", "?"))
     item_id = _text(entry, "id", where)
-    if ID_PATTERN.match(item_id) is None:
+    if ID_PATTERN.fullmatch(item_id) is None:
         raise CatalogError(f"{where}: id の形が不正です")
     cause = _text(entry, "cause", where)
     if cause not in CAUSES:

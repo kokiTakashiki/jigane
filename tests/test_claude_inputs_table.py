@@ -1,9 +1,9 @@
-import importlib.util
 import re
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from script_loader import import_script
 
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs.claude import REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES
@@ -13,13 +13,7 @@ ROOT = Path(__file__).parent.parent
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_claude_inputs_table.py"
-    spec = importlib.util.spec_from_file_location("generate_claude_inputs_table", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_claude_inputs_table")
 
 
 def read_security() -> str:

@@ -22,6 +22,7 @@ from jigane.git.tree_files import is_inside_tree, read_tree_text
 from jigane.judgment_map.classification import FilePair
 from jigane.pull_request_context.fetching import PullRequestMetadata
 from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.store_format import require_current_version
 
 BACKGROUND_FILE = "background.json"
@@ -411,8 +412,8 @@ def save_background(directory: Path, background: Background) -> None:
 
 
 def load_background(directory: Path) -> Background | None:
-    path = directory / BACKGROUND_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, BACKGROUND_FILE)
+    if text is None:
         # ファイルのレビューと、背景を集める前に作った差分のレビューには無い
         return None
-    return parse_background(json.loads(path.read_text(encoding="utf-8")))
+    return parse_background(json.loads(text))

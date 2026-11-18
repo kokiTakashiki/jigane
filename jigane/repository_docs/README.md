@@ -19,6 +19,6 @@
 
 読むサブパッケージ：`git`、`groups`、`llm_runs`、`markdown`、`storage`
 
-読まれるサブパッケージ：`skills`
+読まれるサブパッケージ：`commands`、`skills`
 
 <!-- END GENERATED: dependencies -->

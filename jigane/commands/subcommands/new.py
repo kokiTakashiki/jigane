@@ -2,7 +2,9 @@
 
 import argparse
 import json
+from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_GATE_VIOLATION, EXIT_OK
@@ -25,6 +27,7 @@ from jigane.reviews.lifecycle import (
     create_range_review,
 )
 from jigane.static_analysis.intake import sarif_request
+from jigane.storage.store import ReviewKind
 
 
 def add_sarif_arguments(parser: argparse.ArgumentParser) -> None:
@@ -41,6 +44,34 @@ def add_sarif_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="ディレクトリ",
         help="SARIF のパスの起点です。既定は git のリポジトリの根です",
     )
+
+
+class NewMode(StrEnum):
+    """new の下位コマンドの名前。値は CLI の引数の綴りと同じ。
+
+    add_parser の名前は静的解析が文字列リテラルで読むため、ここを参照せず直に書く。
+    綴りのずれは tests/test_new_modes.py が検出する。
+    """
+
+    FILES = "files"
+    PR = "pr"
+    RANGE = "range"
+    DESIGN_DOC = "design-doc"
+
+    @property
+    def review_kind(self) -> ReviewKind:
+        # 綴り（files、pr）と保存の種類（feature、pull_request）の値が違うため、対応をここに置く
+        match self:
+            case NewMode.FILES:
+                return ReviewKind.FEATURE
+            case NewMode.PR:
+                return ReviewKind.PULL_REQUEST
+            case NewMode.RANGE:
+                return ReviewKind.RANGE
+            case NewMode.DESIGN_DOC:
+                return ReviewKind.DESIGN_DOC
+            case _:
+                assert_never(self)
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -132,31 +163,35 @@ def print_new(review: Review, *, as_json: bool) -> None:
 
 def run(args: argparse.Namespace, context: Context) -> int:
     del context  # レビューの作成は Claude Code CLI を起動しない
+    kind = NewMode(args.mode).review_kind
     sarif = (
         sarif_request(args.sarif, args.sarif_root, Path.cwd())
-        if args.mode in ("pr", "range", "files")
+        if kind is not ReviewKind.DESIGN_DOC
         else None
     )
-    if args.mode == "pr":
-        review = create_pull_request_review(args.url, ReviewInputs(sarif))
-    elif args.mode == "range":
-        review = create_range_review(
-            Path.cwd(),
-            args.range,
-            args.name,
-            DeclaredInputs(sarif, args.intent, args.intent_file),
-        )
-    elif args.mode == "design-doc":
-        review = create_design_doc_review(
-            Path.cwd(), args.document, args.name, args.select, args.attach
-        )
-    else:
-        review = create_feature_review(
-            Path.cwd(),
-            args.paths,
-            args.name,
-            DeclaredInputs(sarif, args.intent, args.intent_file),
-        )
+    match kind:
+        case ReviewKind.PULL_REQUEST:
+            review = create_pull_request_review(args.url, ReviewInputs(sarif))
+        case ReviewKind.RANGE:
+            review = create_range_review(
+                Path.cwd(),
+                args.range,
+                args.name,
+                DeclaredInputs(sarif, args.intent, args.intent_file),
+            )
+        case ReviewKind.DESIGN_DOC:
+            review = create_design_doc_review(
+                Path.cwd(), args.document, args.name, args.select, args.attach
+            )
+        case ReviewKind.FEATURE:
+            review = create_feature_review(
+                Path.cwd(),
+                args.paths,
+                args.name,
+                DeclaredInputs(sarif, args.intent, args.intent_file),
+            )
+        case _:
+            assert_never(kind)
     print_new(review, as_json=args.json)
     print_unparsed_notice(review)
     return EXIT_GATE_VIOLATION if has_gate_violation(review) else EXIT_OK

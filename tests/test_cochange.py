@@ -5,6 +5,7 @@ from fakes import run_command_stub
 from pr_support import commit_all, git
 
 from jigane.git import process
+from jigane.git.command_line import GitSubcommand
 from jigane.policy_materials import cochange
 
 
@@ -111,7 +112,7 @@ def test_revision_is_resolved_then_guarded(monkeypatch: pytest.MonkeyPatch) -> N
 
     def fake_run(args: list[str]) -> str:
         seen.append(args)
-        return f"{sha}\n" if args[1] == "rev-parse" else ""
+        return f"{sha}\n" if args[1] == GitSubcommand.REV_PARSE else ""
 
     monkeypatch.setattr(process, "run_command", run_command_stub(fake_run))
     evil = "--upload-pack=touch /tmp/x"

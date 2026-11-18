@@ -69,6 +69,13 @@ def test_catalog_rejects_malformed(text: str) -> None:
         parse_catalog(text, {}, LANGUAGES)
 
 
+def test_id_with_a_trailing_newline_rejected() -> None:
+    entry = _ENTRY.replace("id='FLK-X'", 'id="FLK-X\\n"')
+    assert entry != _ENTRY
+    with pytest.raises(CatalogError, match="id の形が不正"):
+        parse_catalog(entry, {}, LANGUAGES)
+
+
 def test_duplicate_id_rejected() -> None:
     entry = _ENTRY
     with pytest.raises(CatalogError):

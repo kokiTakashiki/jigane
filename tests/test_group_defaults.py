@@ -1,4 +1,6 @@
+import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,8 +121,8 @@ def test_estimate_reports_older_reviews_as_one_warning(
         meta_path.write_text(json.dumps(stored), encoding="utf-8")
     assert main(["estimate", str(review.id), "micro", "--json"]) == EXIT_OK
     [message] = listing_warnings(caplog)
-    # 見積もりは置き場を複数回引くので、件数ではなく警告が 1 件であることを固定する
-    assert "件のレビューを除きました" in message
+    # 見積もりは置き場を複数回引くが、同じ記録は一度だけ数える
+    assert message.startswith("読めない古い記録が 3 件あります。")
     assert "一覧から除きました:" not in message
 
 
@@ -292,3 +294,28 @@ def test_estimate_json_keys_are_fixed_per_group(
         assert data["expected"].keys() == GROUP_EXPECTATION_KEYS
     assert data["run_guide"].keys() == {"review_kind", "text"}
     assert data["past_run"] is None or "invocation_count" in data["past_run"]
+
+
+def test_summary_warning_comes_after_the_flushed_output(
+    project: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review = review_of(project)
+    old = create_feature_review(project, ["src"], "older")
+    meta_path = old.id.directory() / REVIEW_FILE
+    stored = json.loads(meta_path.read_text(encoding="utf-8"))
+    stored["format"] = 4
+    meta_path.write_text(json.dumps(stored), encoding="utf-8")
+    flushes: list[tuple[int, int]] = []
+
+    class RecordingStream(io.StringIO):
+        def flush(self) -> None:
+            flushes.append((len(self.getvalue()), len(listing_warnings(caplog))))
+            super().flush()
+
+    stream = RecordingStream()
+    monkeypatch.setattr(sys, "stdout", stream)
+    assert main(["estimate", str(review.id), "micro", "--json"]) == EXIT_OK
+    assert stream.getvalue()
+    # 見積もりの出力を書き終えた後、まとめの警告より前に書き出している
+    assert (len(stream.getvalue()), 0) in flushes
+    assert len(listing_warnings(caplog)) == 1

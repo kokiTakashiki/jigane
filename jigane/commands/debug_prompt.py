@@ -15,7 +15,7 @@ from jigane.commands.group_argument import add_group_argument
 from jigane.commands.mcp_argument import add_mcps_argument, load_mcp_selection
 from jigane.commands.output import print_lines
 from jigane.llm_runs.defaults import resolve_run_defaults
-from jigane.reviews.catalog import collapse_skipped_warnings, load_review
+from jigane.reviews.catalog import load_review
 from jigane.reviews.resolution import resolve_review
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.launch_prompts import LaunchInput, LaunchPrompt, launch_prompts
@@ -77,13 +77,12 @@ def record_of(entry: LaunchPrompt) -> dict[str, object]:
 def run_prompt(args: argparse.Namespace, context: Context) -> int:
     del context  # プロンプトの組み立ては LLM を呼ばない
     mcp = load_mcp_selection(args.mcps, args.group, args.mcp_guide)
-    with collapse_skipped_warnings():
-        review = load_review(resolve_review(args.review))
-        assembly = AssemblyInput.load(review, docs=read_docs_for_review(review, args.group))
-        budget = resolve_run_defaults(
-            args.group, None, None, max_budget_usd=args.max_budget_usd_per_call
-        ).budget
-        entries = launch_prompts(LaunchInput(assembly, args.group, mcp, budget))
+    review = load_review(resolve_review(args.review))
+    assembly = AssemblyInput.load(review, docs=read_docs_for_review(review, args.group))
+    budget = resolve_run_defaults(
+        args.group, None, None, max_budget_usd=args.max_budget_usd_per_call
+    ).budget
+    entries = launch_prompts(LaunchInput(assembly, args.group, mcp, budget))
     try:
         page, next_mark = page_of(entries, args.after, args.page_size)
     except UsageError as error:

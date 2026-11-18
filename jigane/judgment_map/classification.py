@@ -3,13 +3,12 @@ import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
-from fnmatch import fnmatchcase
 from functools import cached_property
 from pathlib import Path
 from typing import Any, assert_never
 
 from jigane.git.tree_files import read_tree_bytes
-from jigane.judgment_map.configuration import Config
+from jigane.judgment_map.configuration import Config, is_excluded, matches_any
 from jigane.judgment_map.kinds import LEVEL_OF_KIND, Kind, Level, StoredMode
 from jigane.judgment_map.region_table import CodeRegion, LineCounts, RegionTable
 from jigane.judgment_map.tree_parsing import read_and_parse
@@ -256,10 +255,6 @@ def _compare(old: _Side, new: _Side, old_rows: set[int], new_rows: set[int]) -> 
     if old.tokens(old_rows, with_comments=True) == new.tokens(new_rows, with_comments=True):
         return Kind.FORMAT_ONLY
     return Kind.COMMENT_ONLY
-
-
-def matches_any(path: str, patterns: Sequence[str]) -> bool:
-    return any(fnmatchcase(path, pattern) for pattern in patterns)
 
 
 @dataclass(frozen=True)
@@ -572,7 +567,7 @@ def _classify_file(
     new_for_path = _Side(new_root, pair.new_path, None)
     opcodes = _opcodes(old_for_path.lines, new_for_path.lines)
 
-    if matches_any(path, config.exclude):
+    if is_excluded(path, config):
         return _opcode_segments(pair, opcodes, Kind.GENERATED)
     if pair.new_path is None:
         return _removed_file_segments(old_root, old_for_path, pair)

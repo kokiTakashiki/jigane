@@ -94,6 +94,7 @@ from jigane.skills.policy_launch import (
     Stopped,
     stored_index,
 )
+from jigane.storage.review_access import read_stored_file
 from jigane.text.document_files import DOCUMENT_ONLY_NOTICE, all_documents
 
 GROUP = MACRO
@@ -199,7 +200,7 @@ def changes_prompt_text(review: Review) -> str:
     """発見役と検証役のプロンプトに入れる、変更の節。"""
     if not review.is_diff:
         return f"### 変更\n\n{FEATURE_CHANGES_TEXT}"
-    diff = (review.id.directory() / CHANGES_FILE).read_text(encoding="utf-8")
+    diff = read_stored_file(review.id.directory(), CHANGES_FILE)
     return diff_changes_text(diff)
 
 
@@ -213,7 +214,7 @@ def verifier_changes_text(review: Review) -> str:
     発見役は丸ごと削除したファイルを単位に入れない。検証役だけが本文を受けると、大きな削除で
     入力が発見役の何倍にもなる。
     """
-    diff = (review.id.directory() / CHANGES_FILE).read_text(encoding="utf-8")
+    diff = read_stored_file(review.id.directory(), CHANGES_FILE)
     kept, removed = without_whole_deletions(diff, load_pairs(review.id))
     text = diff_changes_text(kept)
     if not removed:

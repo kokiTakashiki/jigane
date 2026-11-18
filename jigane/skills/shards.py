@@ -20,8 +20,8 @@ from jigane.judgment_map.changes import (
     OMITTED_TOO_LARGE,
     file_change,
 )
-from jigane.judgment_map.classification import is_whole_deletion, matches_any
-from jigane.judgment_map.configuration import load_config
+from jigane.judgment_map.classification import is_whole_deletion
+from jigane.judgment_map.configuration import is_excluded, load_config
 from jigane.llm_runs import claude
 from jigane.markdown.fence import fence, one_line
 from jigane.policy_materials.design_doc import shard_materials
@@ -212,7 +212,7 @@ def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]
         if is_whole_deletion(pair):
             continue
         new_path = required(pair.new_path)
-        if matches_any(new_path, config.exclude):
+        if is_excluded(new_path, config):
             continue
         # file_change は old_path の本文も base_tree から読むため、改名や複写の旧名も見る
         secret = next(
@@ -230,10 +230,10 @@ def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]
 
 
 def _file_units(review: Review, root: Path, withheld: list[str]) -> list[Unit]:
-    exclude = load_config(root).exclude
+    config = load_config(root)
     units: list[Unit] = []
     for path in review.paths:
-        if matches_any(path, exclude):
+        if is_excluded(path, config):
             continue
         if claude.is_secret_file(path):
             withheld.append(path)

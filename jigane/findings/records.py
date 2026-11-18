@@ -32,6 +32,7 @@ from jigane.groups.viewpoints import by_number, by_uuid
 from jigane.preconditions.required import required
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import require_current_version
 
@@ -845,6 +846,10 @@ KEY_NIT_REASON = "nit_reason"
 KEY_TRIAGE_REASON = "triage_reason"
 _KEY_DEEPENS = "deepens"
 KEY_OUT_OF_SCOPE = "out_of_scope"
+# 保存のためだけにある欄名。発見役に見せるスキーマには出さない
+STORED_ONLY_KEYS = frozenset(
+    {KEY_THEME, KEY_ADJUDICATION, KEY_NIT_REASON, KEY_TRIAGE_REASON, KEY_OUT_OF_SCOPE}
+)
 
 _KEY_TITLE = "title"
 _KEY_FINDING_IDS = "finding_ids"
@@ -1342,10 +1347,10 @@ class FilledFindings:
 
 def read_stored_state(directory: Path) -> StoredFindings:
     """findings.json を型で読む。書き手が読み直して保存するときの入口。"""
-    path = directory / FINDINGS_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, FINDINGS_FILE)
+    if text is None:
         return StoredFindings.empty()
-    return read_findings_json(json.loads(path.read_text(encoding="utf-8")), directory.name)
+    return read_findings_json(json.loads(text), directory.name)
 
 
 def _stored_file_name(where: str, file: str) -> str:
@@ -1654,10 +1659,11 @@ class HistoryCorruptError(Exception):
 def _read_history(directory: Path) -> HistoryRead:
     """履歴を読む唯一の入口。壊れているかの判定はここで一度だけ行い、結果の型で伝える。"""
     path = directory / HISTORY_FILE
-    if not path.is_file():
-        return HistoryIntact({})
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = read_stored_file_if_present(directory, HISTORY_FILE)
+        if text is None:
+            return HistoryIntact({})
+        raw = json.loads(text)
         return HistoryIntact(read_history_json(raw, directory.name).groups)
     except (
         ValueError,

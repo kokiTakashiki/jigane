@@ -1,24 +1,18 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 import tree_sitter_language_pack as pack
 from pr_support import git
+from script_loader import import_script
 
 from jigane.languages import grammars
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "grammar_bundle_cache.py"
 BUNDLE = f"macos-arm64-{'a' * 64}.tar.zst"
 
 
 def load_script() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("grammar_bundle_cache", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("grammar_bundle_cache")
 
 
 def test_copy_bundles_copies_only_bundles_missing_from_the_destination(tmp_path: Path) -> None:

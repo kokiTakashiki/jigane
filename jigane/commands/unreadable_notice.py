@@ -27,9 +27,12 @@ def _present_kinds(found: UnreadableConstructs) -> list[ConstructKind]:
     order = {adapter.name: index for index, adapter in enumerate(registry.adapters())}
 
     def position(kind: ConstructKind) -> tuple[bool, int, str]:
-        language = kind.value.split("_", 1)[0]
-        # 登録に無い言語は末尾に置く
-        return (kind != ConstructKind.SYNTAX_ERROR, order.get(language, len(order)), kind.value)
+        # 構文エラー（言語が None）と登録に無い言語は末尾に置く
+        return (
+            kind != ConstructKind.SYNTAX_ERROR,
+            order.get(kind.language or "", len(order)),
+            kind.value,
+        )
 
     return sorted({o.kind for o in found.occurrences}, key=position)
 

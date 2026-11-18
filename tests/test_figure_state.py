@@ -113,6 +113,18 @@ def _fake(title: str, slot: PromptPlace) -> PolicyFigure:
     return PolicyFigure(title, title, lambda _review: figure, slot, interface=LANGUAGE_AGNOSTIC)
 
 
+def test_absent_marks_section_is_skipped(tmp_path: Path) -> None:
+    review = feature_review(tmp_path, "m.py", "x = 1\n")
+    prebuilt: dict[PrebuiltSection, str] = {
+        section: f"<{section.name}>"
+        for section in PrebuiltSection
+        if section is not PrebuiltSection.MARKS
+    }
+    texts = policy_figures.prompt_figure_texts(AssemblyInput.load(review), prebuilt)
+    assert "<MARKS>" not in texts
+    assert "<REGIONS>" in texts
+
+
 def test_registry_order_decides_the_section_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -128,6 +140,7 @@ def test_registry_order_decides_the_section_order(
         "### Y\n\nY",
         "<SEQUENCE>",
         "<REGIONS>",
+        "<MARKS>",
         "### Z\n\nZ",
     ]
     monkeypatch.setattr(policy_figures, "REGISTRY", (y, x, z))

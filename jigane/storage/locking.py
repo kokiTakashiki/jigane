@@ -26,8 +26,10 @@ class LockTimeoutError(Exception):
     pass
 
 
-def open_lock_file(path: Path, flags: int) -> int:
-    """錠のファイルを、symlink を辿らずに開く。symlink なら StoredFileSymlinkError を送出する。
+def open_no_follow(path: Path, flags: int) -> int:
+    """ファイルを、symlink を辿らずに開く。symlink なら StoredFileSymlinkError を送出する。
+
+    錠のファイルと、保存物の読みが使う。
 
     置き場へ書ける別の処理が錠のファイルを symlink に差し替えても、先のファイルを作らず、
     権限も変えないための開き方である。
@@ -99,7 +101,7 @@ def hold_replaceable_file_lock(path: Path) -> Iterator[bool]:
     取れなかったときは何も握らずに False を返す。
     """
     while True:
-        descriptor = open_lock_file(path, os.O_CREAT | os.O_RDWR)
+        descriptor = open_no_follow(path, os.O_CREAT | os.O_RDWR)
         try:
             if not try_lock(descriptor):
                 yield False
@@ -123,7 +125,7 @@ def remove_file_if_unlocked(path: Path) -> bool:
     消せない場合もファイルが残って False になる。
     """
     try:
-        descriptor = open_lock_file(path, os.O_RDWR)
+        descriptor = open_no_follow(path, os.O_RDWR)
     except FileNotFoundError:
         return True
     try:
@@ -174,7 +176,7 @@ def review_lock(
     lock_path = directory / LOCK_FILE
     # ロックのファイルは解放しても消さない。消すと、消す前に開いていた待ち手が消えた後の
     # inode を握り、新しく作られたファイルを握る別の持ち主と同時に臨界区間に入る
-    descriptor = open_lock_file(lock_path, os.O_CREAT | os.O_RDWR)
+    descriptor = open_no_follow(lock_path, os.O_CREAT | os.O_RDWR)
     try:
         deadline = clock() + timeout
         while not try_lock(descriptor):

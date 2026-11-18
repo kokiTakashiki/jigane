@@ -28,8 +28,7 @@ from jigane.design.mentions import (
 from jigane.design.parse import DesignDocument
 from jigane.design.submodule_status import SubmoduleNote, submodule_notes
 from jigane.git.tree_files import read_tree_bytes, work_files
-from jigane.judgment_map.classification import matches_any
-from jigane.judgment_map.configuration import load_config
+from jigane.judgment_map.configuration import is_excluded, load_config
 from jigane.languages import registry
 from jigane.languages.base import TopLevelStringConstant, TopLevelStringConstantExtractor
 from jigane.languages.kinds import LocationKind
@@ -273,7 +272,7 @@ class _World:
     def __init__(self, root: Path) -> None:
         self.root = root
         adapters = registry.adapters()
-        excluded = load_config(root).exclude
+        config = load_config(root)
         # 試験のファイルは、索引、型や関数などの引き当て、たどり、候補に入れない
         work = work_files(root, include_untracked=True)
         files, self._untracked = work.files, work.untracked
@@ -286,7 +285,7 @@ class _World:
             p
             for p in self.paths
             if registry.adapter_for(p) is not None
-            and not matches_any(p, excluded)
+            and not is_excluded(p, config)
             and PurePosixPath(p).parts[0] != _NON_PRODUCT_DIRECTORY
         )
         self._indexes: Indexes | None = None

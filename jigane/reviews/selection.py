@@ -21,6 +21,7 @@ from jigane.groups.viewpoints import viewpoint_fields
 from jigane.reviews.lifecycle import ReviewError
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.store_format import require_current_version
 
 SELECTION_FILE = "selection.json"
@@ -239,10 +240,10 @@ def parse_selection(raw: Mapping[str, Any]) -> Selection:
 
 
 def load_selection(directory: Path) -> Selection:
-    path = directory / SELECTION_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, SELECTION_FILE)
+    if text is None:
         return Selection()
-    return parse_selection(json.loads(path.read_text(encoding="utf-8")))
+    return parse_selection(json.loads(text))
 
 
 def save_selection(directory: Path, selection: Selection) -> None:
@@ -420,9 +421,9 @@ def _split_tokens(known: _Known, tokens: list[str]) -> tuple[list[str], list[str
     members: dict[str, None] = {}
     unknown: list[str] = []
     for token in tokens:
-        if _FINDING_PATTERN.match(token) and token in known.origins:
+        if _FINDING_PATTERN.fullmatch(token) and token in known.origins:
             direct[token] = None
-        elif _THEME_PATTERN.match(token) and token in known.themes:
+        elif _THEME_PATTERN.fullmatch(token) and token in known.themes:
             for member in known.themes[token].finding_ids:
                 members[member] = None
         else:
@@ -601,7 +602,7 @@ def object_to(
         if not reason.strip():
             raise ReviewError("異議の理由が空です")
         known = _locate(directory, read_inputs())
-        if not _FINDING_PATTERN.match(token) or token not in known.origins:
+        if not _FINDING_PATTERN.fullmatch(token) or token not in known.origins:
             raise _unknown_error(known, [token])
         _require_unique(known, [token])
         selection = load_selection(directory)

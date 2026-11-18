@@ -1,8 +1,9 @@
-import importlib.util
 import json
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from script_loader import import_script
 
 ROOT = Path(__file__).parent.parent
 PACK = "tree-sitter-language-pack"
@@ -12,13 +13,7 @@ EXAMPLE_LANGUAGES = {"kotlin"}
 
 
 def _allowed_licenses() -> frozenset[str]:
-    spec = importlib.util.spec_from_file_location(
-        "check_dependency_licenses", ROOT / "scripts" / "check_dependency_licenses.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = import_script("check_dependency_licenses")
     allowed: frozenset[str] = module.ALLOWED_LICENSES
     return allowed
 

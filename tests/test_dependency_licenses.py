@@ -1,21 +1,12 @@
-import importlib.util
 from email.message import Message
-from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-ROOT = Path(__file__).resolve().parent.parent
+from script_loader import import_script
 
 
 def load_checker() -> ModuleType:
-    path = ROOT / "scripts" / "check_dependency_licenses.py"
-    spec = importlib.util.spec_from_file_location("check_dependency_licenses", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_dependency_licenses")
 
 
 def headers(**fields: str) -> Message:

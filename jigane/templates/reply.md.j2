@@ -17,7 +17,7 @@
 {% for group in groups %}
 
 ## {{ group.label }}
-{% if group.group == "micro" %}
+{% if group.grouped_by_theme %}
 {% for theme in group.themes %}
 
 ### {{ (theme.title | md) if theme.title else "その他" }}

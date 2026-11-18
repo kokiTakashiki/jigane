@@ -45,6 +45,13 @@ class ConstructKind:
         return cls(value)
 
     @property
+    def language(self) -> str | None:
+        """言語名。構文エラーは言語を持たないので None。"""
+        if self.value == _SYNTAX_ERROR_VALUE:
+            return None
+        return self.value.split("_", 1)[0]
+
+    @property
     def entry_id(self) -> str:
         """警告の id。kind から決まる。"""
         return "UNREADABLE-" + self.value.upper().replace("_", "-")

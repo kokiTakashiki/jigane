@@ -6,7 +6,9 @@
 定義の索引、前後の比べ、呼ぶ側の数え方は `public_names_core` に任せ、
 `ast` の歩き方と引数の照合だけを持つ。
 呼ぶ側は変更の後の木の中で名前だけを照合して数え、型の解決はしない。
-関数とメソッドの呼び出し、クラスの呼び出しと継承、列挙の値の `型.値` の参照を呼ぶ側とする。
+関数とメソッドの呼び出し、関数を値として渡す参照（`key=fn`）、
+メソッドの属性の読み出し（`@property` など）、クラスの呼び出しと継承、
+列挙の値の `型.値` の参照を呼ぶ側とする。
 クラスは、型注記と式の中で名前を書いた箇所も呼ぶ側とする。文字列で書いた型注記は数えない。
 入れ子のクラスは定義に数えないので行にならない。
 引数は、その引数を実際に渡す呼び出し（キーワード、または位置）の関数を呼ぶ側とする。
@@ -180,7 +182,8 @@ class _SiteCollector(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         value = node.value
-        if isinstance(value, ast.Name | ast.Attribute):
+        # 読み出しだけを数える。代入先と del の対象は、その名前を使う側ではない
+        if isinstance(node.ctx, ast.Load) and isinstance(value, ast.Name | ast.Attribute):
             receiver = value.id if isinstance(value, ast.Name) else value.attr
             self.tree.references.append(
                 _Site(
@@ -205,23 +208,48 @@ def _key_of(definition: Definition) -> tuple[str, str]:
     return (definition.places[0][0], definition.qualified)
 
 
+def _method_sites(definition: Definition, tree: Tree) -> list[Site]:
+    # メソッドは属性の呼び出しと、属性の読み出し（`@property` や呼ばずに渡す `x.m`）と照合する
+    name = definition.qualified.rsplit(".", 1)[-1]
+    return [
+        s
+        for s in [*tree.calls, *tree.references]
+        if cast("_Site", s).is_attribute and s.name == name
+    ]
+
+
+def _function_sites(definition: Definition, tree: Tree) -> list[Site]:
+    # 関数は呼び出しに加えて、値として渡す参照（`key=fn`）も数える。
+    # 名前の読み出しだけを拾うので、定義の名前と import の文は入らない
+    name = definition.qualified
+    return [s for s in [*tree.calls, *tree.names.get(name, [])] if s.name == name]
+
+
+def _distinct(sites: list[Site]) -> list[Site]:
+    # 呼び出しの関数の名前は、呼び出しの表と名前の表の両方に入る。呼び出しの側の一つで数える
+    called = {
+        id(node.func)
+        for node in (cast("_Site", s).node for s in sites)
+        if isinstance(node, ast.Call)
+    }
+    return [s for s in sites if id(cast("_Site", s).node) not in called]
+
+
 def _sites_of(definition: Definition, tree: Tree) -> list[Site]:
     if definition.kind is PublicNameKind.METHOD:
-        # メソッドは属性の呼び出しだけと照合する
-        name = definition.qualified.rsplit(".", 1)[-1]
-        return [
-            s
-            for s in tree.calls
-            if cast("_Site", s).is_attribute and s.name == name and not inside(s, definition)
-        ]
-    # クラスは呼び出しと属性の参照も含む。`__init__` は定義にコンストラクタの印を付けないので、
-    # コンストラクタの表は引かれない
-    return sites_of(
-        definition,
-        tree,
-        constructor_sites=lambda _: [],
-        type_sites=lambda t, name: [*t.calls, *t.names.get(name, []), *t.references],
-    )
+        found = _method_sites(definition, tree)
+    elif definition.kind is PublicNameKind.FUNCTION:
+        found = _function_sites(definition, tree)
+    else:
+        # クラスは呼び出しと属性の参照も含む。`__init__` は定義にコンストラクタの印を付けないので、
+        # コンストラクタの表は引かれない
+        found = sites_of(
+            definition,
+            tree,
+            constructor_sites=lambda _: [],
+            type_sites=lambda t, name: [*t.calls, *t.names.get(name, []), *t.references],
+        )
+    return _distinct([s for s in found if not inside(s, definition)])
 
 
 def _passes(site: Site, parameter: _Parameter) -> bool:

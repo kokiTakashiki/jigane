@@ -14,6 +14,7 @@ from jigane.reviews.catalog import (
     parse_stored_id,
 )
 from jigane.reviews.review_formats import load_review_meta
+from jigane.storage.review_access import read_stored_file
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store import (
     REVIEW_FILE,
@@ -54,7 +55,9 @@ def _stored_ids_named(name: str, repository: Repository | None = None) -> list[R
             try:
                 found.append(
                     parse_stored_id(
-                        load_review_meta(json.loads(review_file.read_text(encoding="utf-8")))
+                        load_review_meta(
+                            json.loads(read_stored_file(review_file.parent, REVIEW_FILE))
+                        )
                     )
                 )
             except (OSError, ValueError, KeyError, TypeError, ReviewError):

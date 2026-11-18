@@ -10,6 +10,7 @@ from jigane.git.repository import identify_git
 from jigane.judgment_map.classification import FindingTouch
 from jigane.static_analysis.models import DropReason, SarifFileRecord, SarifImport, StaticFinding
 from jigane.static_analysis.reader import SarifError, read_sarif
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import require_current_version
 
@@ -205,11 +206,12 @@ def load_static_findings(raw: Mapping[str, Any]) -> StaticFindingsStore:
 
 def read_static_findings(directory: Path) -> StaticFindingsStore | None:
     """置き場の static_findings.json を読む。SARIF を渡さなかったレビューは None。"""
-    path = directory / STATIC_FINDINGS_FILE
-    if not path.is_file():
-        return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        # symlink は読み側が止め、下の except で ReviewError にする
+        text = read_stored_file_if_present(directory, STATIC_FINDINGS_FILE)
+        if text is None:
+            return None
+        raw = json.loads(text)
     except (OSError, ValueError) as error:
         raise ReviewError(f"{STATIC_FINDINGS_FILE} が読めません: {error!r}") from error
     if not isinstance(raw, dict):

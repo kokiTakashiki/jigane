@@ -106,9 +106,10 @@ def _attachment_lines(review: Review, design_doc: DesignDocOrigin) -> list[str]:
 def origin_lines(review: Review) -> list[str]:
     """種類ごとの出所の行。
 
-    PR は題と URL、範囲は範囲の文字列、設計書は版と選択を持つ。ファイルのレビューは持たない。
+    PR は題と URL、範囲は範囲の文字列、設計書は版と選んだファイルと付属の文書を持つ。
+    機能のレビューは出所の行を持たず、空を返す。
 
-    new、show、refresh、list はここから引く。
+    new、show、refresh が source_lines を通して引く。
     """
     match review.origin:
         case PullRequestOrigin(info=info):

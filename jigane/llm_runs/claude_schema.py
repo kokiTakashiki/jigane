@@ -4,7 +4,10 @@ from pydantic import BaseModel, JsonValue
 
 
 def json_schema_of(model: type[BaseModel]) -> dict[str, JsonValue]:
-    """claude の `--json-schema` へ渡すスキーマ。title と discriminator は除き、$ref は展開する"""
+    """claude の `--json-schema` へ渡すスキーマ。
+
+    title と discriminator は除き、$ref は展開する。
+    """
     schema = model.model_json_schema()
     definitions = schema.pop("$defs", {})
     return _object_without_titles(_object_with_references(schema, definitions))

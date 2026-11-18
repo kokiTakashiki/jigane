@@ -44,6 +44,10 @@ jigane *args:
 debug-errors *args:
     uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug errors {{quote(args)}}
 
+# データの置き場と repository-docs.toml のパス、根の権限の検査の結果を示す（引数はそのまま jigane debug paths へ通す。--json で機械が読む形。出力は暫定）。
+debug-paths *args:
+    uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug paths {{quote(args)}}
+
 # レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）。
 debug-review-id *args:
     uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug review-id {{quote(args)}}

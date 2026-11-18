@@ -1,22 +1,12 @@
-import importlib.util
 import subprocess
-from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-ROOT = Path(__file__).resolve().parent.parent
+from script_loader import import_script
 
 
 def load_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "audit_dependencies", ROOT / "scripts" / "audit_dependencies.py"
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("audit_dependencies")
 
 
 def record_runs(monkeypatch: pytest.MonkeyPatch, audit_code: int) -> tuple[list[list[str]], int]:

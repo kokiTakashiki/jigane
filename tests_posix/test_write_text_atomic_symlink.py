@@ -13,7 +13,7 @@ from jigane.languages.approval import ApprovedContent, FileDigest
 from jigane.languages.enabled import EnabledLanguage, load_enabled, save_enabled
 from jigane.storage import atomic_write
 from jigane.storage.atomic_write import write_text_atomic
-from jigane.storage.locking import open_lock_file
+from jigane.storage.locking import open_no_follow
 from jigane.storage.real_directory import require_real_directory
 from jigane.storage.symlink_guard import StoredFileSymlinkError
 
@@ -106,7 +106,7 @@ def test_three_paths_raise_the_same_error(tmp_path: Path) -> None:
     link.symlink_to(tmp_path)
     for action in (
         lambda: write_text_atomic(link, "x"),
-        lambda: open_lock_file(link, os.O_RDWR),
+        lambda: open_no_follow(link, os.O_RDWR),
         lambda: require_real_directory(link),
     ):
         with pytest.raises(StoredFileSymlinkError, match=re.escape(str(link))):

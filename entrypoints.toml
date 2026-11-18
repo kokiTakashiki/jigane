@@ -31,6 +31,11 @@ description = "jigane が返す失敗の種類を一覧する（引数はその�
 commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane debug errors {args}"]
 
 [[task]]
+name = "debug-paths"
+description = "データの置き場と repository-docs.toml のパス、根の権限の検査の結果を示す（引数はそのまま jigane debug paths へ通す。--json で機械が読む形。出力は暫定）"
+commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane debug paths {args}"]
+
+[[task]]
 name = "debug-review-id"
 description = "レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）"
 commands = ["uv run --locked --directory {invocation_dir} --project {project_dir} jigane debug review-id {args}"]

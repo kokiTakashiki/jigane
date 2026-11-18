@@ -20,7 +20,7 @@ from jigane.findings.records import HistoryWarning
 from jigane.groups.definitions import Effort, GroupId
 from jigane.llm_runs import claude, pricing
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
-from jigane.reviews.catalog import collapse_skipped_warnings, load_review
+from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import Review
 from jigane.reviews.resolution import resolve_review
 from jigane.skills.assembly import AssemblyInput
@@ -262,13 +262,12 @@ def estimate_and_print(
 def run(args: argparse.Namespace, context: Context) -> int:
     del context  # 見積もりは LLM を呼ばない
     mcp = load_mcp_selection(args.mcps, args.group, args.mcp_guide)
-    with collapse_skipped_warnings():
-        estimate_and_print(
-            args.review,
-            args.group,
-            as_json=args.json,
-            effort=args.effort,
-            max_budget_usd=args.max_budget_usd_per_call,
-            mcp=mcp,
-        )
+    estimate_and_print(
+        args.review,
+        args.group,
+        as_json=args.json,
+        effort=args.effort,
+        max_budget_usd=args.max_budget_usd_per_call,
+        mcp=mcp,
+    )
     return EXIT_OK

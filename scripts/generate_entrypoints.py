@@ -502,7 +502,7 @@ def _parse_facts(table: dict[str, Any]) -> Facts:
         elif not isinstance(value, str):
             raise ValueError(f"[entrypoints]: {key} は文字列でなければならない")
     facts = Facts(**{key: value for key, value in table.items() if key not in clone_keys})
-    if "subproject" in table and not SUBPROJECT_NAME.match(facts.subproject):
+    if "subproject" in table and not SUBPROJECT_NAME.fullmatch(facts.subproject):
         raise ValueError(
             f"[entrypoints]: subproject は木の下の一つの名前にする: {facts.subproject!r}"
         )
@@ -547,7 +547,7 @@ def _parse_tool(table: dict[str, Any], index: int) -> Tool:
     if bool(known_broken) != bool(verified):
         raise ValueError(f"tool[{index}]: known_broken と verified は両方を書くか、両方を省く")
     for key, version in (("known_broken", known_broken), ("verified", verified)):
-        if version and not VERSION.match(version):
+        if version and not VERSION.fullmatch(version):
             raise ValueError(f"tool[{index}]: {key} は「数.数.数」の形にする: {version!r}")
     if verified:
         order = [tuple(int(n) for n in v.split(".")) for v in (known_broken, verified)]

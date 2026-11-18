@@ -1,20 +1,14 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from script_loader import import_script
 
 ROOT = Path(__file__).parent.parent
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_command_table.py"
-    spec = importlib.util.spec_from_file_location("generate_command_table", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_command_table")
 
 
 def test_readme_table_matches_the_generated_one() -> None:

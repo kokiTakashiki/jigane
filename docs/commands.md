@@ -116,6 +116,8 @@ jigane list [--archived] [--json]
 
 レビューを一覧します。`--archived` を省くとアーカイブしていないレビュー、付けるとアーカイブしたレビューだけを出します。両方を合わせた一覧を出す値はありません。
 
+古い版などで読めない記録は、`jigane list` が 1 件ずつ理由つきで警告します。`list` 以外の副コマンドは、置き場の全件を内部で引く間の同じ警告を、出力の末尾の 1 行にまとめます。一回の実行で置き場を何度引いても同じ記録は一度だけ数え、件数と、理由を見る `jigane list` だけを示します。
+
 `--json` の出力は、レビューごとに 1 要素を持つ配列です。各要素は `"id"` の鍵を持ち、値はレビューの識別子の文字列です（例 `owner/repo@name`）。識別子は `<owner>/<repo>` の後ろに、種類ごとの区切り（PR は `#`、範囲は `@`、ファイルは `:`、設計書は `+`）と、PR は番号、ほかは名前を続けた形です。`--archived` を付けたときの一覧も、同じ形の要素の配列です。
 
 ### jigane archive と unarchive
@@ -361,6 +363,7 @@ jigane debug prompt <レビュー> <群> [--mcps <名前>...] [--max-budget-usd-
 jigane debug run <レビュー> <群> --yes --max-usd <額> [--effort <effort>] [--mcps <名前>...] [--mcp-guide <パス>] [--json]
 jigane debug stats [--json] [--page-size <件数>] [--after <印>] [--with-body]
 jigane debug review-id [--json]
+jigane debug paths [--json]
 ```
 
 jigane の内部を確かめる口です。`pip debug` に倣い、利用者と開発者が使います。**出力は暫定で、jigane の版で変わることがあります。** 確かめる対象は `errors` と `stats` の他にも増えます。
@@ -375,7 +378,19 @@ jigane の内部を確かめる口です。`pip debug` に倣い、利用者と�
 
 `review-id` は、レビューの識別子（`owner/repo` に区切りとキーを続けた形）の文法を示します。`--json` の出力は `{"pattern": ..., "kinds": [{"kind": ..., "form": ...}, ...]}` です。`pattern` は識別子全体に当てる正規表現、`kinds` は種類（`ReviewKind` の値）とその形で、区切りは種類ごとに違います。キーの規則も種類ごとに違い（PR は数字、それ以外は名前）、`pattern` には含まれません。識別子の長さの上限はコードに無いため、`max_length` は出しません。どちらも `ReviewKind` と識別子の文法から機械的に作ります。
 
-`make debug-errors ARGS="--json"` と `make debug-review-id ARGS="--json"` でも走らせられます。
+`paths` は、jigane が読み書きする置き場のパスと、データの置き場の根の検査の結果を示します。根を作らず、何も書きません。`--json` の出力は `{"data_home": ..., "data_home_check": {"exists": ..., "stops": ..., "kind": ...}, "repository_docs_settings": ...}` です。`data_home` は「[データの置き場](#データの置き場)」の順で決まる根の絶対パス、`repository_docs_settings` は根の下の `repository-docs.toml` の絶対パスで、ファイルが無くても同じパスを返します。`data_home_check` は、レビューを書き込む副コマンドが根に当てる検査と同じ判定です。`exists` は根があるか、`stops` はその検査で書き込みの副コマンドが止まるかを表します。`kind` は判定の理由で、次のいずれかです。
+
+| `kind` | 意味 | `stops` |
+| --- | --- | --- |
+| `ok` | 所有者が実行ユーザーで、group と other に書き込み権限が無い | `false` |
+| `absent` | 根が無い。書き込みの副コマンドが 0700 で作る | `false` |
+| `owner_mismatch` | 根の所有者が実行ユーザーと違う | `true` |
+| `writable_by_others` | group か other に書き込み権限がある | `true` |
+| `not_checked` | Windows。権限は ACL に任せ、検査しない | `false` |
+
+根が symlink のときは、その先を調べます。読む側は、`kind` の値が増えても誤らないよう、止まるかどうかを `stops` で判定してください。`--json` が無いときは、三つを一行ずつ出します。
+
+`make debug-errors ARGS="--json"`、`make debug-review-id ARGS="--json"`、`make debug-paths ARGS="--json"` でも走らせられます。
 
 `debug run` は、`--yes` と有限で 0 より大きい `--max-usd` が揃い、見込みが上限以内のときだけ起動します。それ以外は何も起動せず、次の終了コードで止まります。
 
@@ -395,7 +410,7 @@ jigane の内部を確かめる口です。`pip debug` に倣い、利用者と�
 2. Windows では、`%LOCALAPPDATA%` の下の `jigane`。`LOCALAPPDATA` が設定されていない環境は想定せず、根を決められずに失敗します。
 3. Windows 以外では、環境変数 `XDG_DATA_HOME` の下の `jigane`。`XDG_DATA_HOME` が空または未設定なら、`~/.local/share` の下の `jigane`。
 
-`JIGANE_HOME` は、Windows でも Windows 以外でも、`LOCALAPPDATA` と `XDG_DATA_HOME` に優先します。根が無ければ、jigane は他の利用者に読ませない権限（0700）で作ります。既にある根の権限は変えません。ただし、group か other に書き込み権限がある場合は、「データの置き場の権限が広すぎます。chmod 700 で狭めてください」と表示して止まります。止まったら `chmod 700 <根>` で狭めてください。既にある根の所有者が実行しているユーザーでない場合は、「データの置き場の所有者が実行ユーザーと違います。所有者のユーザーで実行するか、置き場を自分の所有に移してください」と表示して止まります。chmod では直せないので、所有者のユーザーで実行するか、根を自分の所有に移してください。読み取りの権限だけなら止まりませんが、置き場には差分、PR の本文、Claude の出力が平文で入るので、group や other に読める権限（0755 など）のままだと、他のユーザーに内容を読まれるおそれがあります。`chmod 700 <根>` で狭めてください。レビューを書き込む副コマンドは、根の権限が広いと止まります。`show` や `list` などの読み取りは止まりません。Windows の権限は ACL で決まるので、この検査をしません。レビューのディレクトリも 0700 で作ります。
+`JIGANE_HOME` は、Windows でも Windows 以外でも、`LOCALAPPDATA` と `XDG_DATA_HOME` に優先します。根が無ければ、jigane は他の利用者に読ませない権限（0700）で作ります。既にある根の権限は変えません。ただし、group か other に書き込み権限がある場合は、「データの置き場の権限が広すぎます。chmod 700 で狭めてください」と表示して止まります。止まったら `chmod 700 <根>` で狭めてください。既にある根の所有者が実行しているユーザーでない場合は、「データの置き場の所有者が実行ユーザーと違います。所有者のユーザーで実行するか、置き場を自分の所有に移してください」と表示して止まります。chmod では直せないので、所有者のユーザーで実行するか、根を自分の所有に移してください。読み取りの権限だけなら止まりませんが、置き場には差分、PR の本文、Claude の出力が平文で入るので、group や other に読める権限（0755 など）のままだと、他のユーザーに内容を読まれるおそれがあります。`chmod 700 <根>` で狭めてください。レビューを書き込む副コマンドは、根の権限が広いと止まります。`show` や `list` などの読み取りは止まりません。Windows の権限は ACL で決まるので、この検査をしません。根までの途中のディレクトリが無いときは、jigane が新しく作ったものだけを 0700 で作り、既にある親の権限は変えません。レビューのディレクトリも 0700 で作ります。
 
 ## リポジトリの文書を渡す
 

@@ -112,7 +112,7 @@ def list_templates() -> list[TemplateEntry]:
 
 
 def find_template(name: str) -> TemplateEntry:
-    if not _NAME_PATTERN.match(name):
+    if not _NAME_PATTERN.fullmatch(name):
         raise ReviewError(f"テンプレートの名前が不正です: {name!r}")
     for entry in list_templates():
         if entry.name == name:
@@ -238,6 +238,8 @@ def _group_context(
     findings = [item["finding"] for item in items]
     return {
         "group": group,
+        # テンプレートが群の値の文字列を直に書くと、GroupId の値とずれても気づけない
+        "grouped_by_theme": group == MICRO,
         "label": GROUP_LABELS[group],
         "findings": findings,
         # 通常の指摘のあとに、種類の宣言の順で節を分ける種類の指摘を並べる

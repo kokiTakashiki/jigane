@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES, TreeFileTooLargeError, read_tree_bytes
-from jigane.judgment_map.classification import FilePair, is_whole_deletion, matches_any
-from jigane.judgment_map.configuration import Config
+from jigane.judgment_map.classification import FilePair, is_whole_deletion
+from jigane.judgment_map.configuration import Config, is_excluded
 from jigane.preconditions.required import required
 
 CHANGES_FILE = "changes.diff"
@@ -46,7 +46,7 @@ def file_change(base_root: Path, head_root: Path, pair: FilePair, config: Config
     path = pair.new_path or pair.old_path
     path = required(path)
     header = _header_lines(pair)
-    if matches_any(path, config.exclude):
+    if is_excluded(path, config):
         return [*header, OMITTED_GENERATED]
     try:
         old_lines = _read_lines(base_root, pair.old_path)

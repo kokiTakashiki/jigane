@@ -62,6 +62,7 @@ from jigane.reviews.lifecycle import Review
 from jigane.skills.input_budget import StoredBudgetStop
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.store_format import require_current_version
 
 LOGGER = logging.getLogger(__name__)
@@ -611,10 +612,10 @@ def dump_runs(runs: Mapping[GroupId, GroupRun]) -> dict[str, Any]:
 
 def read_runs(directory: Path) -> dict[GroupId, GroupRun]:
     """置き場の runs.json を群ごとの記録として読む。ファイルが無ければ空。"""
-    path = directory / RUNS_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, RUNS_FILE)
+    if text is None:
         return {}
-    return dict(load_runs(json.loads(path.read_text(encoding="utf-8"))).groups)
+    return dict(load_runs(json.loads(text)).groups)
 
 
 def write_runs(directory: Path, runs: Mapping[GroupId, GroupRun]) -> None:

@@ -5,7 +5,6 @@ LAUNCHERS である。
 """
 
 import ast
-import importlib.util
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +12,7 @@ from types import ModuleType
 from typing import Any
 
 from ruamel.yaml import YAML
+from script_loader import import_script
 
 from jigane.git.process import LAUNCHABLE_EXECUTABLES, _is_claude
 
@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PROCESS_PATH = ROOT / "jigane" / "git" / "process.py"
 CLAUDE_PATH = ROOT / "jigane" / "llm_runs" / "claude.py"
 RULE_PATH = ROOT / "ast-grep" / "rules" / "no-claude-launch-outside-llm-runs.yml"
-EGRESS_PATH = ROOT / "scripts" / "check_egress.py"
 
 # 規則が拒む名前を、規則の正規表現に当てる候補。規則が拾う範囲を固定するため、
 # 拾わない形も並べる。
@@ -29,12 +28,7 @@ RULE_CANDIDATES = ("claude", "claude.exe", "claude.py", "claudex", "claude_helpe
 
 
 def _load_checker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_egress", EGRESS_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_egress")
 
 
 def _top_level_functions(path: Path) -> set[str]:

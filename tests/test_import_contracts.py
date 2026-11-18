@@ -1,20 +1,14 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from script_loader import import_script
 
 ROOT = Path(__file__).parent.parent
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_import_contracts.py"
-    spec = importlib.util.spec_from_file_location("generate_import_contracts", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_import_contracts")
 
 
 def pyproject_text() -> str:

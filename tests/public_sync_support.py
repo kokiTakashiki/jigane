@@ -1,13 +1,12 @@
 """public_sync の試験が共有する補助。一時の git リポジトリで、公開の複製と書き出した木を組む。"""
 
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from pr_support import commit_all, git
+from script_loader import import_script
 
-ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_FILES = {
     "pyproject.toml": '[project]\nversion = "0.1.7"\n',
     ".gitignore": ".venv/\n.ruff_cache/\ndist/\n",
@@ -34,13 +33,7 @@ IGNORED_IN_PUBLIC = {
 
 
 def load_sync() -> ModuleType:
-    path = ROOT / "scripts" / "public_sync.py"
-    spec = importlib.util.spec_from_file_location("public_sync", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("public_sync")
 
 
 def write_files(base: Path, files: dict[str, str]) -> None:

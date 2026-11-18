@@ -81,7 +81,7 @@ def _imports(indexes: Indexes, importer: str, imported: str) -> bool:
     return False
 
 
-def _history_source(review: Review) -> tuple[Path, str] | None:
+def history_source(review: Review) -> tuple[Path, str] | None:
     """履歴を読む git の場所と、読む先のコミット。履歴を持たない出所は None。
 
     repository_root は保存した変更後の木で .git を持たないので、履歴の場所には使わない。
@@ -101,7 +101,7 @@ def _history_source(review: Review) -> tuple[Path, str] | None:
 
 def _co_changes(review: Review) -> list[CoChange] | None:
     """変更したファイルの共変更。履歴を読めない（git でない、コミットが無い）ときは None。"""
-    source = _history_source(review)
+    source = history_source(review)
     if source is None:
         return None
     git_dir, revision = source

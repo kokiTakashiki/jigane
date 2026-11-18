@@ -27,6 +27,7 @@ from jigane.judgment_map.classification import Segment
 from jigane.judgment_map.unreadable_constructs import Occurrence, unreadable_constructs
 from jigane.regex.gate_tags import REGEX_ANNOTATION_ID, annotation_entry, detect_tags, regex_entry
 from jigane.storage.atomic_write import write_text_atomic
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import require_current_version
 
@@ -165,10 +166,10 @@ def _unreadable_entry(number: str, item: Occurrence) -> GateEntry:
 
 
 def load_gates(directory: Path) -> Gates | None:
-    path = directory / GATES_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, GATES_FILE)
+    if text is None:
         return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(text)
     if not isinstance(raw, dict):
         raise ReviewError(f"{GATES_FILE} の最上位が辞書ではありません")
     stored = require_current_version(GATES_FILE, raw, current=GATES_FORMAT)

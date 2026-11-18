@@ -1,0 +1,25 @@
+id: no-raw-read-of-stored-file
+language: python
+severity: error
+message: レビューの保存先のファイルを素の read_text、read_bytes、open で読んでいる。symlink を辿らない入口 jigane.storage.review_access の read_stored_file、read_stored_file_if_present、read_stored_text を通す。
+# 製品のコード（jigane/）だけに掛ける。tests/ は検査の対象外
+note: 拾うのは、保存先のファイル名の定数（REVIEW_FILE、MAP_FILE など）を `/` でつないだパスに対する、.read_text( と .read_bytes( と .open( の直接の呼び出しと、open( への直接の引数だけである。パスを変数に入れてから読む形、定数でなく文字列で名前を書く形、別名で import した定数、定数を属性として参照する形（store.REVIEW_FILE）、pathlib 以外で開く形（os.open、io.open）は拾わない。定数の一覧は下の regex に手で持つので、保存先のファイル名の定数を足したらここにも足す。
+ignores:
+  - tests/**
+  - tests_posix/**
+  - tests_windows/**
+  - scripts/**
+  - docs/**
+  # 入口の定義そのもの
+  - jigane/storage/**
+constraints:
+  FILE:
+    kind: identifier
+    regex: ^(REVIEW|MAP|REGIONS|PAIRS|FINDINGS|HISTORY|RUNS|IN_PROGRESS|GATES|SELECTION|BACKGROUND|BOT_COMMENTS|STOPPED|STATIC_FINDINGS|CHANGES|ARCHIVE_MARKER)_FILE$
+rule:
+  any:
+    - pattern: ($DIRECTORY / $FILE).read_text($$$)
+    - pattern: ($DIRECTORY / $FILE).read_bytes($$$)
+    - pattern: ($DIRECTORY / $FILE).open($$$)
+    - pattern: open($DIRECTORY / $FILE, $$$)
+    - pattern: open($DIRECTORY / $FILE)

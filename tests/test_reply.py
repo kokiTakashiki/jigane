@@ -384,3 +384,17 @@ def test_show_json_lists_every_finding_without_an_in_reply_field(
     # 捨てた候補から写した nit も、ほかの nit と同じに扱う。選んでいなくても除かない
     assert {"F5", "F7", "F8", "F9"} <= {f["id"] for f in findings}
     assert all("in_reply" not in f for f in findings)
+
+
+def test_only_the_micro_section_of_the_rendered_report_is_split_by_theme(
+    review: Review, tmp_path: Path
+) -> None:
+    pick(review, "F1", "F2", "F3", "F4", "F5", "F6")
+    sections: dict[str, list[str]] = {}
+    for line in report_text(review, tmp_path).splitlines():
+        if line.startswith("## "):
+            sections[line] = []
+        elif line.startswith("### "):
+            sections[next(reversed(sections))].append(line)
+    themed = {heading: subs for heading, subs in sections.items() if subs}
+    assert themed == {"## 実装": ["### 命名の揺れ", "### その他"]}

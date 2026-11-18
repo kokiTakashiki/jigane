@@ -11,6 +11,7 @@ from test_policy_classes import feature_review, whole
 from tree_sitter import Node
 
 from jigane.figures.models import FigureKind, TableFigure
+from jigane.languages import python_public_names as module
 from jigane.languages import registry
 from jigane.languages.base import (
     AddedPublicName,
@@ -19,6 +20,7 @@ from jigane.languages.base import (
     PublicNameKind,
 )
 from jigane.languages.java import JavaAdapter
+from jigane.languages.public_names_core import Rules, parse_all
 from jigane.languages.python_public_names import added_public_names
 from jigane.reviews.lifecycle import Review
 from jigane.skills import macro, policy_callers, policy_figures
@@ -446,3 +448,50 @@ def test_added_public_names_scan_each_changed_file_once(monkeypatch: pytest.Monk
     after = {"a.py": "def one(x):\n    return x\n", "b.py": "def two(y):\n    return one(y)\n"}
     added_public_names({}, after, set(after))
     assert len(scanned) == len(after)
+
+
+def test_property_read_as_attribute_is_a_caller() -> None:
+    after = (
+        "class Box:\n    @property\n    def size(self):\n        return 1\n\n\n"
+        "def use(box):\n    return box.size\n"
+    )
+    assert _names({"m.py": ""}, {"m.py": after})["Box.size"].callers == ("m.py の use",)
+
+
+def test_function_passed_as_a_value_is_a_caller() -> None:
+    after = "def key(x):\n    return x\n\n\ndef use(items):\n    return sorted(items, key=key)\n"
+    assert _names({"m.py": ""}, {"m.py": after})["key"].callers == ("m.py の use",)
+
+
+def test_assigning_an_attribute_is_not_a_caller_of_the_method() -> None:
+    after = (
+        "class Box:\n    @property\n    def size(self):\n        return 1\n\n\n"
+        "def fill(box):\n    box.size = 2\n    box.size += 1\n    del box.size\n"
+    )
+    assert _names({"m.py": ""}, {"m.py": after})["Box.size"].callers == ()
+
+
+def test_the_definition_itself_is_not_a_caller() -> None:
+    after = "def key(x):\n    return x\n"
+    assert _names({"m.py": ""}, {"m.py": after})["key"].callers == ()
+
+
+def test_a_call_is_one_site_not_a_call_and_a_name_read() -> None:
+    source = "def key(x):\n    return x\n\n\ndef use():\n    return key(1)\n"
+    tree = parse_all(
+        {"m.py": source}, Rules(ast.parse, module._walk, module._sites_of, key_of=module._key_of)
+    )
+    definition = tree.definitions[("m.py", "key")]
+    assert len(module._sites_of(definition, tree)) == 1
+
+
+def test_a_method_call_is_one_site_not_a_call_and_an_attribute_read() -> None:
+    source = (
+        "class Box:\n    def size(self):\n        return 1\n\n\n"
+        "def use(box):\n    return box.size()\n"
+    )
+    tree = parse_all(
+        {"m.py": source}, Rules(ast.parse, module._walk, module._sites_of, key_of=module._key_of)
+    )
+    definition = tree.definitions[("m.py", "Box.size")]
+    assert len(module._sites_of(definition, tree)) == 1

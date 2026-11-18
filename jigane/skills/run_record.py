@@ -24,6 +24,7 @@ from jigane.llm_runs.cost import total_by_source
 from jigane.reviews.lifecycle import Review
 from jigane.storage.atomic_write import write_text_atomic
 from jigane.storage.locking import review_lock
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.store_format import require_current_version
 
 STOPPED_FILE = "stopped_runs.json"
@@ -268,10 +269,10 @@ def dump_stopped(runs: Mapping[GroupId, list[StoppedRun]]) -> dict[str, Any]:
 
 
 def _read_in_progress(directory: Path) -> dict[GroupId, RunInProgress]:
-    path = directory / IN_PROGRESS_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, IN_PROGRESS_FILE)
+    if text is None:
         return {}
-    return load_in_progress(json.loads(path.read_text(encoding="utf-8")))
+    return load_in_progress(json.loads(text))
 
 
 def _write_in_progress(directory: Path, runs: Mapping[GroupId, RunInProgress]) -> None:
@@ -282,10 +283,10 @@ def _write_in_progress(directory: Path, runs: Mapping[GroupId, RunInProgress]) -
 
 
 def _read_stopped(directory: Path) -> dict[GroupId, list[StoppedRun]]:
-    path = directory / STOPPED_FILE
-    if not path.is_file():
+    text = read_stored_file_if_present(directory, STOPPED_FILE)
+    if text is None:
         return {}
-    return load_stopped(json.loads(path.read_text(encoding="utf-8")))
+    return load_stopped(json.loads(text))
 
 
 def _write_stopped(directory: Path, runs: Mapping[GroupId, list[StoppedRun]]) -> None:

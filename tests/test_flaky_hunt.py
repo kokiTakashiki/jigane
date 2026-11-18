@@ -1,23 +1,12 @@
-import importlib.util
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-ROOT = Path(__file__).parent.parent
+from script_loader import import_script
 
 
 def load_module() -> ModuleType:
-    path = ROOT / "scripts" / "flaky_hunt.py"
-    spec = importlib.util.spec_from_file_location("flaky_hunt", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # dataclass が自分のモジュールを sys.modules から引くため、実行の前に登録する。
-    sys.modules["flaky_hunt"] = module
-    spec.loader.exec_module(module)
-    return module
+    return import_script("flaky_hunt", register=True)
 
 
 flaky_hunt = load_module()

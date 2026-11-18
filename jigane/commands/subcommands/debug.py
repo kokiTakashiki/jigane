@@ -17,6 +17,7 @@ from jigane.commands.mcp_argument import add_mcps_argument
 from jigane.commands.output import print_lines
 from jigane.commands.subcommands import run as run_subcommand
 from jigane.groups.definitions import Effort
+from jigane.repository_docs.settings import settings_path
 from jigane.storage import store
 
 
@@ -108,6 +109,11 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
     )
     review_id_parser.add_argument("--json", action="store_true")
     review_id_parser.set_defaults(handler=run_review_id)
+    paths_parser = actions.add_parser(
+        "paths", help=f"置き場のパスと根の検査の結果を示します。{PROVISIONAL_NOTICE}"
+    )
+    paths_parser.add_argument("--json", action="store_true")
+    paths_parser.set_defaults(handler=run_paths)
 
 
 def run_errors(args: argparse.Namespace, context: Context) -> int:
@@ -197,5 +203,33 @@ def run_review_id(args: argparse.Namespace, context: Context) -> int:
     print_lines(
         [f"{item['kind']}\t{item['form']}" for item in kinds]
         + [f"全体の形: {store.full_identifier_pattern().pattern}", PROVISIONAL_NOTICE]
+    )
+    return EXIT_OK
+
+
+def run_paths(args: argparse.Namespace, context: Context) -> int:
+    del context
+    # ensure_data_home は呼ばない。根を作らず、何も書かない
+    home = store.data_home()
+    check = store.check_data_home(home)
+    settings = settings_path()
+    if args.json:
+        body = {
+            "data_home": str(home),
+            "data_home_check": {
+                "exists": check.exists,
+                "stops": check.stops,
+                "kind": check.kind.value,
+            },
+            "repository_docs_settings": str(settings),
+        }
+        print(json.dumps(body, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    print_lines(
+        [
+            f"data_home\t{home}",
+            f"data_home_check\t{check.kind.value}",
+            f"repository_docs_settings\t{settings}",
+        ]
     )
     return EXIT_OK

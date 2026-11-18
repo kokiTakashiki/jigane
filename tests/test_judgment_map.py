@@ -19,7 +19,7 @@ from jigane.judgment_map.classification import (
     classify,
     file_line_counts,
 )
-from jigane.judgment_map.configuration import DEFAULT_EXCLUDE, Config, load_config
+from jigane.judgment_map.configuration import DEFAULT_EXCLUDE, Config, is_excluded, load_config
 from jigane.judgment_map.kinds import LEVEL_OF_KIND, Kind, Level, StoredMode
 from jigane.languages.base import Span
 from jigane.preconditions.required import required
@@ -332,6 +332,23 @@ def test_levels() -> None:
     assert LEVEL_OF_KIND[Kind.TEST] == Level.CONFIRM
     assert LEVEL_OF_KIND[Kind.GENERATED] == Level.MACHINE
     assert Level.REQUIRED.rank > Level.CONFIRM.rank > Level.MACHINE.rank
+
+
+@pytest.mark.parametrize(
+    ("path", "excluded"),
+    [
+        ("uv.lock", True),
+        ("gen/a.py", True),
+        ("src/a.py", False),
+        ("gen", False),
+    ],
+)
+def test_is_excluded_follows_the_exclude_patterns(path: str, *, excluded: bool) -> None:
+    assert is_excluded(path, Config(exclude=("gen/*", "*.lock"))) is excluded
+
+
+def test_is_excluded_is_false_for_an_empty_exclude() -> None:
+    assert is_excluded("uv.lock", Config(exclude=())) is False
 
 
 def test_load_config(tmp_path: Path) -> None:

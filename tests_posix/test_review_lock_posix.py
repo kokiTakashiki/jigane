@@ -16,7 +16,7 @@ from lock_support import overlapping_merge, run_in_threads
 from jigane.findings.records import load_findings_state
 from jigane.storage.locking import (
     hold_replaceable_file_lock,
-    open_lock_file,
+    open_no_follow,
     remove_file_if_unlocked,
     review_lock,
 )
@@ -59,10 +59,10 @@ def test_lstat_check_refuses_symlink_without_o_nofollow(
     lock_path = tmp_path / ".lock"
     lock_path.symlink_to(target)
     with pytest.raises(StoredFileSymlinkError):
-        open_lock_file(lock_path, os.O_CREAT | os.O_RDWR)
+        open_no_follow(lock_path, os.O_CREAT | os.O_RDWR)
     assert not target.exists()
     regular = tmp_path / "regular"
-    descriptor = open_lock_file(regular, os.O_CREAT | os.O_RDWR)
+    descriptor = open_no_follow(regular, os.O_CREAT | os.O_RDWR)
     os.close(descriptor)
     assert regular.exists()
 
@@ -92,7 +92,7 @@ def test_symlink_swapped_right_after_open_closes_descriptor_and_refuses(
     monkeypatch.setattr(os, "open", swapping_open)
     monkeypatch.setattr(os, "close", recording_close)
     with pytest.raises(StoredFileSymlinkError):
-        open_lock_file(lock_path, os.O_CREAT | os.O_RDWR)
+        open_no_follow(lock_path, os.O_CREAT | os.O_RDWR)
     assert len(opened) == 1
     assert closed == opened
     with pytest.raises(OSError, match="Bad file descriptor"):

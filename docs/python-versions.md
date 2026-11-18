@@ -4,7 +4,7 @@
 
 ## 対応するバージョン
 
-jigane 0.1.9 が対応する Python は、3.12 から 3.14 までです。
+jigane が対応する Python は、3.12 から 3.14 までです。
 
 下限の 3.12 は、`pyproject.toml` の `requires-python = ">=3.12"` で宣言しています。jigane は、この下限より古い Python で動くことを約束しません。
 
@@ -20,11 +20,13 @@ jigane 0.1.9 が対応する Python は、3.12 から 3.14 までです。
 
 ## バージョンを変えるとき
 
-下限か上限を変えるときは、次の三つを同じ変更で直します。
+下限か上限を変えるときは、次を同じ変更で直します。
 
-1. `pyproject.toml` の `requires-python`
-2. リリースの前の検査で走らせるバージョンの一覧
-3. この文書の「対応するバージョン」の節
+1. `pyproject.toml` の `requires-python`（下限）
+2. `pyproject.toml` の `[tool.mypy]` の `python_version` と `[tool.ruff]` の `target-version`（下限）
+3. `examples/jigane-language-kotlin/pyproject.toml` の `requires-python`（下限）
+4. 非公開の CI のワークフローで、下限と上限の版を並べた検査の matrix（開発に使うバージョンは、同じワークフローのゲートの job が `.python-version` で走らせます）
+5. この文書の「対応するバージョン」の節
 
 開発に使うバージョン（`.python-version`）は、下限と上限のあいだのバージョンから選びます。
 

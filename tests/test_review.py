@@ -679,8 +679,8 @@ def test_collapse_skipped_warnings_reports_older_reviews_as_one_warning(
     assert [item.id for item in listed] == [kept.id]
     [message] = listing_warnings(caplog)
     assert "5 件" in message
-    assert "ほか 2 件" in message
-    assert "jigane new" in message
+    assert "jigane list" in message
+    assert str(older[0].id) not in message
     # 抜けた後は 1 件ずつの警告に戻る
     caplog.clear()
     list_review_summaries()

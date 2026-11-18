@@ -1,4 +1,3 @@
-import importlib.util
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -6,20 +5,13 @@ from types import ModuleType
 import pytest
 from fakes import run_command_stub
 from pr_support import git
+from script_loader import import_script
 
 from jigane.git.process import CommandError
 
-ROOT = Path(__file__).resolve().parent.parent
-
 
 def load_script() -> ModuleType:
-    path = ROOT / "scripts" / "changed_tests.py"
-    spec = importlib.util.spec_from_file_location("changed_tests", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("changed_tests")
 
 
 changed_tests = load_script()

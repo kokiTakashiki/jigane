@@ -1,22 +1,15 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 from pr_support import git
+from script_loader import import_script
 
-ROOT = Path(__file__).resolve().parent.parent
 NOREPLY = "1+octo@users.noreply.github.com"
 
 
 def load_checker() -> ModuleType:
-    path = ROOT / "scripts" / "check_commit_emails.py"
-    spec = importlib.util.spec_from_file_location("check_commit_emails", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_commit_emails")
 
 
 def commit_as(repo: Path, name: str, author: str, committer: str) -> None:

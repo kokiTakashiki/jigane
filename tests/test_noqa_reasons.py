@@ -1,18 +1,13 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+from script_loader import import_script
+
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "scripts" / "check_noqa_reasons.py"
 
 
 def load_checker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_noqa_reasons", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_noqa_reasons")
 
 
 def offending_lines(source: str) -> list[int]:

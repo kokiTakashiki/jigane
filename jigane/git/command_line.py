@@ -21,6 +21,7 @@ class GitSubcommand(StrEnum):
     SYMBOLIC_REF = "symbolic-ref"
     REMOTE = "remote"
     REV_LIST = "rev-list"
+    CHECK_ATTR = "check-attr"
 
 
 def build_git_invocation(
@@ -39,9 +40,10 @@ def build_git_invocation(
     <固定の値…> <コミット…> <コミット:パス…>`
     FETCH のときだけ `--upload-pack=git-upload-pack` を、DIFF、SHOW、LOG のときだけ
     `--no-ext-diff --no-textconv` を、<オプション…> の前に足す。
+    固定の値は FETCH（リモート名）と CHECK_ATTR（属性の名前）だけが取る。
     pathspecs を渡したときだけ、末尾に `-- <パス…>` を足す（空の並びでも `--` は置く）。
     """
-    if fixed_values and subcommand is not GitSubcommand.FETCH:
+    if fixed_values and subcommand not in (GitSubcommand.FETCH, GitSubcommand.CHECK_ATTR):
         raise ValueError(f"{subcommand} は固定の値を取りません")
     command = [
         # 外の比較コマンドと textconv の変換コマンドを、リポジトリの設定が指していても起動しない

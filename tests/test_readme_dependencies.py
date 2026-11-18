@@ -1,4 +1,3 @@
-import importlib.util
 import shutil
 import sys
 from pathlib import Path
@@ -7,6 +6,7 @@ from types import ModuleType
 import grimp
 import pytest
 from dev_launch import run_tool
+from script_loader import import_script
 
 from jigane.git.process import CommandError
 
@@ -15,13 +15,7 @@ SCRIPT = ROOT / "scripts" / "generate_readme_dependencies.py"
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_readme_dependencies.py"
-    spec = importlib.util.spec_from_file_location("generate_readme_dependencies", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_readme_dependencies")
 
 
 def copy_readmes(destination: Path) -> Path:

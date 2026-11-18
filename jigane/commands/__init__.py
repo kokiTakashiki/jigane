@@ -22,6 +22,7 @@ from jigane.commands.language_guidance import detail_with_guidance
 from jigane.commands.output import install_warning_handler
 from jigane.languages import registry
 from jigane.llm_runs import claude
+from jigane.reviews.catalog import collapse_skipped_warnings
 from jigane.storage.store import data_home, require_private_data_home
 
 
@@ -82,13 +83,28 @@ READ_ONLY_COMMANDS = frozenset(
 )
 
 
-def _require_private_home_for_write(command: str) -> None:
+def _require_private_home_for_write(command: str, action: str | None) -> None:
     if command in READ_ONLY_COMMANDS:
         return  # 読み取りは根の権限が広くても止めない
+    if command == "debug" and action == "paths":
+        return  # 根の検査の結果を示す口なので、検査で止めると示せない
     home = data_home()
     # 根を作る副作用は持たせない。無ければ検査せず、書く側が作る
     if home.exists():
         require_private_data_home(home)
+
+
+def _run_handler(args: argparse.Namespace, context: Context) -> int:
+    if args.command == "list":
+        # list は読めない記録を 1 件ずつ理由つきで見せる入口。畳むと理由が消える
+        return int(args.handler(args, context))
+    # 置き場の全件を引く箇所が、読めない記録ごとに警告を並べないよう、入口で一度だけ囲む
+    with collapse_skipped_warnings():
+        try:
+            return int(args.handler(args, context))
+        finally:
+            # 端末でない標準出力は終了の時に書かれる。先に書き出して、まとめの警告を末尾に置く
+            sys.stdout.flush()
 
 
 def main(
@@ -114,13 +130,13 @@ def main(
             # 言語を使わない副コマンドも止める。登録は副コマンドの中のどこからでも引かれ、
             # 使うかどうかを副コマンドごとに見分ける手段が無いため、壊れた状態を一律に先に知らせる
             registry.require_ready(detail_with_guidance)
-        _require_private_home_for_write(args.command)
+        _require_private_home_for_write(args.command, getattr(args, "action", None))
         context = Context(invoke=invoke)
         if is_terminal is not None:
             context = replace(context, is_terminal=is_terminal)
         if read_answer is not None:
             context = replace(context, read_answer=read_answer)
-        return int(args.handler(args, context))
+        return _run_handler(args, context)
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
     except Exception as error:  # noqa: BLE001 最上位の受け口。型の分からない失敗を報告に回す

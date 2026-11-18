@@ -1,8 +1,12 @@
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+import pytest
+from tree_sitter import Node
+
 from jigane.judgment_map.configuration import DEFAULT_EXCLUDE
-from jigane.languages.base import Declaration, Span, Visibility, parse
+from jigane.languages import swift, swift_nodes
+from jigane.languages.base import Declaration, MemberDecl, Span, Visibility, parse
 from jigane.languages.registry import adapter_for, is_build_path, is_test_path
 from jigane.languages.swift import SwiftAdapter
 
@@ -309,3 +313,50 @@ def test_declarations_continue_after_a_broken_top_level_function() -> None:
 def test_declarations_continue_after_a_broken_member_function() -> None:
     found = declarations("struct S { func (a: Int) {} func after() {} }\n")
     assert {"S", "S.after()"} <= set(found)
+
+
+def _nameless(monkeypatch: pytest.MonkeyPatch, nameless: str) -> list[str]:
+    """`nameless` の名前の宣言だけ、名前を引けない扱いにする。引けなかった宣言の種類を返す。
+
+    tree-sitter は名前を欠く宣言を作らないので、名前の引き当てだけを差し替えて分岐に入れる。
+    """
+    original = swift_nodes.function_name_of
+    skipped: list[str] = []
+
+    def lookup(node: Node) -> swift_nodes.FunctionName | None:
+        found = original(node)
+        if found is not None and found.node.text == nameless.encode():
+            skipped.append(node.type)
+            return None
+        return found
+
+    monkeypatch.setattr(swift, "function_name_of", lookup)
+    return skipped
+
+
+def test_declarations_skip_a_top_level_function_whose_name_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skipped = _nameless(monkeypatch, "nameless")
+    found = declarations("func nameless() {}\nfunc after() {}\n")
+    assert skipped == ["function_declaration"]
+    assert set(found) == {"after()"}
+
+
+def test_declarations_skip_a_protocol_requirement_whose_name_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skipped = _nameless(monkeypatch, "nameless")
+    found = declarations("protocol P { func nameless()\n func after() }\n")
+    assert skipped == ["protocol_function_declaration"]
+    assert set(found) == {"P", "P.after()"}
+
+
+def test_type_members_skip_a_function_whose_name_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skipped = _nameless(monkeypatch, "nameless")
+    source = b"struct S { func nameless() {}\n func after() {} }\n"
+    members = adapter.type_members(parse(adapter, source).root_node, source, "S.swift")
+    assert skipped == ["function_declaration"]
+    assert [m.name for m in members if isinstance(m, MemberDecl)] == ["after"]

@@ -1,20 +1,14 @@
-import importlib.util
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from script_loader import import_script
 
 ROOT = Path(__file__).parent.parent
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_package_readme.py"
-    spec = importlib.util.spec_from_file_location("generate_package_readme", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_package_readme")
 
 
 def read_exact(path: Path) -> str:

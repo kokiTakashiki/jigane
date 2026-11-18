@@ -14,6 +14,7 @@ from jigane.git.tree_files import read_tree_text
 from jigane.judgment_map.classification import BotTouch
 from jigane.preconditions.required import required
 from jigane.pull_request_context import gh
+from jigane.storage.review_access import read_stored_file_if_present
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import require_current_version
 from jigane.text.json_input import loads_bounded
@@ -141,11 +142,11 @@ def read_bot_comments(directory: Path) -> StoredBotComments | None:
 
     壊れた保存は ReviewError で止める。None に丸めると、保存が無いレビューと見分けが付かない。
     """
-    path = directory / BOT_COMMENTS_FILE
-    if not path.is_file():
-        return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = read_stored_file_if_present(directory, BOT_COMMENTS_FILE)
+        if text is None:
+            return None
+        raw = json.loads(text)
     except (OSError, ValueError) as error:
         raise ReviewError(f"{BOT_COMMENTS_FILE} が読めません: {error!r}") from error
     if not isinstance(raw, dict):

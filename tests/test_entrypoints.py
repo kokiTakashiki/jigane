@@ -1,4 +1,3 @@
-import importlib.util
 import re
 from pathlib import Path
 from types import ModuleType
@@ -6,6 +5,7 @@ from typing import Any
 
 import pytest
 from markdown_support import fences
+from script_loader import import_script
 
 from jigane.git.environment import GIT_LOCATION_VARIABLES
 
@@ -13,13 +13,7 @@ ROOT = Path(__file__).parent.parent
 
 
 def load_generator() -> ModuleType:
-    path = ROOT / "scripts" / "generate_entrypoints.py"
-    spec = importlib.util.spec_from_file_location("generate_entrypoints", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("generate_entrypoints")
 
 
 def test_makefile_matches_the_definition() -> None:
@@ -182,6 +176,7 @@ def test_just_joins_a_path_after_a_tree_placeholder_inside_one_quote(tmp_path: P
     [
         (FACTS_TOML, "subproject の置換"),
         (FACTS_TOML + 'subproject = "../up"\n', "一つの名前にする"),
+        (FACTS_TOML + 'subproject = "cli\\n"\n', "一つの名前にする"),
     ],
 )
 def test_subproject_placeholders_need_a_plain_subproject(

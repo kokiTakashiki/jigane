@@ -30,7 +30,7 @@ from jigane.skills.mcp import SecurityConfigError
 from jigane.storage.atomic_write import StoredFileInUseError
 from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
-from jigane.storage.symlink_guard import StoredFileSymlinkError
+from jigane.storage.symlink_guard import StoredFileNotRegularError, StoredFileSymlinkError
 
 UNEXPECTED = "unexpected"
 # 子のプロセスの標準エラーを理由へ載せる長さの上限。失敗の原因は末尾に出やすいので末尾を残す
@@ -206,6 +206,15 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
             "stored_file_symlink",
             "保存先のディレクトリにシンボリックリンクがあるため書けません",
             "シンボリックリンクを確かめ、意図したものでなければ消してから、もう一度実行してください",
+        ),
+    ),
+    (
+        StoredFileNotRegularError,
+        Kind(
+            "stored_file_not_regular",
+            "保存したファイルが通常のファイルではないため読めません",
+            "理由に出ているパスを確かめ、通常のファイルでなければ消すか元に戻してから、"
+            "もう一度実行してください",
         ),
     ),
     (

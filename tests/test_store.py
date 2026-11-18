@@ -350,7 +350,8 @@ def test_ensure_data_home_creates_root_with_mode_0700(
     finally:
         os.umask(previous)
     assert stat.S_IMODE(home.stat().st_mode) == 0o700
-    assert stat.S_IMODE(home.parent.stat().st_mode) != 0o700
+    # 新しく作った中間のディレクトリも 0700。既にある親の扱いは tests_posix の試験が縛る
+    assert stat.S_IMODE(home.parent.stat().st_mode) == 0o700
 
 
 @_POSIX_ONLY

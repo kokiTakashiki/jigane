@@ -21,6 +21,7 @@ from jigane.findings.discard import (
     ShardConcerns,
 )
 from jigane.findings.records import (
+    STORED_ONLY_KEYS,
     FilledFindings,
     RemainingDecision,
     StoredFinding,
@@ -620,9 +621,6 @@ def test_prompt_and_record_are_built_from_the_same_shard_concerns(project: Path)
         )
         assert recorded == ShardConcerns((PassedConcern("F1", "X が懸念である。"),), 1)
         assert concerns_section(recorded) in prompts[row["split_index"]]
-
-
-STORED_ONLY_KEYS = {"nit_reason", "triage_reason", "out_of_scope", "adjudication", "theme"}
 
 
 @pytest.mark.parametrize("schema", [micro.DISCOVERY.schema(), security.DISCOVERY.schema()])

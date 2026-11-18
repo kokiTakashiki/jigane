@@ -6,9 +6,12 @@ import pytest
 from listing_support import listing_warnings
 from test_review_relations import save
 
+from jigane.commands import main
+from jigane.commands.exit_codes import EXIT_OK
 from jigane.judgment_map import map_kind
 from jigane.reviews import catalog
 from jigane.reviews.catalog import list_review_summaries, list_reviews
+from jigane.storage.review_error import ReviewError
 from jigane.storage.store import ReviewKind
 
 
@@ -140,3 +143,91 @@ def test_line_totals_match_the_full_read_when_required_is_missing(
     stored["line_counts"]["by_level"] = by_level
     counts = map_kind.load_map(stored).table.line_counts.by_level
     assert map_kind.read_line_totals(stored) == (counts.get("required", 0), sum(counts.values()))
+
+
+def test_read_review_summary_reports_a_missing_directory_as_review_error(tmp_path: Path) -> None:
+    with pytest.raises(ReviewError, match="レビューがありません"):
+        catalog._read_review_summary(tmp_path / "absent")  # pyright: ignore[reportPrivateUsage]
+
+
+def test_read_review_summary_reports_a_broken_map_as_review_error(project: Path) -> None:
+    saved = save(project, "r-1", ReviewKind.RANGE, "2026-01-01T00:00:00+00:00")
+    (saved.id.directory() / "map.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(ReviewError, match="保存したレビューを読めません"):
+        catalog._read_review_summary(saved.id.directory())  # pyright: ignore[reportPrivateUsage]
+
+
+def _break_reviews(project: Path, count: int) -> None:
+    for number in range(count):
+        saved = save(project, f"broken{number}", ReviewKind.FEATURE, "2026-01-01T00:00:00+00:00")
+        (saved.id.directory() / "map.json").write_text("{not json", encoding="utf-8")
+
+
+def test_collapse_skipped_warnings_counts_each_record_once_over_repeated_listings(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _break_reviews(project, 3)
+    with catalog.collapse_skipped_warnings():
+        assert list_review_summaries() == []
+        assert list_review_summaries() == []
+    [message] = listing_warnings(caplog)
+    assert (
+        message == "読めない古い記録が 3 件あります。理由は `jigane list` で 1 件ずつ見られます。"
+    )
+
+
+def test_collapse_skipped_warnings_is_silent_when_nothing_was_skipped(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    save(project, "ok-1", ReviewKind.FEATURE, "2026-01-01T00:00:00+00:00")
+    with catalog.collapse_skipped_warnings():
+        assert len(list_review_summaries()) == 1
+    assert listing_warnings(caplog) == []
+
+
+def test_collapse_skipped_warnings_still_reports_when_the_block_raises(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _break_reviews(project, 1)
+
+    def list_then_fail() -> None:
+        with catalog.collapse_skipped_warnings():
+            list_review_summaries()
+            raise RuntimeError("途中で失敗")
+
+    with pytest.raises(RuntimeError):
+        list_then_fail()
+    [message] = listing_warnings(caplog)
+    assert "1 件" in message
+    # 失敗で抜けても溜める状態は戻り、次の一覧は 1 件ずつ警告する
+    caplog.clear()
+    list_review_summaries()
+    assert len(listing_warnings(caplog)) == 1
+
+
+def test_show_by_short_id_warns_once_for_all_unreadable_reviews(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _break_reviews(project, 5)
+    save(project, "ok-1", ReviewKind.FEATURE, "2026-01-01T00:00:00+00:00")
+    # 短い形の解決は一覧を 2 回引くが、入口が囲むので警告は 1 件になる
+    main(["show", "shop:ok-1", "overview", "--json"])
+    [message] = listing_warnings(caplog)
+    assert "5 件" in message
+
+
+def test_debug_stats_warns_once_for_all_unreadable_reviews(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _break_reviews(project, 5)
+    assert main(["debug", "stats", "--json"]) == EXIT_OK
+    [message] = listing_warnings(caplog)
+    assert "5 件" in message
+
+
+def test_list_warns_for_each_unreadable_review_with_its_reason(
+    project: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _break_reviews(project, 5)
+    assert main(["list", "--json"]) == EXIT_OK
+    assert len(listing_warnings(caplog)) == 5

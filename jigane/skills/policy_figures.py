@@ -33,6 +33,11 @@ from jigane.languages.base import (
 )
 from jigane.policy_materials import changed_files, classes, discriminators, er
 from jigane.policy_materials.changed_files import PrebuiltSection
+from jigane.policy_materials.generated_marks import (
+    NO_GENERATED_HINT,
+    GeneratedHint,
+    generated_hint,
+)
 from jigane.reviews.lifecycle import Review
 from jigane.sequence import review_diagrams
 from jigane.sequence.index import shared_indexes
@@ -78,6 +83,7 @@ PROMPT_ORDER: tuple[PromptPlace, ...] = (
     FigureSlot.AFTER_TREE,
     PrebuiltSection.SEQUENCE,
     PrebuiltSection.REGIONS,
+    PrebuiltSection.MARKS,
     FigureSlot.AFTER_REGIONS,
 )
 
@@ -91,7 +97,18 @@ PROMPT_OMITTED: frozenset[FigureKey] = frozenset({"signatures"})
 
 
 def _tree_figure(review: Review) -> TreeFigure:
-    return changed_files.tree_figure(review)
+    return changed_files.tree_figure(review, _generated_hint(review))
+
+
+def _generated_hint(review: Review) -> GeneratedHint:
+    """変更後に残る変更ファイルの生成物の印。head か変更前の木を持たない出所は印を読まない。"""
+    source = policy_cochange.history_source(review)
+    base_tree = review.base_tree_path
+    if source is None or base_tree is None:
+        return NO_GENERATED_HINT
+    files = changed_files.file_changes(review)
+    paths = [path for path, change in files.items() if change.exists_after]
+    return generated_hint(*source, paths, base_tree)
 
 
 def _sequence_figure(review: Review) -> SequenceFigure:
@@ -373,6 +390,9 @@ def prompt_figure_texts(
                 figure.slot == place and figure.key in keys for figure in REGISTRY
             ):
                 continue
+            if place is PrebuiltSection.MARKS and place not in prebuilt:
+                # 生成物の印の節は、書くことがある資料にだけ組む
+                continue
             texts.append(_with_unsupported_note(assembly.review, place, prebuilt[place]))
         else:
             texts.extend(section_texts(assembly, place, keys))
@@ -488,7 +508,9 @@ def policy_sections(review: Review) -> PolicySections:
     """
     trees = policy_tree.trees_of(review)
     sequence = review_diagrams.sequence_figure(review)
-    prebuilt = changed_files.materials_sections(review, sequence, folded=True)
+    prebuilt = changed_files.materials_sections(
+        review, sequence, folded=True, hint=_generated_hint(review)
+    )
     return PolicySections(
         figures=prebuilt,
         sequence=sequence,

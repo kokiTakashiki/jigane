@@ -1,0 +1,44 @@
+id: no-raw-read-of-stored-file
+snapshots:
+  "(directory / BOT_COMMENTS_FILE).read_text( encoding=\"utf-8\", )":
+    labels:
+    - source: (directory / BOT_COMMENTS_FILE).read_text( encoding="utf-8", )
+      style: primary
+      start: 0
+      end: 62
+  (directory / FINDINGS_FILE).read_bytes():
+    labels:
+    - source: (directory / FINDINGS_FILE).read_bytes()
+      style: primary
+      start: 0
+      end: 40
+  (directory / HISTORY_FILE).open("rb"):
+    labels:
+    - source: (directory / HISTORY_FILE).open("rb")
+      style: primary
+      start: 0
+      end: 37
+  (directory / REVIEW_FILE).read_text(encoding="utf-8"):
+    labels:
+    - source: (directory / REVIEW_FILE).read_text(encoding="utf-8")
+      style: primary
+      start: 0
+      end: 53
+  (review_id.directory() / MAP_FILE).read_text():
+    labels:
+    - source: (review_id.directory() / MAP_FILE).read_text()
+      style: primary
+      start: 0
+      end: 46
+  "open(directory / CHANGES_FILE, encoding=\"utf-8\")":
+    labels:
+    - source: open(directory / CHANGES_FILE, encoding="utf-8")
+      style: primary
+      start: 0
+      end: 48
+  open(directory / STATIC_FINDINGS_FILE):
+    labels:
+    - source: open(directory / STATIC_FINDINGS_FILE)
+      style: primary
+      start: 0
+      end: 38

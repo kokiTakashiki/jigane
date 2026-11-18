@@ -160,7 +160,10 @@ def find_executable(name: str, path: str) -> str | None:
 
 
 def resolve_command(args: list[str], env: dict[str, str] | None) -> list[str]:
-    """先頭を絶対パスの PATH の項目だけから引いた絶対パスに解く。
+    """先頭を、PATH の絶対パスの項目から引いた実行ファイルのパスに解く。
+
+    先頭がスラッシュかバックスラッシュを含む名前のときは PATH を見ず、書かれた場所だけを引く。
+    相対パスで書かれていれば、解いた結果も相対パスのままになりうる。
 
     CreateProcess が拡張子の無い名前に補うのは .exe だけなので、npm が置く claude.cmd などは
     PATHEXT を見る which で解かないと起動できない。POSIX でも、PATH の相対の項目にある

@@ -26,8 +26,15 @@ from jigane.judgment_map.kinds import Kind
 from jigane.judgment_map.region_table import Region
 from jigane.languages import registry
 from jigane.languages.base import Declaration, Span, parse
-from jigane.markdown.cells import markdown_table
+from jigane.markdown.cells import CellKind, code_cell, markdown_table
 from jigane.policy_materials.declarations import ScopedDeclaration, region_declarations
+from jigane.policy_materials.generated_marks import (
+    NO_GENERATED_HINT,
+    GeneratedHint,
+    GeneratedOrigin,
+    MarksRead,
+    MarksUnreadable,
+)
 from jigane.policy_materials.moved_declarations import PlacedDeclaration, find_moved
 from jigane.preconditions.required import required
 from jigane.reviews.lifecycle import Review
@@ -172,6 +179,13 @@ def file_changes(review: Review, *, before: bool = False) -> dict[str, FileChang
     return {path: tally.settle(before=before) for path, tally in tallies.items()}
 
 
+GENERATED_LABEL = "生成物"
+GENERATED_LEGEND = (
+    "「生成物」は、宣言から機械で生成したファイルで、手で書き写した重複ではない。"
+    "直すなら生成元を直す。"
+)
+
+
 def _label(text: str) -> str:
     """利用者の文字列を、Mermaid の引用符つきラベルに入れられる形にする。
 
@@ -236,8 +250,8 @@ def _directory_tree(files: Mapping[str, FileChange]) -> _TreeDirectory:
     return root
 
 
-def _changed_file_label(name: str, change: FileChange) -> str:
-    """変更の印を持つファイルの札。状態、行数、移動の相手を添える。"""
+def _changed_file_label(name: str, change: FileChange, *, generated: bool = False) -> str:
+    """変更の印を持つファイルの札。状態、行数、移動の相手、生成物の印を添える。"""
     label = f"{_label(name)}<br/>{change.state.label}"
     # 区間の無い側（挿入の変更前、削除の変更後、移動）は 0 行になる。「0 行」は書かない
     if change.lines:
@@ -246,6 +260,8 @@ def _changed_file_label(name: str, change: FileChange) -> str:
         label += f"<br/>移動元: {_label(change.moved_from)}"
     elif isinstance(change, MovedAwayFileChange):
         label += f"<br/>移動先: {_label(change.moved_to)}"
+    if generated:
+        label += f"<br/>{GENERATED_LABEL}"
     return label
 
 
@@ -262,9 +278,15 @@ _TREE_CLASS_DEFINITIONS = [
 class _TreeWriter:
     """ディレクトリのツリーを、Mermaid の行に書き出す。節点の id は書いた順に振る。"""
 
-    def __init__(self, files: Mapping[str, FileChange], tags: Mapping[str, Sequence[str]]) -> None:
+    def __init__(
+        self,
+        files: Mapping[str, FileChange],
+        tags: Mapping[str, Sequence[str]],
+        generated: frozenset[str],
+    ) -> None:
         self.files = files
         self.tags = tags
+        self.generated = generated
         self.lines = ["flowchart LR"]
         self.counter = 0
 
@@ -279,7 +301,7 @@ class _TreeWriter:
             node = self.next_id()
             self.lines.append(f'    {node}["{_tagged(_label(name), self.tags.get(path, ()))}"]')
             return node
-        label = _changed_file_label(name, change)
+        label = _changed_file_label(name, change, generated=path in self.generated)
         node = self.next_id()
         tagged = _tagged(label, self.tags.get(path, ()))
         self.lines.append(f'    {node}["{tagged}"]:::{change.state.css_class}')
@@ -298,7 +320,9 @@ class _TreeWriter:
 
 
 def tree_mermaid(
-    files: Mapping[str, FileChange], tags: Mapping[str, Sequence[str]] | None = None
+    files: Mapping[str, FileChange],
+    tags: Mapping[str, Sequence[str]] | None = None,
+    generated: frozenset[str] = frozenset(),
 ) -> str:
     """変更したファイルをディレクトリのツリーに描いた Mermaid の原文（囲みなし）。
 
@@ -309,7 +333,7 @@ def tree_mermaid(
     """
     if not files:
         return ""
-    writer = _TreeWriter(files, tags or {})
+    writer = _TreeWriter(files, tags or {}, generated)
     writer.emit("", _directory_tree(files))
     if all(change.state is FileState.UNCHANGED for change in files.values()):
         # 印を持つ節点が無く、classDef の参照先が無い
@@ -328,17 +352,18 @@ def current_tree_figure(paths: Sequence[str]) -> TreeFigure:
     return TreeFigure(Panel("木", tree_mermaid(files)), file_summaries(files))
 
 
-def tree_figure(review: Review) -> TreeFigure:
+def tree_figure(review: Review, hint: GeneratedHint = NO_GENERATED_HINT) -> TreeFigure:
     """ツリー図の図。画面とプロンプトが同じものを使う。
 
     差分のレビューは変更前の木と変更後の木の二枚、ファイルのレビューは変更後の木だけ。
-    判断の箇所の札は、箇所の path が一致する木の節点に付く。
+    判断の箇所の札は、箇所の path が一致する木の節点に付く。生成物の札は変更後の木にだけ付く。
     """
+    generated = hint.generated
     files = file_changes(review)
     tags = region_tags(review)
     # 削除したファイルは変更後の木に無い。ファイルの一覧には残す
     after_files = {path: change for path, change in files.items() if change.exists_after}
-    after = Panel("変更後の木", tree_mermaid(after_files, tags))
+    after = Panel("変更後の木", tree_mermaid(after_files, tags, generated))
     summaries = file_summaries(files)
     if not review.is_diff:
         return TreeFigure(after, summaries)
@@ -347,7 +372,7 @@ def tree_figure(review: Review) -> TreeFigure:
     return DiffTreeFigure(after, summaries, before)
 
 
-def folded_tree_figure(review: Review) -> TreeFigure:
+def folded_tree_figure(review: Review, hint: GeneratedHint = NO_GENERATED_HINT) -> TreeFigure:
     """変更前後の二枚を、変更のあった枝だけの一つの木に畳んだツリー図。
 
     木に置くのは変更したファイルとその祖先だけなので、変更の無い枝は元から無い。
@@ -355,7 +380,8 @@ def folded_tree_figure(review: Review) -> TreeFigure:
     """
     files = file_changes(review)
     return TreeFigure(
-        Panel("変更の木", tree_mermaid(files, region_tags(review))), file_summaries(files)
+        Panel("変更の木", tree_mermaid(files, region_tags(review), hint.generated)),
+        file_summaries(files),
     )
 
 
@@ -546,31 +572,37 @@ def signature_changes(review: Review) -> SignatureFigure:
     return SignatureFigure(_arranged_entries(collector))
 
 
-def regions_text(review: Review) -> str:
+def regions_text(review: Review, generated: frozenset[str] = frozenset()) -> str:
+    """判断の箇所の表。生成物の箇所が一つでもあれば、「種類」の次に「生成物」の列を足す。"""
     regions = review.map_kind.table.regions
     if not regions:
         return NO_REGIONS_TEXT
+    with_generated = any(region.path in generated for region in regions)
     table: list[list[str]] = []
     for region in regions:
         span = region.new_span or region.old_span
         position = f"{span.start_line}-{span.end_line}" if span else "なし"
         if region.new_span is None:
             position += "（変更前）"
+        origin = GeneratedOrigin.LINGUIST_GENERATED.value if region.path in generated else ""
         table.append(
             [
                 required(region.id),
                 region.key,
                 region.kind.value,
+                *([origin] if with_generated else []),
                 region.path,
                 region.qualified_name,
                 region.summary,
                 position,
             ]
         )
+    generated_header = [GENERATED_LABEL] if with_generated else []
+    generated_format: list[CellKind] = ["raw"] if with_generated else []
     return markdown_table(
-        ["箇所", "key", "種類", "パス", "名前", "要約", "行"],
+        ["箇所", "key", "種類", *generated_header, "パス", "名前", "要約", "行"],
         table,
-        ["raw", "cell", "raw", "cell", "cell", "cell", "raw"],
+        ["raw", "cell", "raw", *generated_format, "cell", "cell", "cell", "raw"],
     )
 
 
@@ -583,9 +615,48 @@ class PrebuiltSection(StrEnum):
     TREE = "変更のツリー図"
     SEQUENCE = "シーケンス図"
     REGIONS = "判断の箇所の一覧"
+    MARKS = "生成物の印"
 
 
 SECTION_SIGNATURES = "公開のシグネチャの変更前後"
+
+
+MARKS_UNREADABLE_TEXT = "生成物の印を読めなかった。札が無いことは生成物でないことを意味しない。"
+MARK_TABLE_ROWS = 30
+MARK_PATTERN_CHARACTERS = 160
+
+
+def marks_text(hint: GeneratedHint) -> str:
+    """生成物の印の節の本文。書くことが無ければ空。"""
+    parts: list[str] = []
+    match hint.reading:
+        case MarksUnreadable():
+            parts.append(MARKS_UNREADABLE_TEXT)
+        case MarksRead() as reading if reading.unchecked_count:
+            parts.append(
+                f"検査の上限を超えた {reading.unchecked_count} 件のファイルは印を検査していない。"
+                "札が無いことは印が無いことを意味しない。"
+            )
+        case _:
+            # 読んでいない（head が無い）か、全てのファイルを検査した
+            pass
+    lines = hint.attribute_lines
+    if lines is not None:
+        parts.extend(f"`{code_cell(path)}` が大きすぎて表に載せない。" for path in lines.oversized)
+        if lines.lines:
+            rows = [
+                [line.file, line.pattern[:MARK_PATTERN_CHARACTERS], line.mark]
+                for line in lines.lines
+            ]
+            parts.append(
+                markdown_table(
+                    ["ファイル", "パターン", "印"],
+                    rows,
+                    ["codespan", "codespan", "codespan"],
+                    cap=MARK_TABLE_ROWS,
+                )
+            )
+    return "\n\n".join(parts)
 
 
 def _titled(title: str, body: str) -> str:
@@ -598,17 +669,29 @@ def tree_section_is_empty(section: str) -> bool:
 
 
 def materials_sections(
-    review: Review, sequences: SequenceFigure | None = None, *, folded: bool = False
+    review: Review,
+    sequences: SequenceFigure | None = None,
+    *,
+    folded: bool = False,
+    hint: GeneratedHint = NO_GENERATED_HINT,
 ) -> dict[PrebuiltSection, str]:
     """事前に組む節を、見出しつきの本文で返す。
 
     シーケンス図は渡されたときだけ含める。インターフェースの変更、宣言、背景は含めない。
     folded が真なら、ツリー図は一つの木に畳み、札のあるシーケンス図は変更後の図だけにする。
     """
-    tree = folded_tree_figure(review) if folded else tree_figure(review)
-    sections = {PrebuiltSection.TREE: _titled(PrebuiltSection.TREE, tree.text())}
+    tree = folded_tree_figure(review, hint) if folded else tree_figure(review, hint)
+    tree_text = tree.text()
+    if hint.generated:
+        tree_text += f"\n\n{GENERATED_LEGEND}"
+    sections = {PrebuiltSection.TREE: _titled(PrebuiltSection.TREE, tree_text)}
     if sequences is not None:
         shown = sequences.without_tagged_before() if folded else sequences
         sections[PrebuiltSection.SEQUENCE] = _titled(PrebuiltSection.SEQUENCE, shown.text())
-    sections[PrebuiltSection.REGIONS] = _titled(PrebuiltSection.REGIONS, regions_text(review))
+    marks = marks_text(hint)
+    if marks:
+        sections[PrebuiltSection.MARKS] = _titled(PrebuiltSection.MARKS, marks)
+    sections[PrebuiltSection.REGIONS] = _titled(
+        PrebuiltSection.REGIONS, regions_text(review, hint.generated)
+    )
     return sections

@@ -71,14 +71,12 @@ def function_name_of(node: Node) -> FunctionName:
     `init_declaration` は `func` を持たないので `name` フィールドを名前の節点とする。
     """
     if node.type == "init_declaration":
-        name_node = node.child_by_field_name("name")
-    else:
-        keyword = next((c for c in node.children if c.type == "func"), None)
-        name_node = keyword.next_sibling if keyword is not None else None
+        init_name = node.child_by_field_name("name")
+        return InitName(init_name) if init_name is not None else None
+    keyword = next((c for c in node.children if c.type == "func"), None)
+    name_node = keyword.next_sibling if keyword is not None else None
     if name_node is None:
         return None
-    if node.type == "init_declaration":
-        return InitName(name_node)
     if name_node.type == "simple_identifier":
         return IdentifierName(name_node)
     return OperatorName(name_node)

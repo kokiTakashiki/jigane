@@ -371,3 +371,68 @@ def test_diff_and_show_ignore_external_diff_and_textconv_in_repository_config(
         build_git_command(GitSubcommand.SHOW, options=["-p"], revisions=[shas[1]]), cwd=repo
     )
     assert not mark.exists()
+
+
+def test_build_check_attr_puts_source_before_end_of_options_and_attribute_after() -> None:
+    sha = parse_commit_sha("x", SHA_A)
+    assert plain_build(
+        GitSubcommand.CHECK_ATTR,
+        options=["--source", str(sha), "-z", "--stdin"],
+        fixed_values=["linguist-generated"],
+    ) == [
+        "git", "check-attr", "--source", SHA_A, "-z", "--stdin",
+        "--end-of-options", "linguist-generated",
+    ]  # fmt: skip
+
+
+def test_check_attr_carries_the_containment_options() -> None:
+    command = build_git_command(GitSubcommand.CHECK_ATTR, fixed_values=["linguist-generated"])
+    assert command[1:4] == ["-c", "core.fsmonitor=false", "-c"]
+    assert command[4].startswith("core.hooksPath=")
+    assert "--no-pager" in command
+
+
+def _check_attr(repo: Path, source: str, paths: list[str]) -> str:
+    command = build_git_command(
+        GitSubcommand.CHECK_ATTR,
+        options=["--source", source, "-z", "--stdin"],
+        fixed_values=["linguist-generated"],
+    )
+    return process.run_command(command, cwd=repo, stdin="".join(f"{p}\0" for p in paths))
+
+
+def test_check_attr_reads_the_attributes_of_the_given_commit_not_the_working_tree(
+    tmp_path: Path,
+) -> None:
+    repo = _repository_with_marking_script(tmp_path, "", "")
+    (repo / ".gitattributes").write_text(
+        "Makefile linguist-generated\n"
+        "justfile linguist-generated=false\n"
+        "-dash linguist-generated\n"
+    )
+    process.run_command(["git", "add", ".gitattributes"], cwd=repo)
+    process.run_command(["git", *IDENTITY, "commit", "-q", "-m", "x"], cwd=repo)
+    head = process.run_command(["git", "rev-parse", "HEAD"], cwd=repo).strip()
+    # 作業木から消しても、コミットの木の印が返る
+    (repo / ".gitattributes").unlink()
+    output = _check_attr(repo, head, ["Makefile", "justfile", "-dash", "other"])
+    assert output.split("\0")[:-1] == [
+        "Makefile", "linguist-generated", "set",
+        "justfile", "linguist-generated", "false",
+        "-dash", "linguist-generated", "set",
+        "other", "linguist-generated", "unspecified",
+    ]  # fmt: skip
+
+
+def test_check_attr_fails_for_a_source_git_cannot_resolve(tmp_path: Path) -> None:
+    repo = _repository_with_marking_script(tmp_path, "", "")
+    with pytest.raises(process.CommandError):
+        _check_attr(repo, "nosuchref", ["Makefile"])
+
+
+def test_check_attr_with_an_absent_full_length_sha_reports_unspecified(tmp_path: Path) -> None:
+    repo = _repository_with_marking_script(tmp_path, "", "")
+    # git 2.54.0 の実測: 40 桁の 16 進は、リポジトリに無いオブジェクトでも失敗せず
+    # 全パスを unspecified で返す。失敗の検出に頼れるのは、解釈できない名前のときだけ
+    output = _check_attr(repo, SHA_A, ["Makefile"])
+    assert output.split("\0")[:-1] == ["Makefile", "linguist-generated", "unspecified"]

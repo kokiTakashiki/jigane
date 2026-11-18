@@ -4,6 +4,7 @@ import pytest
 from fakes import MicroFake
 
 from jigane.commands import main
+from jigane.commands.budget_argument import positive_finite_usd
 from jigane.reviews.lifecycle import create_feature_review
 
 
@@ -35,3 +36,8 @@ def test_invalid_max_budget_is_argparse_error_without_launch(
         )
     assert exited.value.code == 2
     assert fake.calls == []
+
+
+@pytest.mark.parametrize(("text", "expected"), [("0.5", 0.5), ("1e-3", 0.001), ("2", 2.0)])
+def test_positive_finite_usd_accepts_finite_positive_values(text: str, expected: float) -> None:
+    assert positive_finite_usd(text) == expected

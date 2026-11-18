@@ -30,25 +30,91 @@ def data_home() -> Path:
     return default_data_home()
 
 
-def require_private_data_home(home: Path) -> None:
-    """既にある根の権限が広すぎれば ReviewError で止める。
+class DataHomeCheckKind(StrEnum):
+    OK = "ok"
+    ABSENT = "absent"
+    OWNER_MISMATCH = "owner_mismatch"
+    WRITABLE_BY_OTHERS = "writable_by_others"
+    NOT_CHECKED = "not_checked"
 
-    根の所有者が実行ユーザーでない、または group か other に書き込み権限がある場合が対象。
+
+# 書き込みの副コマンドを止める kind と、そのときの文言。止める kind はこの表だけが決める
+_STOP_MESSAGES: dict[DataHomeCheckKind, str] = {
+    # 所有者が違うと実行ユーザーでは chmod できないため、chmod の案内とは文面を分ける
+    DataHomeCheckKind.OWNER_MISMATCH: (
+        "データの置き場の所有者が実行ユーザーと違います。"
+        "所有者のユーザーで実行するか、置き場を自分の所有に移してください"
+    ),
+    DataHomeCheckKind.WRITABLE_BY_OTHERS: (
+        "データの置き場の権限が広すぎます。chmod 700 で狭めてください"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class DataHomeCheck:
+    kind: DataHomeCheckKind
+
+    @property
+    def exists(self) -> bool:
+        return self.kind != DataHomeCheckKind.ABSENT
+
+    @property
+    def stops(self) -> bool:
+        return self.kind in _STOP_MESSAGES
+
+
+def check_data_home(home: Path) -> DataHomeCheck:
+    """根の権限を判定する。根も権限も変えない。
+
+    根の所有者が実行ユーザーでない、または group か other に書き込み権限がある場合が止める対象。
     読み取りの権限だけなら止めない。根が symlink のときは、その先を調べる。
     Windows は ACL に任せ、検査しない。
     """
+    if not home.exists():
+        return DataHomeCheck(DataHomeCheckKind.ABSENT)
     if sys.platform == "win32":
         # POSIX の所有者と mode を持たないため、権限は ACL に任せる
-        return
+        return DataHomeCheck(DataHomeCheckKind.NOT_CHECKED)
     info = home.stat()
     if info.st_uid != os.getuid():
-        # 所有者が違うと実行ユーザーでは chmod できないため、chmod の案内とは文面を分ける
-        raise ReviewError(
-            "データの置き場の所有者が実行ユーザーと違います。"
-            "所有者のユーザーで実行するか、置き場を自分の所有に移してください"
-        )
+        return DataHomeCheck(DataHomeCheckKind.OWNER_MISMATCH)
     if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise ReviewError("データの置き場の権限が広すぎます。chmod 700 で狭めてください")
+        return DataHomeCheck(DataHomeCheckKind.WRITABLE_BY_OTHERS)
+    return DataHomeCheck(DataHomeCheckKind.OK)
+
+
+def require_private_data_home(home: Path) -> None:
+    """既にある根の権限が広すぎれば ReviewError で止める。判定は check_data_home に従う。"""
+    check = check_data_home(home)
+    if check.stops:
+        raise ReviewError(_STOP_MESSAGES[check.kind])
+    # 止める理由が無い。根が無い場合も、書く側が作るのでここでは止めない
+
+
+def _make_private_directories(directory: Path) -> None:
+    """directory とその祖先のうち、まだ無いものだけを 0700 で一段ずつ作る。
+
+    既にある階層の権限は変えない。利用者のホームなど、jigane が作っていないものを書き換えないため。
+    """
+    missing: list[Path] = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for created in reversed(missing):
+        try:
+            # 作った瞬間から広い権限で見えないよう、mode を渡して作る
+            created.mkdir(mode=0o700)
+        except FileExistsError:
+            # 同時に作った側の権限には触らない。根でも同じで、検査は次に開くときの
+            # require_private_data_home が行う
+            continue
+        # mkdir の mode は umask で削られるので、作ったあとにも明示する。
+        # Windows の chmod は読み取り専用の印にしか効かず、0o700 を渡しても害はない
+        created.chmod(0o700)
 
 
 def ensure_data_home() -> Path:
@@ -61,16 +127,7 @@ def ensure_data_home() -> Path:
     if home.exists():
         require_private_data_home(home)
         return home
-    home.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        # 作った瞬間から広い権限で見えないよう、mode を渡して作る
-        home.mkdir(mode=0o700)
-    except FileExistsError:
-        # 同時に作った側の根の権限には触らない
-        return home
-    # mkdir の mode は umask で削られるので、作ったあとにも明示する。
-    # Windows の chmod は読み取り専用の印にしか効かず、0o700 を渡しても害はない
-    home.chmod(0o700)
+    _make_private_directories(home)
     return home
 
 
@@ -323,7 +380,7 @@ class ReviewId:
 
     @classmethod
     def parse(cls, text: str) -> "ReviewId":
-        matched = _FULL_PATTERN.match(text)
+        matched = _FULL_PATTERN.fullmatch(text)
         if matched is None:
             raise ValueError(f"レビューの識別子の形が不正です: {text!r}")
         owner, repo, separator, key = matched.groups()
@@ -332,7 +389,7 @@ class ReviewId:
     @staticmethod
     def parse_short(text: str) -> tuple[str, ReviewKind, str]:
         """owner を省いた `repo<区切り>キー` を (repo, 種類, キー) に分ける。"""
-        matched = _SHORT_PATTERN.match(text)
+        matched = _SHORT_PATTERN.fullmatch(text)
         if matched is None:
             raise ValueError(f"レビューの識別子の形が不正です: {text!r}")
         repo, separator, key = matched.groups()

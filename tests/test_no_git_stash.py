@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import tomllib
 from pathlib import Path
@@ -7,21 +6,16 @@ from types import ModuleType
 
 import pytest
 from pr_support import git
+from script_loader import import_script
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "scripts" / "check_no_git_stash.py"
 # 検査の対象にこのファイル自身が掛からないよう、語を分けて組み立てる。
 WORD = "sta" + "sh"
 VIOLATION = f"git {WORD} pop"
 
 
 def load_checker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("check_no_git_stash", SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return import_script("check_no_git_stash")
 
 
 def run_checker(root: Path, *prefixes: str) -> tuple[int, str]:

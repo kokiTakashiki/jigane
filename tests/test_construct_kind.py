@@ -79,3 +79,9 @@ def test_kind_whose_id_differs_is_rejected() -> None:
     data = _entry(ConstructKind.of_language("kotlin", "foo")).to_json()
     with pytest.raises(ValueError, match="食い違"):
         GateEntry.from_json({**data, "kind": "kotlin_bar"})
+
+
+def test_language_is_the_part_before_the_kind_name_and_none_for_syntax_error() -> None:
+    assert ConstructKind.of_language("swift", "operator_function").language == "swift"
+    assert ConstructKind("kotlin_foo_bar").language == "kotlin"
+    assert ConstructKind.SYNTAX_ERROR.language is None

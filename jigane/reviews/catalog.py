@@ -28,7 +28,7 @@ from jigane.reviews.lifecycle import (
 from jigane.reviews.review_formats import load_review_meta
 from jigane.reviews.stored_pairs import PairsNotSavedError, load_pairs
 from jigane.storage.atomic_write import write_text_atomic
-from jigane.storage.review_access import locked_review, stored_file_exists
+from jigane.storage.review_access import locked_review, read_stored_file, stored_file_exists
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store import (
     REVIEW_FILE,
@@ -39,6 +39,11 @@ from jigane.storage.store import (
     check_review_id,
     data_home,
     review_name_of_directory,
+)
+from jigane.storage.symlink_guard import (
+    StoredFileNotRegularError,
+    StoredFileSymlinkError,
+    is_link_like,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -75,7 +80,7 @@ def _read_meta_and_origin(directory: Path) -> _StoredHead:
 
     ValueError / KeyError / TypeError と ReviewKindMismatchError は呼ぶ側が受ける。
     """
-    meta = load_review_meta(json.loads((directory / REVIEW_FILE).read_text(encoding="utf-8")))
+    meta = load_review_meta(json.loads(read_stored_file(directory, REVIEW_FILE)))
     review_id = parse_stored_id(meta)
     diff_source, pull_request = read_stored_sources(meta["pull_request"], meta["diff_source"])
     try:
@@ -104,7 +109,7 @@ def read_review_at(directory: Path) -> LocatedReview:
     """
     try:
         meta, review_id, origin = _read_meta_and_origin(directory)
-        map_kind = load_map(json.loads((directory / MAP_FILE).read_text(encoding="utf-8")))
+        map_kind = load_map(json.loads(read_stored_file(directory, MAP_FILE)))
         review = Review(
             check_review_id(review_id),
             meta["created_at"],
@@ -121,6 +126,10 @@ def read_review_at(directory: Path) -> LocatedReview:
         return LocatedReview(review, directory)
     except FileNotFoundError as error:
         raise ReviewError(f"レビューがありません: {directory}") from error
+    except StoredFileSymlinkError as error:
+        raise ReviewError(f"保存したレビューのファイルが symlink です: {error}") from error
+    except StoredFileNotRegularError as error:
+        raise ReviewError(f"保存したレビューのファイルが通常でない: {error}") from error
     except (ValueError, KeyError, TypeError) as error:
         # JSON の構文、識別子の形、必須項目の欠け、項目の型。いずれも保存した記録が壊れている
         raise ReviewError(f"保存したレビューを読めません: {directory}: {error!r}") from error
@@ -178,12 +187,20 @@ def check_stored_id(review_id: ReviewId) -> CheckedReviewId:
     checked = check_review_id(review_id)
     directory = checked.directory()
     try:
-        meta = load_review_meta(json.loads((directory / REVIEW_FILE).read_text(encoding="utf-8")))
+        meta = load_review_meta(json.loads(read_stored_file(directory, REVIEW_FILE)))
         stored = parse_stored_id(meta)
     except FileNotFoundError as error:
         raise ReviewError(f"レビューがありません: {review_id}") from error
-    except (ValueError, KeyError, TypeError, ReviewError):
-        # 壊れた記録（JSON、版、id の欠けや形の誤り）は食い違いを判定できないので通す。
+    except (
+        ValueError,
+        KeyError,
+        TypeError,
+        ReviewError,
+        StoredFileSymlinkError,
+        StoredFileNotRegularError,
+    ):
+        # 壊れた記録（JSON、版、id の欠けや形の誤り、symlink や FIFO の review.json）は
+        # 食い違いを判定できないので通す。
         # ここで止めると、壊れた記録を完全な識別子で delete する復旧の道が塞がる。
         # 読む側の load_review_at が別に止める
         return checked
@@ -261,9 +278,7 @@ def _read_review_summary(directory: Path) -> ReviewSummary:
         meta, review_id, origin = _read_meta_and_origin(directory)
         checked = check_review_id(review_id)
         _check_stored_place(checked, origin_kind(origin), directory)
-        required, total = read_line_totals(
-            json.loads((directory / MAP_FILE).read_text(encoding="utf-8"))
-        )
+        required, total = read_line_totals(json.loads(read_stored_file(directory, MAP_FILE)))
         return ReviewSummary(
             checked,
             meta["created_at"],
@@ -275,6 +290,10 @@ def _read_review_summary(directory: Path) -> ReviewSummary:
         )
     except FileNotFoundError as error:
         raise ReviewError(f"レビューがありません: {directory}") from error
+    except StoredFileSymlinkError as error:
+        raise ReviewError(f"保存したレビューのファイルが symlink です: {error}") from error
+    except StoredFileNotRegularError as error:
+        raise ReviewError(f"保存したレビューのファイルが通常でない: {error}") from error
     except (ValueError, KeyError, TypeError) as error:
         raise ReviewError(f"保存したレビューを読めません: {directory}: {error!r}") from error
 
@@ -288,19 +307,18 @@ def _listed_directories(archived: str) -> list[Path]:
         relative = review_file.relative_to(home)
         if relative.parts[0] == TRASH_DIRECTORY or relative.parts[2].startswith(STAGING_PREFIX):
             continue
-        marked = (directory / ARCHIVE_MARKER_FILE).is_file()
+        marker = directory / ARCHIVE_MARKER_FILE
+        marked = marker.is_file() and not is_link_like(marker)
         if archived != ARCHIVED_INCLUDE and marked != (archived == ARCHIVED_ONLY):
             continue
         directories.append(directory)
     return directories
 
 
-# 除いた記録の警告をまとめて出す間だけ、除いた記録を溜める入れ物。None のときは 1 件ずつ警告する
-_SKIPPED_COLLECTOR: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+# 警告をまとめる間だけ、除いた記録の名前を溜める入れ物。None のときは 1 件ずつ警告する
+_SKIPPED_COLLECTOR: ContextVar[set[str] | None] = ContextVar(
     "skipped_review_collector", default=None
 )
-# まとめの警告に名前を挙げる記録の数
-SKIPPED_EXAMPLE_COUNT = 3
 
 
 def _warn_skipped(directory: Path, error: ReviewError) -> None:
@@ -309,33 +327,26 @@ def _warn_skipped(directory: Path, error: ReviewError) -> None:
     if collector is None:
         LOGGER.warning("一覧から除きました: %s: %s", name, error)
         return
-    collector.append((name, str(error)))
+    # 一回の実行で置き場を何度引いても、同じ記録は一度だけ数える
+    collector.add(name)
 
 
 @contextmanager
 def collapse_skipped_warnings() -> Iterator[None]:
-    """この間に一覧から除いた記録の警告を、抜けるときに 1 件へまとめて出す。
+    """この間に一覧から除いた記録の件数を、抜けるときに 1 行の警告で出す。
 
     見積もりのように置き場の全件を引く入口で、古い版の記録 1 件ごとに同じ警告が並ぶのを避ける。
     """
-    collected: list[tuple[str, str]] = []
+    collected: set[str] = set()
     token = _SKIPPED_COLLECTOR.set(collected)
     try:
         yield
     finally:
         _SKIPPED_COLLECTOR.reset(token)
         if collected:
-            names = "、".join(name for name, _ in collected[:SKIPPED_EXAMPLE_COUNT])
-            rest = len(collected) - SKIPPED_EXAMPLE_COUNT
-            more = f" ほか {rest} 件" if rest > 0 else ""
             LOGGER.warning(
-                "一覧から %d 件のレビューを除きました（例: %s%s）。"
-                "古い版などで読めない記録です。必要なら `jigane delete` で消し、"
-                "`jigane new` でレビューを作り直してください。"
-                "理由は `jigane list` で 1 件ずつ出ます",
+                "読めない古い記録が %d 件あります。理由は `jigane list` で 1 件ずつ見られます。",
                 len(collected),
-                names,
-                more,
             )
 
 
