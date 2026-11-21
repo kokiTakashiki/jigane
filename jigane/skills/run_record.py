@@ -63,7 +63,7 @@ class RunStart:
     started_at: str
     model: str
     effort: str | None
-    max_budget_usd: float
+    max_budget_usd: float | None
     pid: int
 
     def to_json(self) -> dict[str, Any]:
@@ -325,7 +325,7 @@ def begin(review: Review, group: GroupId, settings: claude.RunSettings) -> None:
             started_at=_now(),
             model=settings.budget.model,
             effort=settings.effort,
-            max_budget_usd=settings.budget.max_budget_usd,
+            max_budget_usd=settings.budget.max_budget_usd if settings.has_spending_limit else None,
             pid=os.getpid(),
         )
         in_progress[group] = RunInProgress(group, start)
@@ -375,7 +375,9 @@ def tracking(
 
     def recording(invocation: claude.Invocation) -> claude.InvocationResult:
         result = settings.invoke(invocation)
-        costs.append(total_by_source([result.record.cost]).usd)
+        total = total_by_source([result.record.cost])
+        if not total.unknown_count:
+            costs.append(total.usd)
         return result
 
     begin(review, group, settings)

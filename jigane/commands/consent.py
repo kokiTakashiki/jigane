@@ -1,17 +1,20 @@
-"""`jigane run` が Claude Code CLI を起動する前に取る、利用者の同意。"""
+"""`jigane run` がレビューエージェントを起動する前に取る、利用者の同意。"""
 
 import sys
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from jigane.commands.public_urls import installed_version, terms_urls
 from jigane.git.process import CONSENT_PROMPT_END
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, Effort, GroupId
-from jigane.llm_runs import claude
+from jigane.groups.policy_runs import PolicyRole
+from jigane.llm_runs import claude, codex
+from jigane.llm_runs.codex_mcp import REFERENCE_NOTICE
 from jigane.skills.estimate_result import DiagramPolicyEstimate, Estimate
 from jigane.skills.group_expectation import GroupExpectation
 from jigane.skills.mcp import ALL_TOOLS_NOTICE, NO_MCP, McpSelection
+from jigane.storage.agent_selection import Agent
 
 # 群の見込みの行。値は GroupExpectation が持ち、書式はここだけに置く
 EXPECTATION_LINE = (
@@ -87,10 +90,12 @@ class LaunchPlan:
     breakdown: GroupBreakdown
     can_increase: bool
     effort: Effort | None
-    expectation: GroupExpectation
+    expectation: GroupExpectation | None
     # 見積もりが出力と推論の分まで見込む形か（今は設計書の形だけ）
     includes_output: bool = False
     mcp: McpSelection = NO_MCP
+    codex_principles: tuple[str, ...] = ()
+    agent: Agent = Agent.CLAUDE
 
     @property
     def group(self) -> GroupId:
@@ -127,10 +132,13 @@ def _breakdown_of(group: GroupId, estimate: Estimate, budget: claude.RunBudget) 
 
 def launch_plan(
     estimate: Estimate,
-    expectation: GroupExpectation,
+    expectation: GroupExpectation | None,
     group: GroupId,
     settings: claude.RunSettings,
     mcp: McpSelection = NO_MCP,
+    *,
+    discovery_calls: int | None = None,
+    codex_principles: tuple[str, ...] = (),
 ) -> LaunchPlan:
     """見積もりから、確実に起動する回数を求める。群の見込みは組み立ての根が読んで渡す。"""
     # 方針は発見役の 1 回だけで検証役を持たない。他は発見役がシャードごとに 1 回で、
@@ -138,13 +146,17 @@ def launch_plan(
     # （finding_model.py の発見役の出力のモデルは findings の件数に上限を持たず、
     # split_candidates は 10 件ずつ割る）。
     # 検証役は最小の回数には入らない
+    breakdown = _breakdown_of(group, estimate, settings.budget)
+    if discovery_calls is not None:
+        breakdown = replace(breakdown, discovery_calls=discovery_calls)
     return LaunchPlan(
-        _breakdown_of(group, estimate, settings.budget),
+        breakdown,
         group != MACRO,
         settings.effort,
         expectation,
         estimate.expected_output() is not None,
         mcp=NO_MCP if group == MACRO else mcp,
+        codex_principles=codex_principles,
     )
 
 
@@ -152,6 +164,39 @@ def consent_text(
     plan: LaunchPlan, version_lookup: Callable[[], str | None] = installed_version
 ) -> list[str]:
     label = GROUP_BY_ID[plan.group].label
+    expectation = plan.expectation
+    if plan.agent is Agent.CODEX:
+        calls = f"初期の起動は {plan.minimum_calls} 回です。"
+        if plan.can_increase:
+            calls += "検証・採否処理などの追加起動数は指摘や実行結果によって変わります。"
+        return [
+            f"{label}の実行は Codex CLI（codex exec）を使います。{calls}",
+            (
+                "Codex CLI に保存された ChatGPT ログインで、OpenAI の ChatGPT（chatgpt.com）に、"
+                "jigane が組み立てたコード、文書、履歴、検証資料などを送ります。"
+            ),
+            "一時ディレクトリで動かし、シェル、プラグイン、Web 検索を無効にします。",
+            *(
+                [
+                    f"使う MCP: {', '.join(plan.mcp.names)}",
+                    f"登録したコマンドを起動し、{REFERENCE_NOTICE}。",
+                    "取得した資料は同じ送信先へ送ります。",
+                ]
+                if plan.mcp.reference_servers
+                else ["MCP は使いません。"]
+            ),
+            f"モデル {codex.LOGIN_MODEL.name}（effort {codex.LOGIN_MODEL.effort}）",
+            *(
+                f"原則 {number}: {model.name}（effort {model.effort}）"
+                for number in plan.codex_principles
+                for model in (codex.model_for(PolicyRole.PRINCIPLE, number),)
+            ),
+            f"{codex.NO_SPENDING_LIMIT}。",
+            "報告された使用量をモデルの公開 API 単価で USD に換算して記録します。",
+            "請求額は OpenAI 側で確認してください。",
+        ]
+    if expectation is None:
+        raise ValueError("同意に表示する実行経路または費用の見込みがありません")
     calls = (
         f"少なくとも {plan.minimum_calls} 回。検証役の回数に上限はありません"
         "（見つかった指摘の数で決まります）"
@@ -172,7 +217,6 @@ def consent_text(
         f"この群の内訳（{label}）:",
         f"  発見役: {plan.breakdown.calls_text()}",
     ]
-    expectation = plan.expectation
     lines.append(
         EXPECTATION_LINE.format(
             total=expectation.total_usd,

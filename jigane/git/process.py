@@ -237,6 +237,18 @@ def run_claude_resolved(
     return _run_resolved(launched, **kwargs)
 
 
+def run_codex_resolved(
+    args: list[str],
+    **kwargs: Any,  # noqa: ANN401 subprocess.run の引数
+) -> subprocess.CompletedProcess[str]:
+    """Codex の実行とログイン状態の照会専用。"""
+    if args[:2] != ["codex", "exec"] and args[:3] != ["codex", "login", "status"]:
+        raise CommandError(args, "Codex は codex exec と codex login status だけを起動できます")
+    if is_windows():
+        raise CommandError(args, "Codex の起動は macOS と Linux に限ります")
+    return _run_resolved(args, **kwargs)
+
+
 def _resolve_claude(args: list[str], env: dict[str, str] | None) -> list[str]:
     """先頭を claude の実体の絶対パスにした argv。版の確かめと起動に同じ実体を使うため。"""
     # 引数ごと解く。cmd.exe を通る実体の断りは引数を見るため、版の確かめより先に効かせる

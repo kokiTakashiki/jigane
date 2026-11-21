@@ -2,7 +2,58 @@
 
 [README に戻る](../README.md)
 
-コマンドの一覧は `jigane --help` で出ます。以下の例では、先頭の行が呼び方で、続く `#` の行が引数の意味です。`<レビュー>` はレビューの識別子です。
+## コマンド一覧
+
+副コマンドをレビューの段階ごとに並べています。端末では `jigane --help` で一覧を出せます。
+
+<!-- BEGIN GENERATED: command-table (scripts/generate_command_table.py) -->
+
+| 段階 | コマンド | モデルを呼び出す | 役割 |
+| --- | --- | --- | --- |
+| レビューを作る | `new` | いいえ | レビューを作ります |
+| レビューを作る | `refresh` | いいえ | 作者の修正を取り込みます |
+| レビューを作る | `list` | いいえ | レビューを一覧します |
+| レビューを作る | `archive` | いいえ | レビューを一覧から隠します。データは残ります |
+| レビューを作る | `unarchive` | いいえ | アーカイブしたレビューを一覧へ戻します |
+| レビューを作る | `delete` | いいえ | レビューを消します。戻せません |
+| 見る | `show` | いいえ | レビューを表示します |
+| 見る | `diagrams` | いいえ | ツリー図、シーケンス図、方針のレビューの図を出します |
+| 見る | `sequence` | いいえ | 変更した入口ごとのシーケンス図を出します |
+| 見る | `technology-list` | いいえ | 変更したファイルが使う技術の表を出します |
+| 見る | `design` | いいえ | 設計書を読みます |
+| 見る | `estimate` | いいえ | レビュー資料の大きさと費用を見積もります |
+| 見る | `usage` | いいえ | スキルの使用量と成果を表で示します |
+| 解析する | `run` | はい | スキルを実行します |
+| 解析する | `flaky` | いいえ | テストの flaky の検査だけを走らせます（レビューは作りません） |
+| 指摘を選ぶ | `pick` | いいえ | 指摘（F、B の番号）を最終的な指摘に加えます |
+| 指摘を選ぶ | `unpick` | いいえ | 指摘（F、B の番号）を最終的な指摘から外します |
+| 指摘を選ぶ | `hold` | いいえ | 指摘（F、B の番号）を保留にします。--reason で理由を残せます（任意） |
+| 指摘を選ぶ | `unhold` | いいえ | 指摘（F、B の番号）を保留から外します |
+| 指摘を選ぶ | `object` | いいえ | 指摘への異議を記録します |
+| 指摘を選ぶ | `unobject` | いいえ | 指摘への異議を取り下げます |
+| 書き出す | `export-reply` | いいえ | 最終的な指摘から返信の文面を作ります（差分のレビュー） |
+| 書き出す | `export-report` | いいえ | 最終的な指摘からレポートを書き出します |
+| 書き出す | `templates` | いいえ | 返信とレポートのテンプレートを一覧します |
+| 導入 | `select-agent` | いいえ | レビューエージェントを選択・確認します |
+| 導入 | `languages` | いいえ | 言語を一覧し、追加の言語を有効にし、外し、文法を取得します |
+| 確かめる | `debug` | はい | jigane の内部を確かめます。出力は暫定で、jigane の版で変わることがあります |
+
+<!-- END GENERATED: command-table -->
+
+`new pr` と PR のレビューの `refresh` は GitHub から情報を読み、`languages fetch` は tree-sitter の文法を取得します。[データの送り先](data-destinations.md)
+
+## レビューの識別子
+
+`new` の出力に、作ったレビューの識別子を示します。以下の例で `<レビュー>` はこの識別子です。先頭の行がコマンドの呼び方で、続く `#` の行が引数の意味です。
+
+| レビューの種類 | 識別子 |
+| --- | --- |
+| PR | `<owner>/<repo>#<番号>` |
+| 範囲 | `<owner>/<repo>@<名前>` |
+| ファイル | `<owner>/<repo>:<名前>` |
+| 設計書 | `<owner>/<repo>+<名前>` |
+
+呼び出した場所のリポジトリで名前が一つに決まるときは、名前だけ（例 `payment`）で指せます。同じリポジトリに範囲とファイルのレビューなどが同じ名前で複数あれば、入力を拒んで候補を示します。同じリポジトリにその名前が無いときも入力を拒み、別のリポジトリに同じ名前のレビューがあれば候補を示します。
 
 ## 解析しない言語の案内
 
@@ -118,7 +169,7 @@ jigane list [--archived] [--json]
 
 古い版などで読めない記録は、`jigane list` が 1 件ずつ理由つきで警告します。`list` 以外の副コマンドは、置き場の全件を内部で引く間の同じ警告を、出力の末尾の 1 行にまとめます。一回の実行で置き場を何度引いても同じ記録は一度だけ数え、件数と、理由を見る `jigane list` だけを示します。
 
-`--json` の出力は、レビューごとに 1 要素を持つ配列です。各要素は `"id"` の鍵を持ち、値はレビューの識別子の文字列です（例 `owner/repo@name`）。識別子は `<owner>/<repo>` の後ろに、種類ごとの区切り（PR は `#`、範囲は `@`、ファイルは `:`、設計書は `+`）と、PR は番号、ほかは名前を続けた形です。`--archived` を付けたときの一覧も、同じ形の要素の配列です。
+`--json` の出力は、レビューごとに 1 要素を持つ配列です。各要素は `"id"` の鍵を持ち、値は [レビューの識別子](#レビューの識別子) の文字列です（例 `owner/repo@name`）。`--archived` を付けたときの一覧も、同じ形の要素の配列です。
 
 ### jigane archive と unarchive
 
@@ -208,7 +259,7 @@ jigane estimate <レビュー> macro|micro|security [--effort low|medium|high|xh
 # --mcp-guide: セキュリティの群だけが使う、MCP の使い分けの TOML
 ```
 
-入力の大きさを見積もります。引数は `run` と同じ意味で、`--model` だけは受けません。
+レビュー資料の大きさと費用を見積もります。引数は `run` と同じ意味で、`--model` だけは受けません。
 
 `--json` の `expected` には、群の見込みを `total_usd`（発見役の見積もり × 検証役の倍率）、`version`、`discovery_estimate_usd`、`verifier_multiplier`、`verifier_multiplier_source` で出します。方針は検証役を持たないので倍率は 1 で、出所は `no_verifier` です。実装とセキュリティの倍率は、レビューの置き場の `runs.json` にある同じリポジトリの回の記録から引きます（`run_records`）。`jigane run` は回の記録へ、起動の前の発見役の見積もり（`discovery_estimate_usd`）と見積もりの数え方の版（`estimate_version`）を足します。倍率は、今の版の欄を持つ回について、群の実額を発見役の見積もりで割って平均した値です。欄の無い古い回と版の違う回は数えません。数える回が無ければ既定の 2.5 です（`default`）。`jigane usage` の出力には列を足しません。
 
@@ -225,6 +276,19 @@ jigane usage <レビュー> [--json | --csv] [--wide] [--no-header]
 
 スキルの使用量と成果を表で示します。
 
+## エージェントを選ぶ
+
+### jigane select-agent
+
+```bash
+jigane select-agent [claude|codex]
+jigane select-agent --show [--json]
+```
+
+引数を省くと端末で Claude Code と Codex のどちらを使うか尋ねます。エージェント名を指定して保存することもできます。選択の変更には同じコマンドを使います。[データの置き場](#データの置き場) の直下の `agent.json` にはエージェント名だけを保存します。
+
+`--show --json` は、保存された選択を `{"agent":"claude"}` または `{"agent":"codex"}` として出力します。未選択なら `{"agent":null}` を返します。設定が壊れている場合は診断を出して終了コード 2 で止まり、明示指定で選択し直せます。`--show` は設定を読み取るだけです。
+
 ## 解析する
 
 ### jigane run
@@ -239,7 +303,13 @@ jigane run <レビュー> macro|micro|security [--model <モデル>] [--effort l
 # --mcp-guide: セキュリティの群だけが使う、MCP の使い分けの TOML
 ```
 
-実行の前に費用の同意を尋ねます。問いには「発見役:」の行に続けて、「群の見込み: …」の行で発見役の見積もりと検証役の倍率、その積を示します。
+保存したエージェントで実行します。未選択の場合はレビューを読む前に止まり、`jigane select-agent` を案内します。環境変数 `JIGANE_AGENT` と PATH による自動選択は Make／Just のセットアップで使います。見積もり、作成、一覧、help は選択前から使えます。
+
+macOS と Linux では Codex を選んで `macro`、`micro`、`security` を 1 群ずつ実行できます。端末の `jigane run` では `codex login` で保存した ChatGPT ログインを使います。OpenAI に送る資料と認証方法を端末で確認します。実行後は報告された使用量から USD 換算額を記録します。
+
+Codex 選択時の `estimate --json` は、初期起動数、プロンプトのサイズ、非対話実行に使う認証の条件（`noninteractive_requires`）と担当モデル（`noninteractive_model`）を返します。`expected.total_usd` は群全体の USD 換算見込みです。初期起動ごとにプロンプト本文の入力と、出力・推論を合わせた 8,192 トークンを担当モデルの単価で見積もります。実装とセキュリティは検証などの追加起動を見込んで 2.5 倍、方針は 1 倍です。MCP 指定時、または見積もれない場合は `expected.total_usd` が `null` です。`max_budget_usd_per_call` は常に `null` です。`noninteractive_run_available` は資料と見積もりに関する判定で、ログイン状態は実行前に確認します。
+
+Claude Code の実行の前には費用の同意を尋ねます。問いには「発見役:」の行に続けて、「群の見込み: …」の行で発見役の見積もりと検証役の倍率、その積を示します。
 
 スキルを実行します。群は `macro`（方針）、`micro`（実装）、`security`（セキュリティ）の三つです。`--max-budget-usd-per-call` は Claude Code CLI の 1 回の起動あたりの上限の目安であり、超えることがあります（上限は API の呼び出しごとに確かめるため、最後の一回の分だけ超えうる）。実行全体の上限でもありません。方針は PR と範囲のレビューで最大 5 回起動するので、`--max-budget-usd-per-call` を渡すとそのすべてに効き、実行全体の目安は最大でその 5 倍になります。上限に達する入力の起動は見送られ、残りの結果を保存します。ただし方針で図の起動が走らなかった回は、前の回の結果を残します（[reviews.md](reviews.md) の方針の節）。見送った起動は、`jigane run` の表示と `jigane show` の表示に「起動せず」の行で出ます。設計書のレビューは起動が 1 回なので、この目安が実行全体の目安になります。見込みが目安以上のときは、警告して続けます。
 
@@ -249,7 +319,7 @@ jigane run <レビュー> macro|micro|security [--model <モデル>] [--effort l
 
 モデルも既定を持ちます。実装とセキュリティの群と、方針の図の起動と設計書のレビューは claude-sonnet-5-5 で、方針の原則の起動は claude-haiku-5-5 です。effort は方針が high で、他は渡しません。`--model` と `--effort`（low、medium、high、xhigh、max）で上書きできます。`--model` は方針の図と原則のすべての起動に効きます。起動ごとのモデルは `runs.json` に残り、`jigane usage` は起動のモデルごとに行を分けます。`jigane estimate` も `--effort` を受け、見積もりに解決した effort を出します。実行全体の金額と起動の回数は `run` の出力に示します。
 
-セキュリティの群だけが、`--mcps <名前>...` で MCP を選べます。MCP は任意で、`--mcps` を渡さなければ使いません。使う MCP は利用者がデータの置き場の `mcp.json` に書き、名前はその `mcpServers` のキーです。MCP の使い分けを書いたファイルは、「[セキュリティの群の MCP の使い分け](security-mcp.md#セキュリティの群の-mcp-の使い分け)」の節で渡し方を述べます。
+端末の `jigane run` のセキュリティの群では、`--mcps <名前>...` で基準資料を参照するサーバを選びます。省略すると MCP を使いません。選んだ CLI が設定の読み込みやサーバの起動を担います。エージェントごとの登録手順と `--mcp-guide` の書き方は [MCP の設定](security-mcp.md) を参照してください。
 
 解析しない言語のソースのファイルか読めない記述が範囲にあるときは、費用の同意の後に「[解析しない言語の案内](#解析しない言語の案内)」と「[読めない記述の案内](#読めない記述の案内)」を出し、「それでもレビューを実施しますか」と尋ねます。y か yes のときだけ起動します。
 
@@ -359,8 +429,8 @@ jigane languages fetch [<言語> ...] [--accept-terms]
 
 ```bash
 jigane debug errors [--json]
-jigane debug prompt <レビュー> <群> [--mcps <名前>...] [--max-budget-usd-per-call <USD>] [--page-size <件数>] [--after <印>] [--json]
-jigane debug run <レビュー> <群> --yes --max-usd <額> [--effort <effort>] [--mcps <名前>...] [--mcp-guide <パス>] [--json]
+jigane debug prompt <レビュー> <群> [--mcps <名前>...] [--mcp-guide <パス>] [--max-budget-usd-per-call <USD>] [--page-size <件数>] [--after <印>] [--json]
+jigane debug run <レビュー> <群> --yes --max-usd <額> [--expect-agent claude|codex] [--effort <effort>] [--mcps <名前>...] [--mcp-guide <パス>] [--json]
 jigane debug stats [--json] [--page-size <件数>] [--after <印>] [--with-body]
 jigane debug review-id [--json]
 jigane debug paths [--json]
@@ -372,7 +442,13 @@ jigane の内部を確かめる口です。`pip debug` に倣い、利用者と�
 
 `prompt` は、LLM を起動せずに、その群で起動するときのプロンプトの本文を出します。組み立ては `estimate` と `run` が使うものと同じで、費用はかからず、確認なしで走ります。本文はレビュー対象の本文を含むので、標準出力へ出すだけで、ファイルへは書きません。`--json` の出力は `{"prompts": [{"role": ..., "text": ..., "bytes": ...}, ...], "next": ...}` です。`role` は起動の種類（発見役は `discovery`、原則の起動は `principle`）、`bytes` は `text` の UTF-8 のバイト数です。`--page-size`（既定 5、上限 20）の件数ずつに分け、`next` を `--after` に渡すと続きを読みます。`next` が `null` なら末尾です。`--mcps`（セキュリティの群の MCP の注記を変えます）と `--max-budget-usd-per-call`（上限に収まるまでシャードを増やすので、分け方を変えます）は `estimate` と同じ意味です。`--max-budget-usd-per-call` は有限で 0 より大きい値だけを受け、`nan`、`inf`、0、負の値、数値でない値は終了コード 64 で止まります（`run` と `estimate` では引数の誤りの終了コード 2）。`--page-size` か `--after` が正しくなければ、終了コード 64 で止まります。
 
-`run` は実験的な口で、AI の道具が非対話で走らせるためのものです。AI の道具はこれを使う前に、`jigane estimate` の見積もりの額を人へ見せて同意を得てください。端末への同意の問い（費用と、解析しない言語のファイル）を飛ばして、`jigane run` と同じ処理で走らせます。`--model` と `--max-budget-usd-per-call` は受けません（上限は `--max-usd` が決めます）。`--yes` と `--max-usd` の両方が要り、どちらかが無ければ起動せずに終了コード 64 で止まります。群の見込み（`jigane estimate` と同じ計算）が `--max-usd` を超えるときも起動せず、終了コード 2 で止まります。`--json` の出力は `jigane run --json` の鍵に `max_usd`、`estimated_usd`、`experimental`（常に `true`）を足したものです。見込みが上限を超えて止まったときの `--json` は、この三つの鍵と `stopped`（`estimate_exceeds_max_usd`）だけを持ちます。
+`run` は実験的な非対話の入口です。`macro`、`micro`、`security` から 1 群を指定します。未選択の場合は `jigane select-agent` を案内します。`--expect-agent` を指定すると、保存したエージェントが指定と異なる場合は実行前に止まります。AI の道具は実行前に `jigane estimate` の表示と指定する上限を人に示し、資料の送信と費用の同意を得てください。費用と解析しない言語のファイルに関する端末の問いを省略します。`--yes` と `--max-usd` の両方が必要です。引数が不足すると終了コード 64 です。`--model` と `--max-budget-usd-per-call` は受けません。
+
+Codex の非対話実行では MCP の指定を拒否します。資料を参照するには、端末の `jigane run <レビュー> security --mcps <名前>` を使います。
+
+Claude Code と Codex のどちらでも、群の見込みを `--max-usd` と比べます。見込みが上限を超えるか、見積もれない場合は、資料を送らず終了コード 2 になります。Codex は 1 USD 以下を指定し、Codex CLI に保存した ChatGPT ログインを使います。ログインを確認できない場合も資料を送らず終了コード 2 になります。`--max-usd` は実行前の判定に使い、実行後の使用量と USD 換算額は通常の `run` と同様に記録します。実行後の換算額は出力の量や検証の回数によって事前見込みや指定額を超えることがあります。
+
+`--json` の出力は `jigane run --json` の鍵に `max_usd`、群の見込みを表す `estimated_usd`、`experimental`（常に `true`）を足したものです。見込みが指定額を超えた場合は、この三つの鍵と `stopped: estimate_exceeds_max_usd` を返します。Codex に 1 USD を超える額を指定した場合は `estimated_usd` が `null` になり、`stopped: confirmation_required` を返します。認証や見積もりを確認できない場合は `error` を返します。
 
 `stats` は、置き場の全レビュー（アーカイブ済みを含む）について、指摘の数と札をまとめて返します。既定は数と札（`id`、`severity`、`triage`）だけで、指摘の本文（`claim`）は `--with-body` を付けたときだけ出します。`--json` の出力は `{"reviews": [...], "next": ..., "skipped": ..., "limits": {...}}` です。`reviews` の各要素は `id`、群ごとの指摘の数 `finding_counts`、群ごとの指摘の札 `findings` を持ちます。`--page-size`（既定 20、最大 100）で一度に出す件数を決め、`next` が `null` でなければ、その値を `--after` に渡すと続きを取れます。印はレビューの識別子の並びで決めるので、間にレビューが増えても重複や抜けは起きません。読めない記録と、`findings.json` が `limits` の `max_findings_file_bytes`（4 MiB）を超える記録は、読み込む前に飛ばします。飛ばした記録は `skipped` に数えます。`skipped` は、そのページを作る間に飛ばした数です。読めないレビュー自体（`review.json` の破損）は並びに置けないので、最初のページ（`--after` が無いとき）だけで数えます。したがって、全ページの `skipped` の和が全体の数になります。
 
@@ -399,8 +475,9 @@ jigane の内部を確かめる口です。`pip debug` に倣い、利用者と�
 | `--yes` が無い | 終了コード 64 |
 | `--max-usd` が無い | 終了コード 64 |
 | `--max-usd` の値が不正（`nan`、`inf`、0、負の値、数値でない） | 終了コード 64 |
+| Codex で `--max-usd` が 1 USD を超える | 終了コード 2。起動しない |
 | 見込みが `--max-usd` を超える | 終了コード 2。起動しない |
-| 見込みが `--max-usd` 以内 | 起動する。終了コードは `jigane run` と同じ（0、2、3） |
+| 見込みが `--max-usd` 以内で、Codex ではログインも確認できる | 起動する。終了コードは `jigane run` と同じ（0、2、3） |
 
 ## データの置き場
 

@@ -1,6 +1,6 @@
 """群の見込み。発見役の見積もりに検証役の倍率を掛けた額を、すべての群で一つの定義で出す。
 
-金額と倍率から見込みを組み、倍率の出所（回の記録、既定の値の順）を決める。
+Claude Code の倍率は回の記録から引く。Codex CLI は担当モデルごとの入出力と既定の倍率を使う。
 見積もり全体を走らせるのは組み立ての根（estimate と run の入口）で、ここでは走らせない。
 """
 
@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from jigane.groups.definitions import GroupId
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, codex, pricing
 from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_review_summaries
 from jigane.skills.estimate_result import EstimateCommon
+from jigane.skills.launch_prompts import LaunchPrompt
 from jigane.skills.pipeline import ESTIMATE_COUNTING_VERSION, read_runs
 
 # 見込みの組み立てを変えたら上げる。jigane estimate --json の expected.version
@@ -21,6 +22,8 @@ EXPECTATION_VERSION = 1
 NO_VERIFIER_MULTIPLIER = 1.0
 # 回の記録に実額が無いときの検証役の倍率の仮置き。測定で後から決め直す
 DEFAULT_VERIFIER_MULTIPLIER = 2.5
+# Codex CLI の初期起動 1 回あたりの出力・推論の見込み。CLI に渡す制限値ではない。
+CODEX_LOGIN_OUTPUT_TOKENS = 8_192
 
 
 class VerifierMultiplierSource(StrEnum):
@@ -94,4 +97,27 @@ def read_expectation(
         return GroupExpectation(discovery_usd, from_records, VerifierMultiplierSource.RUN_RECORDS)
     return GroupExpectation(
         discovery_usd, DEFAULT_VERIFIER_MULTIPLIER, VerifierMultiplierSource.DEFAULT
+    )
+
+
+def codex_login_expectation(
+    prompts: tuple[LaunchPrompt, ...], *, has_verifier: bool
+) -> GroupExpectation | None:
+    """初期起動ごとの入力・出力と、追加検証を含む単群の USD 換算見込み。"""
+    prefix_size = len(codex.REVIEW_BOUNDARY.encode("utf-8"))
+    if not prompts or any(p.size + prefix_size > codex.MAX_PROMPT_BYTES for p in prompts):
+        return None
+    nanos = sum(
+        prompt.codex_model().estimate_nanos(
+            pricing.estimate_input_tokens(prompt.size + prefix_size), CODEX_LOGIN_OUTPUT_TOKENS
+        )
+        for prompt in prompts
+    )
+    discovery_usd = nanos / codex.NANOS_PER_USD
+    if has_verifier:
+        return GroupExpectation(
+            discovery_usd, DEFAULT_VERIFIER_MULTIPLIER, VerifierMultiplierSource.DEFAULT
+        )
+    return GroupExpectation(
+        discovery_usd, NO_VERIFIER_MULTIPLIER, VerifierMultiplierSource.NO_VERIFIER
     )

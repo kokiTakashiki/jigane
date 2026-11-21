@@ -54,7 +54,7 @@ def _named_sequences(tree: ast.Module) -> dict[str, list[str]]:
 
 def _compare(
     node: ast.Compare, named: dict[str, list[str]]
-) -> Iterator[tuple[str, ComparisonKind, str]]:
+) -> Iterator[tuple[str, ComparisonKind, str, bool]]:
     operands = [node.left, *node.comparators]
     for operator, left, right in zip(node.ops, operands, operands[1:], strict=False):
         if isinstance(operator, ast.Eq | ast.NotEq):
@@ -62,13 +62,18 @@ def _compare(
                 if (value := _string(side)) is not None:
                     # 両辺がリテラルの比べは、比べている相手の式が無い
                     subject = "" if _string(other) is not None else ast.unparse(other)
-                    yield value, ComparisonKind.EQUALS, subject
+                    yield value, ComparisonKind.EQUALS, subject, False
         elif isinstance(operator, ast.In | ast.NotIn):
-            strings = _literal_strings(right)
-            if strings is None and isinstance(right, ast.Name):
-                strings = named.get(right.id)
+            strings = (
+                named.get(right.id) if isinstance(right, ast.Name) else _literal_strings(right)
+            )
             for value in strings or []:
-                yield value, ComparisonKind.MEMBERSHIP, ast.unparse(left)
+                yield (
+                    value,
+                    ComparisonKind.MEMBERSHIP,
+                    ast.unparse(left),
+                    isinstance(right, ast.Name),
+                )
         else:
             # 大小の比較や同一性の判定は、文字列の値の写しの手がかりにならない
             continue
@@ -105,12 +110,12 @@ def _walk_comparisons(tree: ast.Module, path: str) -> list[StringLiteralComparis
         if isinstance(node, ast.Compare):
             pairs = _compare(node, named)
         elif isinstance(node, ast.Call):
-            pairs = _call(node)
+            pairs = ((*pair, False) for pair in _call(node))
         else:
             continue
         found += [
-            StringLiteralComparison(value, kind, path, node.lineno, subject)
-            for value, kind, subject in pairs
+            StringLiteralComparison(value, kind, path, node.lineno, subject, uses_named_set)
+            for value, kind, subject, uses_named_set in pairs
         ]
     return sorted(found, key=lambda comparison: comparison.line)
 

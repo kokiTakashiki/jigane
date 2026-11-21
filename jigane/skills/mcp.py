@@ -1,56 +1,102 @@
-"""--mcps で選んだ MCP サーバ。mcp.json で確かめた名前と設定を一つの不変の値にまとめる。"""
+"""MCP の選択。上流 CLI に渡す名前と設定または実行ファイルのパスを持つ。"""
 
-import json
 import logging
 import os
+import re
+import shlex
 import stat
-import tempfile
+import sys
 import tomllib
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from jigane.git.process import is_windows
-from jigane.llm_runs import claude
-from jigane.storage.store import data_home
-from jigane.text.json_input import (
-    SETTINGS_NESTING_LIMIT,
-    JsonTooDeepError,
-    loads_bounded,
-    settings_too_deep_message,
-)
+from jigane.llm_runs.claude import MCP_RESOURCE_TOOLS
+from jigane.llm_runs.codex_mcp import StdioServer
+from jigane.storage.store import data_home, require_private_data_home
 
 LOGGER = logging.getLogger(__name__)
-MCP_CONFIG_FILE = "mcp.json"
-# --allowedTools に mcp__<名前> を渡すと、そのサーバの全ての道具が承認なしで許される
-ALL_TOOLS_NOTICE = "これらのサーバの道具はすべて承認なしで使われます"
+MCP_CONFIG_DIRECTORY = "mcp-claude"
+CODEX_MCP_DIRECTORY = "mcp-codex"
+MCP_CONFIG_FILE = "mcp.json"  # 移行元の名前
+MCP_HOME_ENVIRONMENT = "JIGANE_MCP_HOME"
+_MCP_NAME = re.compile(r"[A-Za-z0-9_-]+")
+ALL_TOOLS_NOTICE = "Claude Code はこれらのサーバの道具をすべて承認なしで使います"
 
 
 class SecurityConfigError(Exception):
     pass
 
 
-def mcp_config_path() -> Path:
-    return data_home() / MCP_CONFIG_FILE
-
-
-def warn_if_broadly_accessible(path: Path) -> None:
-    """POSIX で mcp.json にグループか他人の権限があれば警告する。読み込みは止めない。
-
-    設定に認証情報が入りうる。拒まないのは、既存の利用者の起動を権限の指摘で止めないため。
-    Windows の権限は mode のビットに現れないので確かめない。
-    """
-    if is_windows():
-        return
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & 0o077:
-        LOGGER.warning(
-            "%s の権限が 0%o です。認証情報が入りうるので 0600 に絞ってください（chmod 600）",
-            path,
-            mode,
+def _registration_home() -> Path:
+    override = os.environ.get(MCP_HOME_ENVIRONMENT)
+    home = data_home() if override is None else Path(override)
+    if override is not None and (not home.is_absolute() or not home.is_dir()):
+        raise SecurityConfigError(
+            f"{MCP_HOME_ENVIRONMENT} に既存のディレクトリの絶対パスを指定してください"
         )
+    home = home.resolve()
+    require_private_data_home(home)
+    return home
+
+
+def _checked_path(path: Path, *, directory: bool = False, codex_cli: bool = False) -> None:
+    """CLI に渡す設定を lstat だけで確認する。本文は Claude Code が開く。"""
+    migration = (
+        "信頼できる stdio 実行ファイルを mcp-codex/<名前> として登録してください"
+        if codex_cli
+        else f"旧 {MCP_CONFIG_FILE} の登録を mcp-claude/<名前>.json にサーバごとに移してください"
+    )
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        raise SecurityConfigError(f"MCP の設定がありません: {path}。{migration}") from None
+    except OSError:
+        raise SecurityConfigError(f"MCP の設定の状態を確認できません: {path}") from None
+    mode_matches = stat.S_ISDIR if directory else stat.S_ISREG
+    if not mode_matches(info.st_mode) or (
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        kind = "ディレクトリ" if directory else "ファイル"
+        raise SecurityConfigError(f"MCP の設定には通常の{kind}を使ってください: {path}")
+    if sys.platform == "win32":  # noqa: TID251 POSIX 所有者 API の無い Windows では ACL に任せる
+        return
+    if info.st_uid != os.getuid():
+        raise SecurityConfigError(f"MCP の設定の所有者を実行ユーザーにしてください: {path}")
+    mode = stat.S_IMODE(info.st_mode)
+    chmod = f"chmod {'700' if directory else '600'} {shlex.quote(str(path))}"
+    if mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise SecurityConfigError(
+            f"{path} はグループか他の利用者が書き込めます。"
+            f"設定を確認し、`{chmod}` で権限を絞ってください"
+        )
+    if mode & 0o077 and not directory:
+        LOGGER.warning("%s の権限を絞ってください（%s）", path, chmod)
+
+
+def _codex_executable(registration: Path, name: str) -> Path:
+    """内容を開かず、利用者が登録した実行ファイルの実体を解く。"""
+    error = SecurityConfigError(
+        f"MCP サーバ {name} の実行ファイルを確認できません。"
+        f"{CODEX_MCP_DIRECTORY}/{name} に、信頼できる実行ファイルへのリンクを置いてください"
+    )
+    if sys.platform == "win32":  # noqa: TID251 Codex のこの経路は POSIX の権限を使う
+        raise error
+    try:
+        executable = registration.resolve(strict=True)
+        info = executable.stat()
+        if not stat.S_ISREG(info.st_mode) or not os.access(executable, os.X_OK):
+            raise error
+        trusted_owners = (0, os.getuid())
+        if info.st_uid not in trusted_owners or info.st_mode & 0o022:
+            raise error
+        for parent in executable.parents:
+            info = parent.stat()
+            writable = info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX
+            if info.st_uid not in trusted_owners or writable:
+                raise error
+    except (OSError, RuntimeError):
+        raise error from None
+    return executable
 
 
 def read_guide(path: Path, names: tuple[str, ...]) -> dict[str, str]:
@@ -89,94 +135,74 @@ def read_guide(path: Path, names: tuple[str, ...]) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class McpServer:
-    """選んだ MCP サーバ一つ。use_for は --mcp-guide を渡さなかったときだけ None。"""
-
     name: str
-    config: Any
+    path: Path
     use_for: str | None
 
 
 @dataclass(frozen=True)
 class McpSelection:
-    """選んだサーバの並び。空が「MCP 無し」の唯一の表し方。"""
-
     servers: tuple[McpServer, ...] = ()
+    codex_cli: bool = False
 
     @classmethod
     def none(cls) -> "McpSelection":
         return cls()
 
     @classmethod
-    def load(cls, names: tuple[str, ...], guide_path: Path | None = None) -> "McpSelection":
-        """mcp.json から指定した名前の設定だけを取り出す。ファイルか名前が無ければ失敗する。
-
-        guide_path があれば、形と名前の集合を確かめてから使い分けを持たせる。
-        """
+    def load(
+        cls, names: tuple[str, ...], guide_path: Path | None = None, *, codex_cli: bool = False
+    ) -> "McpSelection":
+        if any(not _MCP_NAME.fullmatch(name) for name in names):
+            raise SecurityConfigError("MCP の名前は半角英数字、ハイフン、下線で指定してください")
         guide = None if guide_path is None else read_guide(guide_path, names)
         if not names:
             return cls.none()
-        path = mcp_config_path()
-        if not path.is_file():
-            raise SecurityConfigError(
-                f"--mcps {' '.join(names)} を指定しましたが {path} がありません。"
-                '{"mcpServers": {...}} の形で起動の設定を書いてください'
+        home = _registration_home()
+        directory = home / (CODEX_MCP_DIRECTORY if codex_cli else MCP_CONFIG_DIRECTORY)
+        _checked_path(directory, directory=True, codex_cli=codex_cli)
+        servers = tuple(
+            McpServer(
+                name,
+                _codex_executable(directory / name, name)
+                if codex_cli
+                else directory / f"{name}.json",
+                None if guide is None else guide[name],
             )
-        warn_if_broadly_accessible(path)
-        shape_error = SecurityConfigError(f"{path} が mcpServers を持つ JSON の形ではありません")
-        try:
-            document = loads_bounded(path.read_text(encoding="utf-8"), SETTINGS_NESTING_LIMIT)
-        except JsonTooDeepError as error:
-            raise SecurityConfigError(settings_too_deep_message(path, error)) from error
-        except ValueError as error:
-            raise shape_error from error
-        if not isinstance(document, dict):
-            raise shape_error
-        available = document.get("mcpServers")
-        if not isinstance(available, dict):
-            raise SecurityConfigError(f"{path} に mcpServers がありません")
-        missing = [name for name in names if name not in available]
-        if missing:
-            raise SecurityConfigError(
-                f"{path} に MCP サーバ {', '.join(missing)} の設定がありません"
-            )
-        # guide を読んだときは read_guide が names と同じ集合を保証するので、全てに use_for が入る
-        return cls(
-            tuple(
-                McpServer(name, available[name], None if guide is None else guide[name])
-                for name in names
-            )
+            for name in names
         )
+        if not codex_cli:
+            for server in servers:
+                _checked_path(server.path)
+        return cls(servers, codex_cli)
 
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(server.name for server in self.servers)
 
-    def allowed_tools(self) -> tuple[str, ...]:
-        if not self.servers:
+    @property
+    def config_paths(self) -> tuple[Path, ...]:
+        return () if self.codex_cli else tuple(server.path for server in self.servers)
+
+    @property
+    def reference_servers(self) -> tuple[StdioServer, ...]:
+        if not self.codex_cli:
             return ()
-        return (*(f"mcp__{name}" for name in self.names), *claude.MCP_RESOURCE_TOOLS)
+        return tuple(StdioServer(server.name, server.path) for server in self.servers)
 
-    def config_content(self) -> dict[str, Any]:
-        return {"mcpServers": {server.name: server.config for server in self.servers}}
-
-    @contextmanager
-    def config_file(self) -> Iterator[Path | None]:
-        """選んだサーバだけの一時の設定ファイルを権限 0600（POSIX）で作り、抜けるときに消す。"""
+    def require_outside(self, working_directory: Path) -> None:
         if not self.servers:
-            # 既定は MCP を使わない。--mcp-config を渡さないので、ファイルを作らない
-            yield None
             return
-        descriptor, name = tempfile.mkstemp(prefix="jigane-mcp-", suffix=".json")
-        path = Path(name)
-        try:
-            # mkstemp は 0600 で作る。設定に認証情報が入りうるので、他の利用者に読ませない。
-            # 0600 は POSIX でしか効かない。
-            # Windows では利用者ごとの一時のディレクトリの既定の ACL に頼る
-            with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-                json.dump(self.config_content(), file)
-            yield path
-        finally:
-            path.unlink(missing_ok=True)
+        root = working_directory.resolve()
+        if any(server.path.is_relative_to(root) for server in self.servers):
+            raise SecurityConfigError(
+                "MCP の設定と実行ファイルをレビュー対象の作業ディレクトリの外に置いてください"
+            )
+
+    def allowed_tools(self) -> tuple[str, ...]:
+        if not self.servers or self.codex_cli:
+            return ()
+        return (*(f"mcp__{name}" for name in self.names), *MCP_RESOURCE_TOOLS)
 
 
 NO_MCP = McpSelection.none()

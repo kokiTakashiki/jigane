@@ -88,7 +88,7 @@ def _called(node: Node) -> tuple[Node | None, str]:
     return head.child_by_field_name("target"), (name.text or b"").decode() if name else ""
 
 
-def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, ComparisonKind]]:
+def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, ComparisonKind, bool]]:
     receiver, name = _called(node)
     arguments = _argument_values(node)
     if not arguments:
@@ -96,16 +96,17 @@ def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, Compar
     first = arguments[0][1]
     if receiver is None:
         if name in _REGEX_CONSTRUCTORS and (pattern := _string(first)) is not None:
-            yield pattern, ComparisonKind.REGEX
+            yield pattern, ComparisonKind.REGEX, False
     elif name == "contains":
-        if receiver.type == "simple_identifier":
+        uses_named_set = receiver.type == "simple_identifier"
+        if uses_named_set:
             strings = named.get((receiver.text or b"").decode())
         else:
             strings = _literal_strings(receiver)
         for value in strings or []:
-            yield value, ComparisonKind.MEMBERSHIP
+            yield value, ComparisonKind.MEMBERSHIP, uses_named_set
     elif name in _AFFIX_KINDS and (affix := _string(first)) is not None:
-        yield affix, _AFFIX_KINDS[name]
+        yield affix, _AFFIX_KINDS[name], False
 
 
 def _edge(node: Node | None, field: str) -> Node | None:
@@ -132,13 +133,17 @@ def _comparison(node: Node) -> Iterator[tuple[str, ComparisonKind]]:
 def string_comparisons_of(root: Node, path: str) -> list[StringLiteralComparison]:
     """ファイルの文字列との比較を、行の順に返す。"""
     named = _named_sequences(root)
-    found: list[tuple[str, ComparisonKind, int]] = []
+    found: list[tuple[str, ComparisonKind, int, bool]] = []
     for node in walk_nodes(root):
+        pairs: Iterator[tuple[str, ComparisonKind, bool]]
         if node.type in ("equality_expression", "infix_expression"):
-            pairs = _comparison(node)
+            pairs = ((*pair, False) for pair in _comparison(node))
         elif node.type == "call_expression":
             pairs = _call(node, named)
         else:
             continue
-        found += [(value, kind, node.start_point.row + 1) for value, kind in pairs]
+        found += [
+            (value, kind, node.start_point.row + 1, uses_named_set)
+            for value, kind, uses_named_set in pairs
+        ]
     return ordered_comparisons(found, path)

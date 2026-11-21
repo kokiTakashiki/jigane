@@ -1,6 +1,8 @@
+import tomllib
+from pathlib import Path
+
 import pytest
 
-from jigane import __version__
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE
 
@@ -9,7 +11,9 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         main(["--version"])
     assert raised.value.code == EXIT_OK
-    assert __version__ in capsys.readouterr().out
+    project = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    version = tomllib.loads(project.read_text(encoding="utf-8"))["project"]["version"]
+    assert capsys.readouterr().out.strip() == f"jigane {version}"
 
 
 @pytest.mark.parametrize("name", ["7", "0128"])

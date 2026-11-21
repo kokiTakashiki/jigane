@@ -162,3 +162,20 @@ class SwiftAdapter:
 | `StringLiteralComparison` | `value` → `literal_value`、`kind` → `comparison_kind`、`subject` → `compared_expression` |
 | `TypeFieldNames` | `name` → `type_name`、`fields` → `field_names` |
 | `CallSite`（フィールド）、`DeferredSite`（プロパティ） | `end` → `end_byte` |
+
+## 組み込みの対応言語
+
+判断の地図と flaky の検査は、tree-sitter で読む次の四言語に対応します。
+
+| 言語 | 拡張子 |
+|---|---|
+| Python | `.py` |
+| Java | `.java` |
+| Swift | `.swift` |
+| C# | `.cs`（`Foo.xaml.cs` は、対応する `Foo.xaml` のイベントの結線も読みます） |
+
+方針の資料の図は、言語ごとに対応が違います。Python はすべての図に対応します。Java と C# は、副コマンドの引数と、保存物の書く側と読む側の二つに対応しません。Swift は、副コマンドの引数に対応せず、保存物の書く側と読む側は `Foundation.UserDefaults`、Codable の JSON（`JSONEncoder` の `encode` と `JSONDecoder` の `decode`）、Keychain（`SecItem*` 関数）に対応します。`jigane languages list` が、言語ごとの対応する図と対応外の図を示します。
+
+ほかの言語のファイルも、レビューから外しません。判断の地図は、構文を読まずに変更の行をロジックの変更として扱い、確認が要る区間として示します。flaky の検査は、ほかの言語のファイルを調べません。方針、実装、セキュリティの解析は、言語でファイルを絞り込みません。ほかの言語は「[言語を追加する](#言語を追加する)」の節の手順で足せます。
+
+範囲のファイルに、解析しない言語のソースが含まれるときは、`new`、`estimate`、`run` が案内を出します。案内の内容は「[解析しない言語の案内](commands.md#解析しない言語の案内)」の節にあります。構文エラーなど、読めない記述がある場合も、「[読めない記述の案内](commands.md#読めない記述の案内)」を出します。

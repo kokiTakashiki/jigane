@@ -39,7 +39,7 @@ from jigane.reviews.catalog import read_review_at
 from jigane.reviews.review_formats import REVIEW_FORMAT
 from jigane.reviews.selection import SELECTION_FILE, SELECTION_FORMAT, load_selection
 from jigane.skills import pipeline, run_record
-from jigane.skills.mcp import McpSelection
+from jigane.skills.mcp import McpSelection, SecurityConfigError
 from jigane.skills.pipeline import RUNS_FORMAT
 from jigane.skills.run_record import IN_PROGRESS_FORMAT, STOPPED_FILE, STOPPED_FORMAT
 from jigane.storage.store import REVIEW_FILE
@@ -190,5 +190,7 @@ def test_root_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JIGANE_HOME", str(home))
     home.mkdir()
     shutil.copy(STORE / "root" / "mcp" / "mcp.json", home)
-    selection = McpSelection.load(("mobile-sec", "server-sec"))
-    assert selection.names == ("mobile-sec", "server-sec")
+    before = (home / "mcp.json").read_bytes()
+    with pytest.raises(SecurityConfigError, match=r"旧 mcp\.json"):
+        McpSelection.load(("mobile-sec", "server-sec"))
+    assert (home / "mcp.json").read_bytes() == before

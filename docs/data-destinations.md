@@ -4,7 +4,7 @@
 
 jigane が外へ送る相手の一覧です。ここに無い相手へ、jigane が自分で接続することはありません。
 
-レビューの対象の差分、PR の本文とレビューボットのコメント、周辺のファイルは、利用者が導入した Claude Code を通じて Anthropic に送られます。学習への利用と保持の期間は、利用者自身の Anthropic のアカウントの設定と契約に従います。詳しくは <https://code.claude.com/docs/en/data-usage> を読んでください。機密のリポジトリでは、契約と設定を確かめてから使ってください。
+Codex を選んだときの送信先と認証方法は [Codex のレビュー](#codex-のレビュー) に記載しています。Claude Code を選んだ場合、レビューの対象の差分、PR の本文とレビューボットのコメント、周辺のファイルは、利用者が導入した Claude Code を通じて Anthropic に送られます。学習への利用と保持の期間は、利用者自身の Anthropic のアカウントの設定と契約に従います。詳しくは <https://code.claude.com/docs/en/data-usage> を読んでください。機密のリポジトリでは、契約と設定を確かめてから使ってください。
 
 ## 送り先
 
@@ -14,7 +14,8 @@ jigane が外へ送る相手の一覧です。ここに無い相手へ、jigane 
 | `api.github.com` | リポジトリと PR の番号、gh の認証 | `jigane new pr`、`jigane refresh` | gh |
 | `release-assets.githubusercontent.com` | 文法の配布物の取得の要求 | `jigane languages fetch` | tree-sitter-language-pack |
 | （claude を通して） | プロンプト（差分、PR の題と本文、ボットのコメント、図と表、前の回の指摘）、claude が読んだファイルの中身、モデルの出力。宛先は claude が決める。このほか claude 自身が、環境の節（作業ディレクトリのパス、OS の名前と版）と、ログイン中のアカウントのメールアドレスを要求に付け足します。環境の節とメールアドレスは jigane の指定では止まらず、切る手段は確かめた範囲で見つかりませんでした。claude 2.1.308 にログインした環境で、起動の環境を `HOME`、`PATH`、`USER`、`LOGNAME`、`TMPDIR` だけに絞っても入ること、`ANTHROPIC_API_KEY` で認証しても入ることを確かめました。作業ディレクトリが Git のリポジトリのときに付くリポジトリの状態の節（Git の利用者名、枝、状態、直近のコミットの件名）は、jigane が `--settings` に `includeGitInstructions: false` を渡して切っています。claude 2.1.308 で要求から消えることを確かめました | `jigane run` の各起動 | 起動する外部コマンド claude |
-| （利用者が選ぶ MCP サーバ） | モデルがその MCP サーバの道具に渡す問い。宛先は利用者の `mcp.json` の設定が決める | `jigane run security --mcps <名前>` を指定したときだけ | claude が呼ぶ MCP サーバ |
+| `chatgpt.com`（Codex CLI の ChatGPT ログイン） | 組み立て済みのレビュー資料、検証資料、出力スキーマ | ログインを確認でき、`jigane run` に端末で同意したとき、または `jigane debug run <レビュー> <群> --yes --max-usd <額>` で同意し、群の見込みが指定額以内のとき | 認証はログイン済みの Codex CLI が扱う |
+| （利用者が選ぶ MCP サーバ） | 選んだ CLI からの資料の参照要求。Claude Code はサーバの道具への問いも送れます。取得した資料は選んだエージェントのモデルに渡ります | セキュリティの群で `--mcps <名前>` を指定したとき | 利用者が選択したエージェントに登録したサーバ |
 
 ホストの列が括弧で始まる行は、ホスト名を持ちません。送り先が jigane の外（claude の設定や利用者の MCP の設定）で決まるためです。
 
@@ -22,20 +23,36 @@ gh と git が `github.com` へ送るのは取得の要求と認証で、レビ�
 
 文法の取得は `jigane languages fetch` のときだけです。レビューの実行のときには取得しません。
 
+## Codex のレビュー
+
+macOS と Linux では Codex CLI に `codex login` でログインし、`jigane select-agent codex` で選択してから `jigane run <レビュー> <群> --json` を端末で実行します。図の形の `macro` は、図と該当する設計原則を別々に起動します。`micro` と `security` は、必要に応じて発見役の後に検証役を起動します。各起動には jigane が組み立てたコード、図や表、文書、レビュー履歴、検証資料などを最大 32 KiB 送ります。`security` は提示された資料で根拠と緩和策を確認する静的レビューです。
+
+通常の `jigane run` と非対話の `jigane debug run` は、どちらも Codex CLI に保存した ChatGPT ログインで `chatgpt.com` に資料を送ります。ログインを確認できなければ送信前に止まります。Codex 自体の認証や付随の通信については [Codex の認証](https://learn.chatgpt.com/docs/auth) を参照してください。
+
+Codex を一時ディレクトリで起動します。読み取り専用サンドボックスを選び、シェル、画像読み取り、サブエージェント、Web 検索を無効にします。利用者の設定ファイルと追加ルールを読み込まず、セッションを永続化しない設定で起動します。jigane はレビューの結果と実行の記録を通常のデータの置き場に保存します。
+
+Codex のホームに `.env`、`AGENTS.md`、`AGENTS.override.md` のいずれかがある場合は、資料を送る前に停止します。Codex CLI がその環境設定や追加指示をレビューに持ち込むのを防ぐためです。既存の設定を使い分ける場合は、専用の `CODEX_HOME` を指定して `codex login` し、同じ環境で `jigane run` または `jigane debug run` を実行できます。
+
+図、設計書、実装、セキュリティには `gpt-6-luna` を推論設定 `low` で使います。原則担当は P1 と P2 が `gpt-6-luna`、P3 と P5 が `gpt-6.1-terra`、P4 が `gpt-6.2-sol` で、推論設定は `high`、出力は指摘のみです。
+
+端末のセキュリティの群で MCP を指定すると、Codex CLI が選んだローカルのサーバから資料を取得します。Codex の非対話実行は MCP の指定を拒否します。`--max-usd`（1 USD 以下）は、起動前に 1 群の USD 換算見込みと照合する額です。実際の換算額は指定額を超えることがあります。
+
+報告された使用量はモデル別の標準単価で換算し、`cost_source: usage_priced` で記録します。原則担当のキャッシュ書込は、標準の 12 時間保持の単価で換算します。Codex CLI のイベントに応答モデルがある場合は照合し、無い場合の費用は要求モデルの単価による換算です。使用量が足りない場合は `unreported` を記録します。不明な費用を含む合計は `null` です。[OpenAI の料金表](https://developers.openai.com/api/docs/pricing)
+
 ## 付随の送信
 
-Claude Code は、プロンプトのほかに、使用の統計、誤りの報告、自動の更新の確かめ、機能の旗の取得などを送ることがあります。jigane は、起動する claude の環境に `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を入れ、これらを止めます。利用者の環境に同じ変数が別の値で入っていても、jigane は 1 に上書きします。止めた後、claude の送り先は Anthropic のモデルの API だけになります（次の節の環境変数で差し替えた場合は、その先になります）。
+Claude Code は、プロンプトのほかに、使用の統計、誤りの報告、自動の更新の確かめ、機能の旗の取得などを送ることがあります。jigane は、起動する claude の環境に `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` を入れ、これらを止めます。利用者の環境に同じ変数が別の値で入っていても、jigane は 1 に上書きします。モデル API の送り先は次の節の環境変数で差し替えられます。MCP を指定した場合は選択したサーバへの接続も発生します。
 
 ## 環境変数による差し替え
 
-次の変数は、利用者の環境の値のまま子のプロセスに渡ります。jigane は除きも上書きもしません。
+次の変数は、利用者の環境の値のまま子のプロセスに渡ります。
 
 - `ANTHROPIC_BASE_URL`：claude の送り先
 - `HTTPS_PROXY` などのプロキシの変数：claude、gh、git、文法の取得の接続
 - `OTEL_*`：claude の OpenTelemetry の送り先
 - `TREE_SITTER_LANGUAGE_PACK_MANIFEST_URL`：文法の取得先
 
-claude の子の環境から除くのは、GitHub の資格情報の変数（`GH_TOKEN`、`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GITHUB_ENTERPRISE_TOKEN`）だけです。gh と git の子の環境からは、この除きは行いません。
+Claude Code の子の環境から GitHub の資格情報を表す変数（`GH_TOKEN`、`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GITHUB_ENTERPRISE_TOKEN`）を除きます。MCP を指定した場合も、Claude Code が引き継いだ環境で MCP 設定中の環境変数を解決します。
 
 ## ユーザーの設定ファイル
 

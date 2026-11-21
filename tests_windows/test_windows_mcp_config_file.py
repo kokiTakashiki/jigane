@@ -1,27 +1,30 @@
-"""Windows で MCP の一時の設定ファイルが利用者の一時のディレクトリに作られ、消えること。
+"""Windows でも Claude Code が元の設定ファイルを直接受け取る。"""
 
-既定の testpaths の外に置き、Windows の CI の job だけが明示して走らせる。
-権限は絞らず既定の ACL に頼るので、ここで固定するのは置き場と後始末だけ。
-"""
-
-import json
-import tempfile
 from pathlib import Path
 
-from jigane.skills.mcp import McpSelection, McpServer
+import pytest
+
+from jigane.llm_runs import claude
+from jigane.skills.mcp import MCP_CONFIG_DIRECTORY, McpSelection
 
 
-def test_config_file_lives_under_the_user_temp_directory_and_is_removed() -> None:
-    selection = McpSelection((McpServer("mobile-sec", {"command": "x"}, None),))
-
-    with selection.config_file() as path:
-        assert path is not None
-        assert Path(tempfile.gettempdir()).resolve() in path.resolve().parents
-        assert json.loads(path.read_text(encoding="utf-8")) == selection.config_content()
-
-    assert not path.exists()
-
-
-def test_no_file_is_made_without_servers() -> None:
-    with McpSelection.none().config_file() as path:
-        assert path is None
+def test_native_mcp_path_is_passed_as_one_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "data with spaces"
+    monkeypatch.setenv("JIGANE_HOME", str(home))
+    path = home / MCP_CONFIG_DIRECTORY / "refs.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"mcpServers": {"refs": {"command": "fixture"}}}', encoding="utf-8")
+    selection = McpSelection.load(("refs",))
+    invocation = claude.Invocation(
+        "prompt",
+        {},
+        tmp_path,
+        claude.LaunchBudget(0.1, 0.09),
+        "test",
+        mcp_configs=selection.config_paths,
+        mcp_server_names=selection.names,
+    )
+    argv = claude.build_command(invocation)
+    assert argv[argv.index("--mcp-config") + 1] == str(path.resolve())

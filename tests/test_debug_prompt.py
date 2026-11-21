@@ -4,14 +4,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import MicroFake
+from fakes import MacroFake, MicroFake
 
 from jigane.commands import main
-from jigane.commands.exit_codes import EXIT_USAGE
+from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE, EXIT_USAGE
+from jigane.commands.subcommands import run as run_subcommand
 from jigane.groups.definitions import GroupId
+from jigane.llm_runs import codex
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.reviews.resolution import resolve_review
+from jigane.skills import adversarial, macro_compact
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimator import estimate_of
 from jigane.skills.launch_prompts import LaunchInput, LaunchRole
@@ -66,6 +69,107 @@ def test_macro_has_discovery_then_principles(capsys: pytest.CaptureFixture[str])
     assert roles[0] == LaunchRole.DISCOVERY.value == "discovery"
     assert set(roles[1:]) == {LaunchRole.PRINCIPLE.value}
     assert len(roles) > 1
+
+
+@pytest.fixture
+def value_set_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    root = tmp_path / "shop"
+    src = root / "src"
+    src.mkdir(parents=True)
+    (src / "defs.py").write_text(
+        "NAMES = ('alpha', 'beta', 'gamma')\ndef known(value):\n    return value in NAMES\n",
+        encoding="utf-8",
+    )
+    (src / "use.py").write_text(
+        "def check(mode):\n"
+        "    a = mode == 'alpha'\n"
+        "    b = mode in ['beta', 'gamma']\n"
+        "    c = mode.startswith('alp')\n"
+        "    d = mode.endswith('ma')\n"
+        "    return a or b or c or d\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(root)
+    create_feature_review(root, ["src"], "p")
+    return "shop:p"
+
+
+@pytest.fixture
+def codex_macro(monkeypatch: pytest.MonkeyPatch) -> MacroFake:
+    fake = MacroFake([])
+
+    monkeypatch.setattr(codex, "run", fake)
+    monkeypatch.setattr(run_subcommand, "codex_supported", lambda: True)
+    assert main(["select-agent", "codex"]) == EXIT_OK
+    return fake
+
+
+def test_codex_p1_sends_the_guide_and_the_definition_with_direct_comparison_locations(
+    value_set_review: str, codex_macro: MacroFake, capsys: pytest.CaptureFixture[str]
+) -> None:
+    guide = adversarial.template_text(macro_compact.P1_GUIDE)
+    prompts = run_json(capsys, value_set_review, "macro")["prompts"]
+    assert (
+        main(
+            ["run", value_set_review, "macro"], is_terminal=lambda: True, read_answer=lambda _: "y"
+        )
+        == EXIT_OK
+    )
+    assert sorted(call.prompt for call in codex_macro.calls) == sorted(
+        entry["text"] for entry in prompts
+    )
+    [p1] = [entry["text"] for entry in prompts if guide in entry["text"]]
+    assert p1.startswith("方針の静的レビュー。- P1 ")
+    assert "| 定義 | 文字列での比較 | 値 |" in p1
+    [row] = [line for line in p1.splitlines() if line.startswith("| src/defs.py:1 NAMES |")]
+    assert "4 (src/use.py:2 等値 'alpha'" in row
+    assert "src/use.py:3 所属 'beta', 'gamma'" in row
+    assert "src/use.py:4 接頭辞 'alp' ほか 1 件)" in row
+    assert "src/defs.py:3 所属" not in row
+
+    assert main(["select-agent", "claude"]) == EXIT_OK
+    claude_prompts = run_json(capsys, value_set_review, "macro")["prompts"]
+    assert all(guide not in entry["text"] for entry in claude_prompts)
+    [claude_p1] = [
+        entry["text"] for entry in claude_prompts if "- P1 単一の情報源" in entry["text"]
+    ]
+    assert "src/defs.py:3 所属" in claude_p1
+
+
+@pytest.mark.parametrize("over", [0, 1])
+def test_codex_run_checks_p1_bytes_including_the_boundary_before_invoking(
+    value_set_review: str,
+    codex_macro: MacroFake,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    over: int,
+) -> None:
+    prompts = run_json(capsys, value_set_review, "macro")["prompts"]
+    [p1] = [entry for entry in prompts if "## P1の資料の読み方" in entry["text"]]
+    padding = codex.MATERIALS_MAX_BYTES - p1["bytes"] + over
+    template_text = adversarial.template_text
+    monkeypatch.setattr(
+        adversarial,
+        "template_text",
+        lambda name: (
+            template_text(name) + "a" * padding
+            if name == macro_compact.P1_GUIDE
+            else template_text(name)
+        ),
+    )
+    code = main(
+        ["run", value_set_review, "macro"], is_terminal=lambda: True, read_answer=lambda _: "y"
+    )
+    if over:
+        assert code == EXIT_PROCESSING_FAILURE
+        assert "32 KiB" in capsys.readouterr().err
+        assert codex_macro.calls == []
+    else:
+        assert code == EXIT_OK
+        [prompt] = [
+            call.prompt for call in codex_macro.calls if "## P1の資料の読み方" in call.prompt
+        ]
+        assert len((codex.REVIEW_BOUNDARY + prompt).encode("utf-8")) == codex.MAX_PROMPT_BYTES
 
 
 @pytest.mark.usefixtures("project", "all_principle_shapes")

@@ -81,7 +81,9 @@ def _arguments(node: Node) -> list[Node]:
     ]
 
 
-def _invocation(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, ComparisonKind]]:
+def _invocation(
+    node: Node, named: dict[str, list[str]]
+) -> Iterator[tuple[str, ComparisonKind, bool]]:
     function = node.child_by_field_name("function")
     arguments = _arguments(node)
     if function is None or function.type != "member_access_expression" or not arguments:
@@ -94,15 +96,16 @@ def _invocation(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, 
         return
     name = (name_node.text or b"").decode()
     if name == "Contains":
-        if receiver.type == "identifier":
+        uses_named_set = receiver.type == "identifier"
+        if uses_named_set:
             strings = named.get((receiver.text or b"").decode())
         else:
             strings = _literal_strings(receiver)
         for value in strings or []:
-            yield value, ComparisonKind.MEMBERSHIP
+            yield value, ComparisonKind.MEMBERSHIP, uses_named_set
     elif name in _AFFIX_KINDS:
         if (affix := _string(arguments[0])) is not None:
-            yield affix, _AFFIX_KINDS[name]
+            yield affix, _AFFIX_KINDS[name], False
     elif (
         name in _STATIC_REGEX_FUNCTIONS
         and receiver.type == "identifier"
@@ -110,7 +113,7 @@ def _invocation(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, 
         and len(arguments) > 1
         and (pattern := _string(arguments[1])) is not None
     ):
-        yield pattern, ComparisonKind.REGEX
+        yield pattern, ComparisonKind.REGEX, False
 
 
 def _creation(node: Node) -> Iterator[tuple[str, ComparisonKind]]:
@@ -138,15 +141,19 @@ def _binary(node: Node) -> Iterator[tuple[str, ComparisonKind]]:
 def string_comparisons_of(root: Node, path: str) -> list[StringLiteralComparison]:
     """ファイルの文字列との比較を、行の順に返す。"""
     named = _named_sequences(root)
-    found: list[tuple[str, ComparisonKind, int]] = []
+    found: list[tuple[str, ComparisonKind, int, bool]] = []
     for node in walk_nodes(root):
+        pairs: Iterator[tuple[str, ComparisonKind, bool]]
         if node.type == "binary_expression":
-            pairs = _binary(node)
+            pairs = ((*pair, False) for pair in _binary(node))
         elif node.type == "invocation_expression":
             pairs = _invocation(node, named)
         elif node.type == "object_creation_expression":
-            pairs = _creation(node)
+            pairs = ((*pair, False) for pair in _creation(node))
         else:
             continue
-        found += [(value, kind, node.start_point.row + 1) for value, kind in pairs]
+        found += [
+            (value, kind, node.start_point.row + 1, uses_named_set)
+            for value, kind, uses_named_set in pairs
+        ]
     return ordered_comparisons(found, path)

@@ -1034,7 +1034,7 @@ class ComparisonKind(StrEnum):
 
 @dataclass(frozen=True)
 class StringLiteralComparison:
-    """値と文字列のリテラルのまま比べている箇所一つ。`in` の組は要素ごとに一つ返す。"""
+    """値を文字列と比べる箇所一つ。所属判定は組の要素ごとに一つ返す。"""
 
     # 比べている文字列。接頭辞、接尾辞、正規表現のときは、その文字列そのもの
     literal_value: str
@@ -1044,6 +1044,8 @@ class StringLiteralComparison:
     line: int
     # 比べている相手の式の原文（`mode`、`self.kind` など）。読み取れない言語と形では空
     compared_expression: str = ""
+    # 比較箇所に文字列を書かず、同じファイルの名前付きの組を使っている場合は true
+    uses_named_set: bool = False
 
 
 @runtime_checkable

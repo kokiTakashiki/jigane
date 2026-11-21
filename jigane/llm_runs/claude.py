@@ -20,6 +20,9 @@ from jigane.git.process import (
     run_claude_resolved,
 )
 from jigane.groups.definitions import Effort
+from jigane.groups.policy_runs import PolicyRole
+from jigane.llm_runs import claude_mcp
+from jigane.llm_runs.codex_mcp import StdioServer
 from jigane.llm_runs.cost import (
     BudgetOutcome,
     Cost,
@@ -61,10 +64,14 @@ class Invocation:
     model: str
     tools: tuple[str, ...] = ("Read",)
     effort: Effort | None = None
-    mcp_config: Path | None = None
+    mcp_configs: tuple[Path, ...] = ()
     allowed_mcp_tools: tuple[str, ...] = ()
     # None は --max-turns を渡さない（上限なし）
     max_turns: int | None = None
+    policy_role: PolicyRole | None = None
+    principle: str | None = None
+    reference_mcp: tuple[StdioServer, ...] = ()
+    mcp_server_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,9 @@ class StoredInvocationRecord:
     max_budget_usd: float | None
     # この起動のモデル。実行の中で起動ごとにモデルが違う形があるので起動で残す。古い記録は None
     model: str | None = None
+    usage_incomplete: bool = False
+    response_model: str | None = None
+    mcp_read_servers: tuple[str, ...] | None = None
 
     def usage_fields(self) -> dict[str, Any]:
         """額を除く欄。額と出所は cost_as_record が書く。"""
@@ -97,6 +107,14 @@ class StoredInvocationRecord:
             del usage["max_budget_usd"]
         if usage["model"] is None:
             del usage["model"]
+        if self.response_model is None:
+            del usage["response_model"]
+        if not self.usage_incomplete:
+            del usage["usage_incomplete"]
+        if self.mcp_read_servers is None:
+            del usage["mcp_read_servers"]
+        else:
+            usage["mcp_read_servers"] = list(self.mcp_read_servers)
         return usage
 
     def as_row(self) -> dict[str, Any]:
@@ -112,11 +130,13 @@ class StoredInvocationRecord:
         names = {item.name for item in fields(cls)} - {"cost"}
         # 欠けた行は KeyError、読めない時刻は ValueError（文字列でなければ TypeError）で止まる
         datetime.fromisoformat(row["started_at"])
+        reads = row.get("mcp_read_servers")
         return cls(
             **{
                 "max_budget_usd": None,
                 "model": None,
                 **{key: row[key] for key in names if key in row},
+                "mcp_read_servers": tuple(reads) if isinstance(reads, list) else None,
             },
             cost=cost_from_record(dict(row)),
         )
@@ -144,8 +164,7 @@ class StoredInvocationRecord:
 
 @dataclass(frozen=True)
 class InvocationRecord(StoredInvocationRecord):
-    # この起動が持っていた上限（Invocation.budget.limit_usd）。記録を作る run が写す
-    max_budget_usd: float
+    """USD 上限を渡せる起動では Invocation.budget.limit_usd を写す。"""
 
 
 @dataclass(frozen=True)
@@ -171,6 +190,7 @@ class RunBudget:
     # と単価で起動の費用を見積もる。方針の図の形は応答 1 回分、実装とセキュリティは最後の一往復分。
     # None の組は入力だけの見積もりのまま
     output_allowance_tokens: int | None = None
+    max_prompt_bytes: int | None = None
 
     @property
     def counts_output(self) -> bool:
@@ -237,6 +257,9 @@ class RunSettings:
     invoke: Invoke
     # 往復の上限。None の実行は --max-turns を渡さない
     max_turns: int | None = None
+    has_spending_limit: bool = True
+    allow_tools: bool = True
+    reference_mcp: tuple[StdioServer, ...] = ()
 
     def invocation(
         self,
@@ -245,12 +268,13 @@ class RunSettings:
         json_schema: dict[str, Any],
         working_directory: Path,
         tools: tuple[str, ...] = ("Read",),
-        mcp_config: Path | None = None,
+        mcp_configs: tuple[Path, ...] = (),
         allowed_mcp_tools: tuple[str, ...] = (),
+        mcp_server_names: tuple[str, ...] = (),
     ) -> Invocation:
         """self.budget.reserve_margin が偽なら、CLI に上限そのものを渡す（余裕を引かない）。"""
         budget = self.budget.max_budget_usd
-        if self.budget.reserve_margin:
+        if self.has_spending_limit and self.budget.reserve_margin:
             tokens = self.budget.prompt_tokens(len(prompt.encode("utf-8")))
             reduced = self.budget.cli_usd(tokens)
             # None は余裕を引くと下限を割る入力。走らせる前の検査（skills/input_budget）が先に
@@ -266,11 +290,13 @@ class RunSettings:
             working_directory=working_directory,
             budget=LaunchBudget(limit_usd=self.budget.max_budget_usd, cli_usd=budget),
             model=self.budget.model,
-            tools=tools,
+            tools=tools if self.allow_tools else (),
             effort=self.effort,
-            mcp_config=mcp_config,
+            mcp_configs=mcp_configs,
             allowed_mcp_tools=allowed_mcp_tools,
             max_turns=self.max_turns,
+            reference_mcp=self.reference_mcp,
+            mcp_server_names=mcp_server_names,
         )
 
 
@@ -288,6 +314,7 @@ class FailureKind(StrEnum):
     BUDGET_EXCEEDED = "budget_exceeded"
     TURNS_EXCEEDED = "turns_exceeded"
     BAD_OUTPUT = "bad_output"
+    MCP_RESPONSE = "mcp_response"
     OTHER = "other"
 
     @property
@@ -422,7 +449,7 @@ def reviewer_environment(
     return environment
 
 
-MCP_RESOURCE_TOOLS = ("ReadMcpResourceTool", "ListMcpResourcesTool")
+MCP_RESOURCE_TOOLS = claude_mcp.MCP_RESOURCE_TOOLS
 
 
 def claude_binary() -> str:
@@ -504,13 +531,22 @@ def build_command(invocation: Invocation) -> list[str]:
                     "blockReadsOutsideWorkingDirectories": True,
                 },
                 "includeGitInstructions": False,
+                **(
+                    {
+                        "allowedMcpServers": [
+                            {"serverName": name} for name in invocation.mcp_server_names
+                        ]
+                    }
+                    if invocation.mcp_configs
+                    else {}
+                ),
             }
         ),
         "-p",
         "--tools",
         ",".join(invocation.tools),
         "--output-format",
-        "json",
+        "stream-json" if invocation.mcp_configs else "json",
         "--json-schema",
         json.dumps(_schema_for_cli(invocation.json_schema), ensure_ascii=False),
         "--model",
@@ -525,8 +561,10 @@ def build_command(invocation: Invocation) -> list[str]:
     # 利用者の設定と claude.ai のコネクタの MCP を混ぜない。混ざると、その道具の説明が
     # 文脈に入り、遅い接続でキャッシュが外れて金額が膨らむ。渡した設定だけを読ませる
     command.append("--strict-mcp-config")
-    if invocation.mcp_config is not None:
-        command += ["--mcp-config", str(invocation.mcp_config)]
+    if invocation.mcp_configs:
+        command += ["--verbose", "--no-session-persistence", "--setting-sources", ""]
+        # --restricted と設定元の空指定で利用者・作業木の許可リストを混ぜない。
+        command += ["--mcp-config", *map(str, invocation.mcp_configs)]
         if invocation.allowed_mcp_tools:
             command += ["--allowedTools", ",".join(invocation.allowed_mcp_tools)]
     return command
@@ -641,42 +679,45 @@ def _is_error_kind(subtype: object, text: str) -> FailureKind:
     return classify_failure_text(text)
 
 
-def run(
-    invocation: Invocation,
-    *,
-    runner: Callable[..., subprocess.CompletedProcess[str]] = run_claude_resolved,
-    timeout_seconds: int = 900,
-) -> InvocationResult:
-    # 親の環境を受け継ぐ。ログイン済みの認証と CLAUDE_CODE_OAUTH_TOKEN を子に渡すため。
-    # ただし GitHub の資格情報は除く（REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES）。
-    # プロンプトは標準入力で渡す。差分や PR の本文を含むプロンプトが、Windows の
-    # コマンドラインの長さの上限（約 32,767 文字）を超えうるため。-p に位置引数が
-    # 無ければ標準入力を読むことを、claude 2.1.292 で実測した。
-    started_at = now_iso()
-    try:
-        completed = runner(
-            build_command(invocation),
-            input=invocation.prompt,
-            cwd=invocation.working_directory,
-            env=reviewer_environment(),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=timeout_seconds,
-            check=False,
+def _mcp_payload(
+    completed: subprocess.CompletedProcess[str], invocation: Invocation, started_at: str
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    observed = claude_mcp.inspect_output(
+        completed.stdout, _MAX_OUTPUT_NESTING, invocation.mcp_server_names
+    )
+    payload = observed.result
+    if observed.failure is not None:
+        message, kind = observed.failure, FailureKind.MCP_RESPONSE
+    elif observed.invalid_stream or (payload is None and completed.returncode == 0):
+        message, kind = (
+            "Claude Code の MCP 実行の結果を確認できませんでした",
+            FailureKind.BAD_OUTPUT,
         )
-    except FileNotFoundError as error:
-        command = build_command(invocation)
-        failure = launch_failure(command[:1], invocation.working_directory, error)
-        if failure is None:
-            raise
-        raise failure from error
-    except subprocess.TimeoutExpired as error:
-        raise ClaudeInvocationError(
-            f"claude が {timeout_seconds} 秒でタイムアウトしました",
-            failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
-            FailureKind.TIMEOUT,
-        ) from error
+    elif payload is not None and completed.returncode == 0 and not payload.get("is_error"):
+        return {**payload, "terminal_reason": None}, observed.read_servers
+    else:
+        result = payload or {}
+        status = result.get("api_error_status")
+        kind = _is_error_kind(
+            result.get("subtype"), f"status {status}" if type(status) is int else ""
+        )
+        message = "Claude Code の MCP 付き起動が失敗しました"
+        if completed.returncode:
+            message += f"（終了コード {completed.returncode}）"
+    # MCP の出力には設定値や資料が含まれうる。失敗理由は固定文にし、費用と使用量を残す。
+    record = failure_record(payload, invocation.budget.limit_usd, started_at, invocation.model)
+    raise ClaudeInvocationError(
+        message,
+        replace(
+            record, is_error=True, terminal_reason=None, mcp_read_servers=observed.read_servers
+        ),
+        kind,
+    )
+
+
+def _json_payload(
+    completed: subprocess.CompletedProcess[str], invocation: Invocation, started_at: str
+) -> dict[str, Any]:
     if completed.returncode != 0:
         reason = _failure_reason(completed)
         failed_payload = _stdout_payload(completed.stdout)
@@ -710,6 +751,73 @@ def run(
             failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
             FailureKind.BAD_OUTPUT,
         )
+    return payload
+
+
+def run(
+    invocation: Invocation,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = run_claude_resolved,
+    timeout_seconds: int = 900,
+) -> InvocationResult:
+    # 親の環境を受け継ぐ。ログイン済みの認証と CLAUDE_CODE_OAUTH_TOKEN を子に渡すため。
+    # ただし GitHub の資格情報は除く（REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES）。
+    # プロンプトは標準入力で渡す。差分や PR の本文を含むプロンプトが、Windows の
+    # コマンドラインの長さの上限（約 32,767 文字）を超えうるため。-p に位置引数が
+    # 無ければ標準入力を読むことを、claude 2.1.292 で実測した。
+    started_at = now_iso()
+    with_mcp = bool(invocation.mcp_configs)
+    capture = (
+        {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL}
+        if with_mcp
+        else {"capture_output": True}
+    )
+    try:
+        completed = runner(
+            build_command(invocation),
+            input=invocation.prompt,
+            cwd=invocation.working_directory,
+            env=reviewer_environment(),
+            text=True,
+            encoding="utf-8",
+            timeout=timeout_seconds,
+            check=False,
+            **capture,
+        )
+    except FileNotFoundError as error:
+        command = build_command(invocation)
+        failure = launch_failure(command[:1], invocation.working_directory, error)
+        if failure is None:
+            raise
+        raise failure from error
+    except subprocess.TimeoutExpired as error:
+        failed = failure_record(None, invocation.budget.limit_usd, started_at, invocation.model)
+        if with_mcp:
+            reads = claude_mcp.reads_before_timeout(
+                error.stdout, _MAX_OUTPUT_NESTING, invocation.mcp_server_names
+            )
+            failed = replace(failed, mcp_read_servers=reads)
+        raise ClaudeInvocationError(
+            f"claude が {timeout_seconds} 秒でタイムアウトしました",
+            failed,
+            FailureKind.TIMEOUT,
+        ) from (None if with_mcp else error)
+    except UnicodeDecodeError:
+        if not with_mcp:
+            raise
+        raise ClaudeInvocationError(
+            "Claude Code の MCP 実行の出力が UTF-8 ではありません",
+            replace(
+                failure_record(None, invocation.budget.limit_usd, started_at, invocation.model),
+                mcp_read_servers=(),
+            ),
+            FailureKind.BAD_OUTPUT,
+        ) from None
+    read_servers = None
+    if with_mcp:
+        payload, read_servers = _mcp_payload(completed, invocation, started_at)
+    else:
+        payload = _json_payload(completed, invocation, started_at)
     record = parse_record(payload, invocation.budget.limit_usd, started_at, invocation.model)
     if record.is_error:
         # subtype と result に失敗の理由（過負荷、上限の超過など）が書かれる
@@ -724,10 +832,16 @@ def run(
     if not isinstance(structured_output, dict):
         raise ClaudeInvocationError(
             "structured_output がありません",
-            failure_record(payload, invocation.budget.limit_usd, started_at, invocation.model),
+            replace(
+                failure_record(payload, invocation.budget.limit_usd, started_at, invocation.model),
+                mcp_read_servers=read_servers,
+            ),
             FailureKind.BAD_OUTPUT,
         )
-    return InvocationResult(structured_output=structured_output, record=record)
+    return InvocationResult(
+        structured_output=structured_output,
+        record=replace(record, mcp_read_servers=read_servers),
+    )
 
 
 def normalize_path(path: str, working_directory: Path) -> str | None:

@@ -437,7 +437,10 @@ class PolicyGroupRun(GroupRun):
     # 入力の見積もりで起動しなかった起動の記録。シャードの群の budget_stops と同じ形と欄名
     budget_stops: tuple[StoredBudgetStop, ...] | None = None
 
-    _OWN_PLAIN_KEYS = ("dropped_without_bot_findings", "record_kind")
+    # 前回の指摘と経過時間を残したときに限り、今回の経過時間を別に持つ。
+    latest_attempt_elapsed_s: float | None = None
+
+    _OWN_PLAIN_KEYS = ("dropped_without_bot_findings", "record_kind", "latest_attempt_elapsed_s")
 
     @classmethod
     def from_json(cls, value: Mapping[str, Any]) -> "PolicyGroupRun":
@@ -559,15 +562,32 @@ class ShardedGroupRun(GroupRun):
         return {**stored, **self.others}
 
     @property
+    def mcp_read_servers(self) -> list[str] | None:
+        reads = [
+            names
+            for row in self.invocations or ()
+            if (names := row.record.mcp_read_servers) is not None
+        ]
+        if not reads:
+            return None
+        seen = {server for names in reads for server in names}
+        return [server for server in self.mcp.servers if server in seen]
+
+    @property
     def failed_shards(self) -> int:
         """発見役が失敗したシャードの数。実行結果の事実の出所はこの記録だけ。"""
         return (self.shards or 0) - (self.succeeded_shards or 0)
 
 
 def mcp_label(run: GroupRun) -> str:
-    """実行で使った MCP の表示。欄の無い古い記録は「不明」。"""
+    """MCP の選択と本文取得の記録を表示する。"""
     if not isinstance(run, ShardedGroupRun):
         return McpRecord.unknown().label()
+    if run.mcp.servers:
+        selected = ", ".join(run.mcp.servers)
+        reads = run.mcp_read_servers
+        bodies = "未計測" if reads is None else ", ".join(reads) or "なし"
+        return f"MCP: 選択 {selected}、本文取得の記録 {bodies}"
     return run.mcp.label()
 
 
@@ -729,7 +749,10 @@ def summarize_invocations(run: GroupRun) -> dict[str, Any]:
     return {
         "invocation_count": len(invocations),
         "input_tokens": sum(input_token_total(item.record) for item in invocations),
-        "cost_usd": totals.usd,
+        "cost_usd": None if totals.unknown_count else totals.usd,
+        "known_cost_usd": totals.usd,
+        "usage_priced_cost_usd": totals.usage_priced,
+        "unknown_cost_invocation_count": totals.unknown_count,
         "substituted_cost_usd": totals.limit_substitute,
         "over_budget": [
             {

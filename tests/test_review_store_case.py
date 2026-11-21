@@ -26,6 +26,8 @@ from jigane.storage.store import (
     open_review_directory,
 )
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def repo(repo_template: dict[str, str], tmp_path: Path) -> Path:

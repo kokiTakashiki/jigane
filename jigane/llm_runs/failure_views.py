@@ -98,6 +98,10 @@ class EarlierFailuresView:
             parts.append(f"通らなかった失敗 {len(self.views)} 件")
         if facts.recovered_count:
             parts.append(f"回復した起動 {facts.recovered_count} 回")
+        if facts.totals.unknown_count:
+            parts.append(f"金額不明の起動 {facts.totals.unknown_count} 回")
+        if facts.totals.usage_priced:
+            parts.append(f"使用量から換算 {facts.totals.usage_priced:.6f} USD")
         if facts.totals.usd:
             estimated = (
                 f"（うち推定 {facts.totals.limit_substitute:.2f} USD）"
@@ -118,7 +122,10 @@ class EarlierFailuresView:
             "unrecorded_cost_count": facts.unrecorded_cost_count,
             # 課金のある起動ではなく、起動の記録を持つ全失敗の数。意味は従来のまま
             "invocation_count": facts.invocation_count,
-            "cost_usd": facts.totals.usd,
+            "cost_usd": None if facts.totals.unknown_count else facts.totals.usd,
+            "known_cost_usd": facts.totals.usd,
+            "usage_priced_cost_usd": facts.totals.usage_priced,
+            "unknown_cost_invocation_count": facts.totals.unknown_count,
             "substituted_cost_usd": facts.totals.limit_substitute,
             "text": self.text,
             "failures": [view.to_json() for view in self.views],

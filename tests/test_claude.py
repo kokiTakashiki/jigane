@@ -104,12 +104,18 @@ def test_build_command_passes_max_turns_only_when_set(tmp_path: Path) -> None:
 def test_build_command_with_mcp(tmp_path: Path) -> None:
     invocation = make_invocation(
         tmp_path,
-        mcp_config=tmp_path / "mcp.json",
+        mcp_configs=(tmp_path / "mcp.json",),
+        mcp_server_names=("a",),
         allowed_mcp_tools=("mcp__a__x", "mcp__a__y"),
     )
     command = build_command(invocation)
-    assert command[-5:] == [
+    assert command[command.index("--output-format") + 1] == "stream-json"
+    assert command[-9:] == [
         "--strict-mcp-config",
+        "--verbose",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
         "--mcp-config",
         str(tmp_path / "mcp.json"),
         "--allowedTools",
@@ -176,12 +182,26 @@ def test_run_success(tmp_path: Path) -> None:
 LOGIN_VALUE = "login-value"
 
 
+@pytest.mark.parametrize("with_mcp", [False, True])
 def test_run_strips_write_credentials_from_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, with_mcp: bool
 ) -> None:
     stdout = (FIXTURES / "structured-success.json").read_text("utf-8")
+    invocation = make_invocation(tmp_path)
+    if with_mcp:
+        invocation = make_invocation(
+            tmp_path, mcp_configs=(tmp_path / "refs.json",), mcp_server_names=("refs",)
+        )
+        init = {
+            "type": "system",
+            "subtype": "init",
+            "mcp_servers": [{"name": "refs", "status": "connected"}],
+        }
+        stdout = f"{json.dumps(init)}\n{stdout}"
     monkeypatch.setenv("GH_TOKEN", "gh-secret")
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", LOGIN_VALUE)
+    reference_fixture = "reference-fixture"
+    monkeypatch.setenv("JIGANE_TEST_MCP_TOKEN", reference_fixture)
     monkeypatch.setenv("ENABLE_CLAUDEAI_MCP_SERVERS", "true")
     captured: dict[str, Any] = {}
 
@@ -189,9 +209,10 @@ def test_run_strips_write_credentials_from_environment(
         captured.update(kwargs)
         return subprocess.CompletedProcess(command, 0, stdout, "")
 
-    run(make_invocation(tmp_path), runner=runner)
+    run(invocation, runner=runner)
     assert "GH_TOKEN" not in captured["env"]
     assert captured["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == LOGIN_VALUE
+    assert captured["env"]["JIGANE_TEST_MCP_TOKEN"] == reference_fixture
     # claude.ai のコネクタは、利用者の環境に関わらず子の起動へ載せない
     assert captured["env"]["ENABLE_CLAUDEAI_MCP_SERVERS"] == "false"
 
@@ -271,10 +292,16 @@ def test_estimate_input_tokens() -> None:
 
 
 def test_build_command_with_mcp_and_no_allowed_tools(tmp_path: Path) -> None:
-    invocation = make_invocation(tmp_path, mcp_config=tmp_path / "mcp.json")
+    invocation = make_invocation(
+        tmp_path, mcp_configs=(tmp_path / "mcp.json",), mcp_server_names=("a",)
+    )
     command = build_command(invocation)
-    assert command[-3:] == [
+    assert command[-7:] == [
         "--strict-mcp-config",
+        "--verbose",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
         "--mcp-config",
         str(tmp_path / "mcp.json"),
     ]

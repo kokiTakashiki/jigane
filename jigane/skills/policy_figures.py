@@ -211,6 +211,7 @@ REGISTRY: tuple[PolicyFigure, ...] = (
         policy_stores.store_table,
         FigureSlot.AFTER_TREE,
         interface=StoreAccessExtractor,
+        build_of=policy_stores.shared_store_table,
     ),
     PolicyFigure(
         "signatures",
@@ -492,6 +493,7 @@ class PolicySections:
     sequence: SequenceFigure
     repeats: str
     technology: str
+    packed_technology: str
 
     @property
     def figures_missing(self) -> bool:
@@ -511,6 +513,7 @@ def policy_sections(review: Review) -> PolicySections:
     prebuilt = changed_files.materials_sections(
         review, sequence, folded=True, hint=_generated_hint(review)
     )
+    technology, packed_technology = technology_materials.short_section_texts(review)
     return PolicySections(
         figures=prebuilt,
         sequence=sequence,
@@ -518,7 +521,8 @@ def policy_sections(review: Review) -> PolicySections:
         + policy_repeats.repeats_text(
             review, trees.after, line_limit=policy_repeats.POLICY_LINE_LIMIT
         ),
-        technology=technology_materials.short_section_text(review),
+        technology=technology,
+        packed_technology=packed_technology,
     )
 
 

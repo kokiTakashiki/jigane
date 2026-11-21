@@ -23,6 +23,7 @@ from jigane.commands.output import install_warning_handler
 from jigane.languages import registry
 from jigane.llm_runs import claude
 from jigane.reviews.catalog import collapse_skipped_warnings
+from jigane.storage.agent_selection import AgentSelectionError, load_agent, require_agent
 from jigane.storage.store import data_home, require_private_data_home
 
 
@@ -107,6 +108,23 @@ def _run_handler(args: argparse.Namespace, context: Context) -> int:
             sys.stdout.flush()
 
 
+def _prepare_command(args: argparse.Namespace) -> None:
+    if args.command == "run" or (args.command == "debug" and args.action == "run"):
+        args.agent = require_agent()
+        expected = getattr(args, "expect_agent", None)
+        if expected is not None and args.agent != expected:
+            raise AgentSelectionError(f"承認時のエージェント {expected} から選択が変わりました")
+    if args.command == "estimate":
+        args.agent = load_agent()
+    if args.command == "select-agent":
+        # 言語の状態を読まず、保存する場合だけ保存側で根の権限を検査する
+        return
+    if args.command != "languages":
+        # 言語の設定が壊れていても languages から修復できるようにする
+        registry.require_ready(detail_with_guidance)
+    _require_private_home_for_write(args.command, getattr(args, "action", None))
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -122,15 +140,7 @@ def main(
         return EXIT_PROCESSING_FAILURE
     install_warning_handler()
     try:
-        if args.command == "languages":
-            # 使えない追加の言語があっても、languages の一覧と disable で直せるようにする。
-            # ここで止めると、直す手段そのものが塞がれる
-            pass
-        else:
-            # 言語を使わない副コマンドも止める。登録は副コマンドの中のどこからでも引かれ、
-            # 使うかどうかを副コマンドごとに見分ける手段が無いため、壊れた状態を一律に先に知らせる
-            registry.require_ready(detail_with_guidance)
-        _require_private_home_for_write(args.command, getattr(args, "action", None))
+        _prepare_command(args)
         context = Context(invoke=invoke)
         if is_terminal is not None:
             context = replace(context, is_terminal=is_terminal)

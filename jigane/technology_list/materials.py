@@ -1,5 +1,7 @@
 """方針のレビューの資料の「技術選定」の節を、技術選定のモデルから Markdown で作る。"""
 
+import json
+from itertools import groupby
 from typing import Any
 
 from jigane.markdown.cells import CellKind, markdown_table
@@ -53,6 +55,11 @@ def short_section_text(review: Review) -> str:
     変化のあった技術だけを、名前、分類、変化、
     根拠の表にする。
     """
+    return short_section_texts(review)[0]
+
+
+def short_section_texts(review: Review) -> tuple[str, str]:
+    """同じ行から従来の表と、分類・変化・根拠が共通する行を束ねた表を返す。"""
     model = build_model(review)
     rows: list[list[str]] = []
     names: set[str] = set()
@@ -91,4 +98,14 @@ def short_section_text(review: Review) -> str:
         else "変化のあった技術は無い。"
     )
     count = f"変化の無い技術は {unchanged} 件で、表から省いた。"
-    return f"### 技術選定\n\n{SHORT_INTRO}\n\n{body}\n\n{count}"
+    header = f"### 技術選定\n\n{SHORT_INTRO}"
+    text = f"{header}\n\n{body}\n\n{count}"
+    if not rows:
+        return text, text
+    grouped = [
+        [*details, json.dumps([row[0] for row in group], ensure_ascii=False)]
+        for details, group in groupby(rows, key=lambda row: row[1:])
+    ]
+    table = markdown_table(["分類", "変化", "根拠", "技術"], grouped, ["cell"] * 4)
+    packed = f"{header}\n\n{table}\n\n{count}"
+    return text, min((text, packed), key=lambda section: len(section.encode("utf-8")))

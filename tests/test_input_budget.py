@@ -38,6 +38,9 @@ from jigane.skills import (
 from jigane.skills.assembly import AssemblyInput
 
 # 単価の表に無いモデル "m" は表の最高の単価（10 USD / 100 万トークン）で見積もる
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 PRICE_PER_TOKEN = 10 / 1_000_000
 
 

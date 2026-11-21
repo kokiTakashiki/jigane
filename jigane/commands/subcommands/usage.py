@@ -64,7 +64,10 @@ class Measures:
     cache_creation_tokens: int
     cache_read_tokens: int
     output_tokens: int
-    cost_usd: float
+    cost_usd: float | None
+    known_cost_usd: float
+    usage_priced_cost_usd: float
+    unknown_cost_invocation_count: int
     duration_s: float
 
     @property
@@ -232,6 +235,12 @@ COMPACT_COLUMNS = tuple(c for c in _DEFINITIONS if c.display is not Display.WIDE
 def row_json(row: UsageRow) -> dict[str, Any]:
     """--json の rows の一行。列の順に、合計の行だけが持つ欄を続ける。"""
     document: dict[str, Any] = {column.name: column.read(row) for column in COLUMNS}
+    if row.usage_priced_cost_usd or row.unknown_cost_invocation_count:
+        document.update(
+            known_cost_usd=row.known_cost_usd,
+            usage_priced_cost_usd=row.usage_priced_cost_usd,
+            unknown_cost_invocation_count=row.unknown_cost_invocation_count,
+        )
     if isinstance(row, TotalRow):
         document["substituted_cost_usd"] = row.substituted_cost_usd
         if row.discard_rounds is not None:
@@ -275,6 +284,8 @@ def _usage_row(
     items: list[StoredInvocation],
 ) -> RoleRow:
     chars = [item.stamp.chars for item in items if item.stamp is not None]
+    costs = total_by_source(item.record.cost for item in items)
+    known_cost = costs.usd if costs.usage_priced else round(costs.usd, 4)
     return RoleRow(
         group=GROUP_BY_ID[group].label,
         role=ROLE_LABELS[role],
@@ -289,7 +300,10 @@ def _usage_row(
         cache_creation_tokens=sum(item.record.cache_creation_input_tokens for item in items),
         cache_read_tokens=sum(item.record.cache_read_input_tokens for item in items),
         output_tokens=sum(item.record.output_tokens for item in items),
-        cost_usd=round(sum(total_by_source([item.record.cost]).usd for item in items), 4),
+        cost_usd=None if costs.unknown_count else known_cost,
+        known_cost_usd=known_cost,
+        usage_priced_cost_usd=costs.usage_priced,
+        unknown_cost_invocation_count=costs.unknown_count,
         duration_s=round(sum(item.record.duration_ms for item in items) / 1000, 1),
     )
 
@@ -315,7 +329,9 @@ def _total_row(group: GroupId, tally: GroupTally) -> TotalRow:
     # 区分は読み込みで補い済みの値を数える。
     counts = count_by_triage(tally.findings)
     triage_counts = {column: counts[column] for column in ALL_TRIAGE_COLUMNS}
-    cost_usd = round(sum(row.cost_usd for row in rows), 4)
+    costs = total_by_source(pipeline.invocation_costs(tally.group_run))
+    known_cost = costs.usd if costs.usage_priced else round(costs.usd, 4)
+    cost_usd = None if costs.unknown_count else known_cost
     # 必読1件あたりの金額の「必読」は、関門を塞ぐ区分
     must_read = sum(triage_counts[t] for t in ALL_TRIAGE_COLUMNS if t.traits.read_first)
     considered = discard_rounds = None
@@ -336,6 +352,9 @@ def _total_row(group: GroupId, tally: GroupTally) -> TotalRow:
         cache_read_tokens=sum(row.cache_read_tokens for row in rows),
         output_tokens=sum(row.output_tokens for row in rows),
         cost_usd=cost_usd,
+        known_cost_usd=known_cost,
+        usage_priced_cost_usd=costs.usage_priced,
+        unknown_cost_invocation_count=costs.unknown_count,
         # 発見役とシャードは並行に動くため、役ごとの秒の合算は経過時間より大きい。
         # 経過時間を記録する前の実行にはそれが無いので、合算で代える。
         duration_s=(
@@ -345,11 +364,11 @@ def _total_row(group: GroupId, tally: GroupTally) -> TotalRow:
         ),
         findings_total=len(tally.findings),
         triage_counts=triage_counts,
-        usd_per_must_read=round(cost_usd / must_read, 4) if must_read else None,
+        usd_per_must_read=round(cost_usd / must_read, 4)
+        if must_read and cost_usd is not None
+        else None,
         considered=considered,
-        substituted_cost_usd=round(
-            total_by_source(pipeline.invocation_costs(tally.group_run)).limit_substitute, 4
-        ),
+        substituted_cost_usd=round(costs.limit_substitute, 4),
         # 回ごとの並びは、runs.json が最新の実行しか持たないため findings_history.json の回で補う
         discard_rounds=discard_rounds,
         mcp=pipeline.mcp_label(tally.group_run) if group == security.GROUP else None,
@@ -465,10 +484,16 @@ def mcp_lines(report: UsageReport) -> list[str]:
 def substitute_lines(report: UsageReport) -> list[str]:
     """金額が報告されず上限の額で代えた推定の分を、群ごとに示す。代えた起動が無ければ空。"""
     return [
-        f"{row.group}の合計 {row.cost_usd:.4f} USD のうち推定（上限の額で代用） "
+        f"{row.group}の合計 {row.known_cost_usd:.4f} USD のうち推定（上限の額で代用） "
         f"{row.substituted_cost_usd:.4f} USD"
         for row in report.rows
         if isinstance(row, TotalRow) and row.substituted_cost_usd
+    ] + [
+        f"{row.group}の使用量を公開単価で換算 {row.usage_priced_cost_usd:.6f} USD"
+        f"、金額不明の起動 {row.unknown_cost_invocation_count} 回"
+        for row in report.rows
+        if isinstance(row, TotalRow)
+        and (row.usage_priced_cost_usd or row.unknown_cost_invocation_count)
     ]
 
 

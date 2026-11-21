@@ -39,6 +39,9 @@ def _finding_id(value: str) -> str:
     return value
 
 
+RELATIVE_PATH_PATTERN = r"^(?![/\\])(?![A-Za-z]:)"
+
+
 def _relative_path(value: str) -> str:
     # 旧のスキーマの pattern と同じ三条件を、一つずつ確かめる
     if value.startswith("/"):
@@ -66,7 +69,7 @@ class Location(BaseModel):
     path: Annotated[
         NonEmpty,
         AfterValidator(_relative_path),
-        Field(json_schema_extra={"pattern": r"^(?![/\\])(?![A-Za-z]:)"}),
+        Field(json_schema_extra={"pattern": RELATIVE_PATH_PATTERN}),
     ]
     start_line: Line
     end_line: Line

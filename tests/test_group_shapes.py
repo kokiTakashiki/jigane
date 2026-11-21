@@ -11,6 +11,8 @@ from jigane.groups.definitions import DIAGRAM_SHAPE, GROUPS, MACRO, MICRO, RunSh
 from jigane.llm_runs import claude
 from jigane.reviews.lifecycle import Review, create_feature_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

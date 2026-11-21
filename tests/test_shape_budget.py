@@ -44,6 +44,9 @@ from jigane.skills.output_estimate import (
 )
 from jigane.storage.store import data_home
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 DOCUMENT_PATH = "docs/shop-design.md"
 
 

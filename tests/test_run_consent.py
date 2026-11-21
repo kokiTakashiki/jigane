@@ -32,6 +32,9 @@ from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplier
 from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import McpSelection, McpServer
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 SKIPPING_OPTIONS = ("--yes", "--force", "--no-confirm", "--assume-yes", "-y", "-f")
 
 
@@ -299,12 +302,17 @@ def test_consent_text_shows_the_mcp_line() -> None:
         can_increase=True,
         effort=None,
         expectation=EXPECTATION,
-        mcp=McpSelection((McpServer("mobile-sec", {}, None), McpServer("server-sec", {}, None))),
+        mcp=McpSelection(
+            (
+                McpServer("mobile-sec", Path("fixture.json"), None),
+                McpServer("server-sec", Path("fixture.json"), None),
+            )
+        ),
     )
     lines = consent_text(selected)
     assert "使う MCP: mobile-sec, server-sec" in lines
     assert "MCP は使いません" not in lines
-    assert "これらのサーバの道具はすべて承認なしで使われます。" in lines
+    assert "Claude Code はこれらのサーバの道具をすべて承認なしで使います。" in lines
     assert "承認なし" not in " ".join(consent_text(plan))
 
 

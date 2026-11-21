@@ -42,6 +42,8 @@ from jigane.reviews.stored_pairs import load_pairs
 from jigane.skills.macro import background_prompt_text
 from jigane.storage.store import ReviewKind
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def repo(repo_template: dict[str, str], tmp_path: Path) -> dict[str, str]:

@@ -21,6 +21,9 @@ from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.reviews.resolution import resolve_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 QUESTION = f"それでもレビューを実施しますか{CONSENT_PROMPT_END}"
 
 

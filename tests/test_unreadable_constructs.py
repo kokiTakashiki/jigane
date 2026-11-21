@@ -18,6 +18,9 @@ from jigane.languages.base import parse
 from jigane.languages.swift_nodes import IdentifierName, OperatorName, function_name_of
 from jigane.reviews.lifecycle import create_feature_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 NOTICE = "読めない記述が、判断の地図の区間のファイルに含まれています。"
 
 

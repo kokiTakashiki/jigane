@@ -191,6 +191,8 @@ def check_input_budget(
     上限以上のときに止める。
     単価の表に無いモデルは、表の最高の単価で見積もって検査し、その旨の文を返す。
     """
+    if not settings.has_spending_limit:
+        return BudgetCheck(None, None)
     budget = settings.budget
     tokens = budget.prompt_tokens(len(prompt.encode("utf-8")))
     estimated = budget.launch_cost(tokens)

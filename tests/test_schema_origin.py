@@ -2,13 +2,15 @@
 
 import copy
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 
 import jsonschema
 import pytest
 from legacy_schemas import frozen_schema
+from pydantic import Field, TypeAdapter
 
 from jigane.groups import viewpoints as viewpoint_table
+from jigane.llm_runs import codex
 from jigane.llm_runs.claude import _schema_for_cli
 from jigane.skills import macro, micro, security
 
@@ -75,6 +77,37 @@ def test_the_model_schema_keeps_the_path_pattern_and_the_disclosed_at_descriptio
     legacy = frozen_schema("macro_conclude")["properties"]["discarded"]["items"]["properties"]
     disclosed = schema["properties"]["discarded"]["items"]["properties"]["disclosed_at"]
     assert disclosed["description"] == legacy["disclosed_at"]["description"]
+
+
+def test_codex_relative_path_matches_the_review_schema_without_lookaround() -> None:
+    schema = macro.CONCLUDE.schema()["properties"]["findings"]["items"]["properties"]
+    path = schema["evidence"]["items"]["properties"]["path"]
+    wire = codex.strict_schema(path)
+    # Pydantic の既定の Rust 正規表現エンジンも先読みを拒む。
+    TypeAdapter(Annotated[str, Field(pattern=wire["pattern"])])
+    original = jsonschema.Draft202012Validator(path)
+    transmitted = jsonschema.Draft202012Validator(wire)
+    for value in (
+        "a",
+        "z:",
+        "A:/a",
+        "C:rel",
+        "/",
+        "/rooted",
+        "\\",
+        "\\host",
+        "",
+        ".",
+        ".file",
+        "a/b",
+        "a:b",
+        "1:x",
+        "別:名",
+        "a\n",
+        "a\nb",
+        "a\x00",
+    ):
+        assert transmitted.is_valid(value) == original.is_valid(value), value
 
 
 def test_the_model_schema_and_the_legacy_schema_agree_on_representative_inputs() -> None:

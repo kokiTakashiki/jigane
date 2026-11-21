@@ -13,12 +13,14 @@ from jigane.commands.exit_codes import EXIT_OK
 from jigane.commands.views.review import selection_lines
 from jigane.findings.discard import DiscardState, DiscardSummary
 from jigane.findings.records import (
+    FINDINGS_FILE,
     FINDINGS_FORMAT,
     HISTORY_FILE,
     GroupResult,
     HistoryCorruptError,
     HistoryRound,
     ReplacedRun,
+    StoredFindings,
     ThemeUpdate,
     load_history_checked,
     merge_group,
@@ -123,6 +125,25 @@ def _pick_then_lose(review: Review) -> Path:
     save_selection(directory, selection)
     merge_group(directory, MACRO, group_result([], ThemeUpdate((), 1)), None)
     return directory
+
+
+def test_show_resolves_older_principle_uuids_from_stored_findings(
+    review: Review, capsys: pytest.CaptureFixture[str]
+) -> None:
+    p4 = "7dfa8c6a-d367-4f5b-ae32-cce643a7ec85"
+    p5 = "561ff3b2-0ec3-41bd-b611-7865229b46c7"
+    stored = StoredFindings.empty().to_json()
+    stored["last_number"] = 2
+    stored["groups"] = {
+        "macro": [{**_finding(1), "viewpoint": p4}, {**_finding(2), "viewpoint": p5}]
+    }
+    (review.id.directory() / FINDINGS_FILE).write_text(json.dumps(stored), encoding="utf-8")
+    assert main(["show", str(review.id), "macro", "--json"]) == EXIT_OK
+    rows = json.loads(capsys.readouterr().out)["findings"]
+    assert {row["viewpoint"]: (row["viewpoint_id"], row["viewpoint_kind"]) for row in rows} == {
+        "P4": (p4, "design_principle"),
+        "P5": (p5, "design_principle"),
+    }
 
 
 def test_a_missing_picked_number_gets_its_body_from_the_history(review: Review) -> None:

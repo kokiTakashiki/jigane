@@ -17,6 +17,8 @@ from jigane.skills import run_record
 from jigane.storage.review_error import ReviewError
 from jigane.storage.store_format import OlderFormatError
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def review(tmp_path: Path) -> Review:

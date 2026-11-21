@@ -1,0 +1,10 @@
+id: no-codex-launch-outside-llm-runs
+language: python
+severity: error
+message: Codex の起動は jigane.llm_runs.codex.run に集めます。
+ignores:
+  - jigane/llm_runs/codex.py
+  - jigane/git/process.py
+rule:
+  kind: identifier
+  regex: ^run_codex_resolved$

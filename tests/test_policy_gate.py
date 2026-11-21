@@ -16,6 +16,8 @@ from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.order import policy_notice
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

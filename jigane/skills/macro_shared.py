@@ -33,7 +33,9 @@ def prompt_parts() -> dict[str, str]:
     return parts
 
 
-def stamp_template(name: str, text: str, inserts: DesignInserts | None = None) -> PromptStamp:
+def stamp_template(
+    name: str, text: str, inserts: DesignInserts | None = None, *, instruction: str = ""
+) -> PromptStamp:
     """版は、雛形の文面と共有の部品の文面から作る。inserts は設計の雛形へ差し込む部品。
 
     None は差し込みの無い形（図だけの形）で、刻印は部品を混ぜない。
@@ -45,4 +47,5 @@ def stamp_template(name: str, text: str, inserts: DesignInserts | None = None) -
     if inserts is not None:
         digest.update(inserts.division.encode("utf-8"))
         digest.update(inserts.viewpoints.encode("utf-8"))
+    digest.update(instruction.encode("utf-8"))
     return PromptStamp(digest.hexdigest()[:12], len(text))

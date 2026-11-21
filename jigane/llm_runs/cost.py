@@ -19,6 +19,13 @@ class Measured:
 
 
 @dataclass(frozen=True)
+class UsagePriced:
+    """報告された使用量を公開単価で換算した額。"""
+
+    usd: float
+
+
+@dataclass(frozen=True)
 class LimitSubstitute:
     """金額が報告されず、起動の上限の額を代わりに置いた。使った額の上界で、過少に数えない。"""
 
@@ -35,13 +42,14 @@ class NotCharged:
     """API を呼ぶ前に失敗した起動。課金は無く、額は 0 として数える。"""
 
 
-Cost = Measured | LimitSubstitute | NotCharged | Unreported
+Cost = Measured | UsagePriced | LimitSubstitute | NotCharged | Unreported
 
 
 class CostSource(StrEnum):
     """runs.json の cost_source の値。"""
 
     MEASURED = "measured"
+    USAGE_PRICED = "usage_priced"
     LIMIT_SUBSTITUTE = "limit_substitute"
     NOT_CHARGED = "not_charged"
     UNREPORTED = "unreported"
@@ -54,17 +62,19 @@ UNREPORTED = Unreported()
 def cost_as_record(cost: Cost) -> dict[str, Any]:
     """runs.json の cost_usd と cost_source を書く唯一の口。
 
-    額を持たない NotCharged と Unreported は 0 を書く。
+    額が不明なら null を書く。
     """
     match cost:
         case Measured(usd):
             return {"cost_usd": usd, "cost_source": CostSource.MEASURED.value}
+        case UsagePriced(usd):
+            return {"cost_usd": usd, "cost_source": CostSource.USAGE_PRICED.value}
         case LimitSubstitute(usd):
             return {"cost_usd": usd, "cost_source": CostSource.LIMIT_SUBSTITUTE.value}
         case NotCharged():
             return {"cost_usd": 0.0, "cost_source": CostSource.NOT_CHARGED.value}
         case Unreported():
-            return {"cost_usd": 0.0, "cost_source": CostSource.UNREPORTED.value}
+            return {"cost_usd": None, "cost_source": CostSource.UNREPORTED.value}
         case _:
             assert_never(cost)
 
@@ -82,6 +92,8 @@ def cost_from_record(record: dict[str, Any]) -> Cost:
             return NotCharged()
         case CostSource.LIMIT_SUBSTITUTE:
             return LimitSubstitute(float(record["cost_usd"]))
+        case CostSource.USAGE_PRICED:
+            return UsagePriced(float(record["cost_usd"]))
         case CostSource.MEASURED:
             return Measured(float(record["cost_usd"]))
         case _ as unreachable:
@@ -108,28 +120,34 @@ class BudgetOutcome(StrEnum):
 class CostTotals:
     measured: float
     limit_substitute: float
+    usage_priced: float = 0.0
+    unknown_count: int = 0
 
     @property
     def usd(self) -> float:
-        return self.measured + self.limit_substitute
+        return self.measured + self.limit_substitute + self.usage_priced
 
 
 def total_by_source(costs: Iterable[Cost]) -> CostTotals:
     """Cost の並びを型ごとに分けて数える。合計はここで求める。"""
     measured = 0.0
-    substitute = 0.0
+    substitute = priced = 0.0
+    unknown = 0
     for cost in costs:
         match cost:
             case Measured(usd):
                 measured += usd
             case LimitSubstitute(usd):
                 substitute += usd
-            case NotCharged() | Unreported():
-                # 額が無いので合計に足すものが無い
+            case UsagePriced(usd):
+                priced += usd
+            case Unreported():
+                unknown += 1
+            case NotCharged():
                 pass
             case _:
                 assert_never(cost)
-    return CostTotals(measured, substitute)
+    return CostTotals(measured, substitute, priced, unknown)
 
 
 def cost_text(cost: Cost) -> str:
@@ -137,6 +155,8 @@ def cost_text(cost: Cost) -> str:
     match cost:
         case Measured(usd):
             return f"{usd:.4f} USD（使った額）"
+        case UsagePriced(usd):
+            return f"{usd:.6f} USD（報告された使用量を公開単価で換算）"
         case LimitSubstitute(usd):
             return f"{usd:.4f} USD（推定。上限の額で代用し、実際に使った額は不明）"
         case NotCharged():

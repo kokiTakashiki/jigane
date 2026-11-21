@@ -41,6 +41,9 @@ from jigane.skills import macro, micro, triage
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.output_models import ThemesOutput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 UNVERIFIED = TriageReason.WEAKENED_UNVERIFIED
 TOOL_GUESS = TriageReason.TOOL_GUESS_UNFOUNDED
 

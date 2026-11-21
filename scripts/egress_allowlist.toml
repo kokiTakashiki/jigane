@@ -6,6 +6,7 @@
 # docs/data-destinations.md の表「送り先」のホストの列と、集合として一致させる。
 hosts = [
   "api.github.com",
+  "chatgpt.com",
   "github.com",
   "release-assets.githubusercontent.com",
 ]
@@ -20,6 +21,8 @@ hosts = [
 # ドメイン名の形をしているが、ホストではない文字列。コードや他言語の名前の参照で、構造では見分けられない。
 # 足すときは、その名前が接続先でないことを確かめる。
 names = [
+  "turn.completed",
+  "item.completed",
   "pytest.fixture",
   "freezegun.freeze",
   "machine.travel",

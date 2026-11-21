@@ -3,7 +3,7 @@
 1. ネットワークに触る部品の import と、tree_sitter_language_pack の取得の呼び出しが、
    scripts/egress_allowlist.toml の `site` の外に無いこと。
 2. コードの中の文字列にあるホストと URL が、許可リストの中にあること（docstring は対象外）。
-3. 起動する外部コマンドの先頭が git か、検査済みの gh と claude の口だけであること。
+3. 起動する外部コマンドが git、検査済みの gh と claude の口、Codex の試用起動に限られること。
 4. 許可リストの接続先と、docs/data-destinations.md の表「送り先」が一致すること。
 
 3 は scripts/ の .py にも掛ける。開発の道具も起動の口を使い、git と gh の呼び出しを
@@ -139,6 +139,7 @@ LAUNCHERS = frozenset(
         "run_command_bytes",
         "run_resolved",
         "run_claude_resolved",
+        "run_codex_resolved",
     }
 )
 PROCESS_MODULE = "jigane.git.process"
@@ -150,6 +151,7 @@ LAUNCHABLE_EXECUTABLES = frozenset({"git", "gh"})
 # 起動の口の呼び出しの先頭が git の定数でなくてよい場所と、その場所が満たす条件
 GH_MODULE = "jigane.pull_request_context.gh"
 CLAUDE_MODULE = "jigane.llm_runs.claude"
+CODEX_MODULE = "jigane.llm_runs.codex"
 
 
 def _module_name(root: Path, path: Path) -> str:
@@ -634,12 +636,32 @@ def _claude_command_starts_with_binary(tree: ast.AST) -> bool:
     return starts and default
 
 
+def _launcher_reference_errors(tree: ast.AST, where: str, callee_ids: set[int]) -> list[str]:
+    problems = []
+    for node in ast.walk(tree):
+        reference = _reference_name(node)
+        if reference in LAUNCHERS and id(node) not in callee_ids:
+            problems.append(
+                f"{where}:{_line_number(node)}: 起動の口 {reference} を呼ばずに参照している。"
+                "呼び出しなら先頭の引数を検査できる"
+            )
+        elif isinstance(node, ast.ImportFrom):
+            problems.extend(
+                f"{where}:{node.lineno}: 起動の口 {alias.name} を import している。"
+                "import した名前は呼び出しの検査から外れる"
+                for alias in node.names
+                if alias.name in LAUNCHERS
+            )
+    return problems
+
+
 def check_commands(root: Path) -> list[str]:
     """起動の口に渡る argv が、次のいずれかだけであること。
 
     全要素が定数の git のリスト、build_git_command の結果、VARIABLE_GIT_ARGV_ALLOWED に載せた
     関数での表の形の git のリスト、check_allowed を通る gh の口、GH_ARGV_ALLOWED に載せた
-    関数での表の形の gh のリスト、検査済みの claude の口。jigane/ と scripts/ を読む。
+    関数での表の形の gh のリスト、検査済みの claude の口、Codex の起動とログイン状態の照会。
+    jigane/ と scripts/ を読む。
 
     subprocess と os.system の直接の利用は ruff の banned-api が禁じているので、ここでは見ない。
     gh の形の照合（check_allowed）と claude の実行ファイルの解決は、その口が担う。ここは、
@@ -659,6 +681,10 @@ def check_commands(root: Path) -> list[str]:
         for node, scope in _scopes(tree):
             if isinstance(node, ast.Call) and _callee_name(node) in LAUNCHERS:
                 callee_ids.add(id(node.func))
+                if _callee_name(node) == "run_codex_resolved":
+                    if module != CODEX_MODULE or scope not in {"run", "_require_chatgpt_login"}:
+                        problems.append(f"{where}:{node.lineno}: Codex の起動口の外から呼んでいる")
+                    continue
                 first = node.args[0] if node.args else None
                 via_gh = (
                     module == GH_MODULE
@@ -680,20 +706,8 @@ def check_commands(root: Path) -> list[str]:
                         "check_allowed を通る gh の口（gh.py の _run）でも、"
                         "GH_ARGV_ALLOWED の関数での表の形の gh でもない"
                     )
-        for node in ast.walk(tree):
-            reference = _reference_name(node)
-            if reference in LAUNCHERS and id(node) not in callee_ids and module != CLAUDE_MODULE:
-                problems.append(
-                    f"{where}:{_line_number(node)}: 起動の口 {reference} を呼ばずに参照している。"
-                    f"呼び出しなら先頭の引数を検査できる。claude の口（{CLAUDE_MODULE}）だけが例外"
-                )
-            elif isinstance(node, ast.ImportFrom) and module != CLAUDE_MODULE:
-                problems.extend(
-                    f"{where}:{node.lineno}: 起動の口 {alias.name} を import している。"
-                    "import した名前は呼び出しの検査から外れる"
-                    for alias in node.names
-                    if alias.name in LAUNCHERS
-                )
+        if module != CLAUDE_MODULE:
+            problems.extend(_launcher_reference_errors(tree, where, callee_ids))
         if module == CLAUDE_MODULE and not _claude_command_starts_with_binary(tree):
             problems.append(
                 f"{where}: build_command の argv の先頭が claude_binary() でない、"

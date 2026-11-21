@@ -75,6 +75,8 @@ class ValueSetRow:
     # 定義の無い値の組（`if` の連鎖などで同じ式を同じ値と比べるだけの組）では、比べている式の原文。
     # このとき definitions は空で、場所は comparisons の最初の要素。定義のある組は空
     subject: str = ""
+    # 直接書かれた比較の位置と値。同じ位置・形で複数の値を比べる場合も各値を保つ
+    direct_comparisons: tuple[StringLiteralComparison, ...] = ()
 
 
 @dataclass
@@ -173,15 +175,18 @@ def _compares_to(group: _Group, comparison: StringLiteralComparison) -> bool:
 
 def _matching_comparisons(
     group: _Group, comparisons: list[StringLiteralComparison]
-) -> tuple[StringLiteralComparison, ...]:
+) -> tuple[tuple[StringLiteralComparison, ...], tuple[StringLiteralComparison, ...]]:
     found: dict[tuple[str, int, ComparisonKind], StringLiteralComparison] = {}
+    direct: dict[tuple[str, int, ComparisonKind, str], StringLiteralComparison] = {}
     for comparison in comparisons:
-        if _compares_to(group, comparison):
-            # `in` の組は要素ごとに返るので、同じ箇所と形は先に当たった一つだけを残す
-            found.setdefault(
-                (comparison.path, comparison.line, comparison.comparison_kind), comparison
-            )
-    return tuple(sorted(found.values(), key=lambda c: (c.path, c.line, c.comparison_kind)))
+        if not _compares_to(group, comparison):
+            continue
+        place = (comparison.path, comparison.line, comparison.comparison_kind)
+        # 従来の表では同じ箇所と形を一つに数える
+        found.setdefault(place, comparison)
+        if not comparison.uses_named_set:
+            direct.setdefault((*place, comparison.literal_value), comparison)
+    return tuple(found[key] for key in sorted(found)), tuple(direct[key] for key in sorted(direct))
 
 
 def _compared_only_candidates(
@@ -252,16 +257,28 @@ def build_value_set_rows(
             kept = tuple(
                 sorted((c for c in undefined if c.literal_value in rare), key=lambda c: c.line)
             )
-            rows.append(ValueSetRow((), tuple(sorted(rare)), _counts(paths), paths, kept, subject))
+            rows.append(
+                ValueSetRow(
+                    (),
+                    tuple(sorted(rare)),
+                    _counts(paths),
+                    paths,
+                    kept,
+                    subject=subject,
+                    direct_comparisons=kept,
+                )
+            )
     for group in defined_groups:
         paths = _containing_paths(group, containing)
+        matched, direct = _matching_comparisons(group, comparisons)
         rows.append(
             ValueSetRow(
                 tuple(sorted(group.definitions, key=lambda d: (d.path, d.line))),
                 tuple(sorted(group.values)),
                 _counts(paths),
                 paths,
-                _matching_comparisons(group, comparisons),
+                matched,
+                direct_comparisons=direct,
             )
         )
     return tuple(

@@ -1,10 +1,14 @@
+import re
 from pathlib import Path
 
 import pytest
+from review_fakes import make_review
 from test_policy_callers import _case as callers_case
+from test_policy_classes import _interface_region, whole
 from test_policy_field_copies import _range_review, _tree
 
 from jigane.groups.viewpoints import (
+    INFORMATION_HIDING,
     KISS,
     SEPARATION_OF_CONCERNS,
     SINGLE_SOURCE,
@@ -12,7 +16,7 @@ from jigane.groups.viewpoints import (
     design_principles,
 )
 from jigane.policy_materials.changed_files import PrebuiltSection
-from jigane.skills import adversarial, policy_figures
+from jigane.skills import adversarial, macro_compact, macro_principles_run, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import PROMPT_OMITTED, REGISTRY
 from jigane.skills.policy_principles import (
@@ -23,6 +27,7 @@ from jigane.skills.policy_principles import (
     principle_prompts,
     principle_text,
 )
+from jigane.storage.store import ReviewKind
 
 P1_CASE = Path(__file__).parent / "fixtures" / "policy_material" / "principle_prompts" / "p1-a06"
 TITLES = {figure.key: figure.title for figure in REGISTRY}
@@ -38,11 +43,12 @@ def test_assigned_figure_keys() -> None:
         YAGNI: ("sequence", "classes", "readers", "callers"),
         KISS: ("value_sets", "classes", "discriminators"),
         SEPARATION_OF_CONCERNS: ("sequence", "classes", "readers"),
+        INFORMATION_HIDING: ("stores", "readers", "classes"),
     }
 
 
 def test_every_principle_has_an_entry() -> None:
-    assert set(FIGURE_KEYS_BY_PRINCIPLE) == set(design_principles())
+    assert set(FIGURE_KEYS_BY_PRINCIPLE) == set(design_principles(include_policy_only=True))
 
 
 def test_figure_keys_exist_in_registry_and_are_not_omitted() -> None:
@@ -52,7 +58,7 @@ def test_figure_keys_exist_in_registry_and_are_not_omitted() -> None:
 
 
 def test_tree_figure_is_given_to_every_principle() -> None:
-    for principle in design_principles():
+    for principle in design_principles(include_policy_only=True):
         assert TREE_KEY in figure_keys_of(principle)
 
 
@@ -100,11 +106,16 @@ def test_prompt_wording_asks_for_every_violation_or_nit_and_never_for_discards()
     assert "指摘は少なく" not in template
 
 
-def test_p1_example_identifiers_share_one_line_of_the_materials(tmp_path: Path) -> None:
+@pytest.mark.parametrize("compact", [False, True])
+def test_p1_example_identifiers_share_one_line_of_the_materials(
+    tmp_path: Path, *, compact: bool
+) -> None:
     review = _range_review(tmp_path, _tree(P1_CASE / "before"), _tree(P1_CASE / "after"))
-    lines = principle_prompt(AssemblyInput.load(review), SINGLE_SOURCE).splitlines()
-    for group in (["WorkerConfig"], ["ClientConfig"], ["ServerConfig"]):
-        assert any(all(word in line for word in group) for line in lines), group
+    launches = macro_principles_run.principle_launches(AssemblyInput.load(review), compact=compact)
+    [p1] = [launch.prompt for launch in launches if launch.viewpoint == SINGLE_SOURCE.number]
+    lines = p1.splitlines()
+    assert any("WorkerConfig" in line and "ClientConfig" in line for line in lines)
+    assert any("WorkerConfig" in line and "ServerConfig" in line for line in lines)
 
 
 def test_p2_example_identifiers_share_one_line_of_the_materials(tmp_path: Path) -> None:
@@ -112,3 +123,42 @@ def test_p2_example_identifiers_share_one_line_of_the_materials(tmp_path: Path) 
     lines = principle_prompt(AssemblyInput.load(review), YAGNI).splitlines()
     for group in (["Table.render.max_width", "なし"], ["Table.render.align", "なし"]):
         assert any(all(word in line for word in group) for line in lines), group
+
+
+def test_compact_p3_launch_pairs_all_changes_in_a_public_signature(tmp_path: Path) -> None:
+    old = (
+        "def publish(channel: str, limit: int = 10, retries: int = 1, retired: bool = False, "
+        "encoding: str = 'utf8'):"
+    )
+    new = (
+        "def publish(channel: str, limit: int = 20, retries: int = 1, encoding: str = 'utf8', "
+        "label: str = '', quiet: bool = False, safe: bool = True, tracing: bool = False):"
+    )
+    base, head = tmp_path / "base", tmp_path / "head"
+    base.mkdir()
+    head.mkdir()
+    (base / "m.py").write_text(old + "\n    return channel\n", encoding="utf-8")
+    (head / "m.py").write_text(new + "\n    return channel.upper()\n", encoding="utf-8")
+    span = {"start_line": 1, "end_line": 2}
+    review = make_review(
+        head,
+        ["m.py"],
+        base_tree=base,
+        judgment_map={
+            "segments": [whole("m.py", 2)],
+            "regions": [_interface_region(1, "publish", span, span)],
+            "line_counts": {},
+        },
+        kind=ReviewKind.RANGE,
+    )
+    launches = macro_principles_run.principle_launches(AssemblyInput.load(review), compact=True)
+    [p3] = [launch for launch in launches if launch.viewpoint == KISS.number]
+    assert adversarial.template_text(macro_compact.P3_GUIDE).strip() in p3.prompt
+    [paired] = [
+        line.split(" ~ ", 1)[1] for line in p3.prompt.splitlines() if " ~ def publish(" in line
+    ]
+    marks = re.compile(r"⟦([^¦]*)¦([^⟧]*)⟧")
+    assert len(marks.findall(paired)) >= 3
+    assert marks.sub(r"\1", paired) == old
+    assert marks.sub(r"\2", paired) == new
+    assert "return channel" not in p3.prompt

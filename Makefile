@@ -41,12 +41,12 @@ help:
 	@echo "  debug-errors         jigane が返す失敗の種類を一覧する（引数はそのまま jigane debug errors へ通す。--json で機械が読む形。出力は暫定）"
 	@echo "  debug-paths          データの置き場と repository-docs.toml のパス、根の権限の検査の結果を示す（引数はそのまま jigane debug paths へ通す。--json で機械が読む形。出力は暫定）"
 	@echo "  debug-review-id      レビューの識別子の形を示す（引数はそのまま jigane debug review-id へ通す。--json で機械が読む形。出力は暫定）"
-	@echo "  setup                依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）"
+	@echo "  setup                レビューエージェントを選び、依存と文法を取得する"
 	@echo "  preflight            作業ツリーが setup 済みかを、通信せずに確かめる（.venv と文法の置き場のファイルの有無だけ。setup は走らせない。無ければ一行の案内を出して止まる）"
 	@echo "  lint                 規則・整形・型（Linux・macOS と win32 の両方として読む）・Markdown・依存宣言・使われていないコード・層の向き・外への送り先・依存のライセンス・呼び出しの形（ast-grep）を検査する（直さない）"
 	@echo "  fmt                  整形し、自動で直せる違反を直す"
 	@echo "  test                 テストを走らせる（JIGANE_HOME は一時の場所へ向ける。macOS・Linux では POSIX だけの試験 tests_posix も走らせる）"
-	@echo "  generate             この定義から Makefile と justfile を、build_parser から README の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す"
+	@echo "  generate             この定義から Makefile と justfile を、build_parser から docs/commands.md の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す"
 	@echo "  flaky-hunt           試験の揺れを測る。乱順の種と並列の数を変えて同じ試験を繰り返し、落ちた試験と種を表にする（引数はそのまま scripts/flaky_hunt.py へ通す。--help を見る。落ちた回の出力は一時の置き場に残す。ゲートには入れない）"
 	@echo "  check-commit-emails  指定した範囲のコミットの作者と委託者のメールアドレスが GitHub の noreply だけであることを確かめる（引数は git log の版の範囲で必須。例 ARGS="origin/main..HEAD"。呼び出した場所の git リポジトリを見る。ゲートには入れない）"
 	@echo "  check                機械のゲート。lint と test を通し、緑で終わったときだけ HEAD に印を書く（push 前の hook が印と照らす）"
@@ -76,9 +76,10 @@ debug-review-id:
 	$(call require_uv)
 	@uv run --locked --directory "$(CURDIR)" --project "$(PROJECT_DIR)" jigane debug review-id $(ARGS)
 
-# 依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）。
+# レビューエージェントを選び、依存と文法を取得する。
 setup:
 	$(call require_uv)
+	uv run --no-project python -X utf8 -m scripts.select_agent_setup
 	uv sync --locked
 	uv run --locked python scripts/grammar_bundle_cache.py seed
 	uv run --locked python -m jigane.languages.fetch_main fetch
@@ -125,7 +126,7 @@ test:
 	uv run --locked --project "$(PROJECT_DIR)" python "$(PROJECT_DIR)"/scripts/with_temp_jigane_home.py uv run --locked pytest
 	uv run --locked --project "$(PROJECT_DIR)" python "$(PROJECT_DIR)"/scripts/with_temp_jigane_home.py uv run --locked pytest tests_posix
 
-# この定義から Makefile と justfile を、build_parser から README の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す。
+# この定義から Makefile と justfile を、build_parser から docs/commands.md の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す。
 generate:
 	$(call require_uv)
 	@uv run --locked --directory "$(PROJECT_DIR)" python scripts/generate_entrypoints.py

@@ -11,8 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from jigane.findings.records import AdjudicationKind, Verdict
 from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES
-from jigane.groups.definitions import MACRO
-from jigane.llm_runs import claude
+from jigane.groups.definitions import MACRO, MICRO
+from jigane.llm_runs import claude, codex
 from jigane.llm_runs.cost import LimitSubstitute
 from jigane.llm_runs.launch_failure import (
     CandidatesUnverified,
@@ -22,7 +22,7 @@ from jigane.llm_runs.launch_failure import (
     rerun_count,
     stopped_rerun_count,
 )
-from jigane.skills import adversarial, pipeline, shared_rules
+from jigane.skills import adversarial, pipeline, shard_material, shards, shared_rules
 
 
 def make_candidate(viewpoint: str = "D1", claim: str = "c") -> dict[str, Any]:
@@ -647,3 +647,76 @@ def test_excerpt_drops_in_tree_symlink_and_oversized_file(tmp_path: Path) -> Non
     ]
     [entry] = excerpts_in(judge_prompt_for(root, checked))
     assert [e["path"] for e in entry["checked"]] == ["real.py"]
+
+
+@pytest.mark.parametrize(
+    ("evidence_line", "challenge_length", "roles", "reason"),
+    [
+        (99, 1, [], adversarial.UnverifiedReason.MATERIALS_MISSING),
+        (2, 33_000, ["rebuttal"], adversarial.UnverifiedReason.MATERIALS_TOO_LARGE),
+        (2, 1, ["rebuttal", "judge"], None),
+    ],
+)
+def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
+    tmp_path: Path,
+    evidence_line: int,
+    challenge_length: int,
+    roles: list[str],
+    reason: adversarial.UnverifiedReason | None,
+) -> None:
+    def invoke(invocation: claude.Invocation) -> claude.InvocationResult:
+        assert not invocation.tools
+        assert "kept context" in invocation.prompt
+        assert "unrelated context" not in invocation.prompt
+        assert len((codex.REVIEW_BOUNDARY + invocation.prompt).encode("utf-8")) <= 32_768
+        if "challenge" in invocation.json_schema["properties"]["items"]["items"]["properties"]:
+            observed.append("rebuttal")
+            item = {"index": 0, "challenge": "ぁ" * challenge_length, "checked": [location]}
+        else:
+            observed.append("judge")
+            item = {
+                "index": 0,
+                "verdict": "kept",
+                "reason": "The supplied material supports the claim.",
+                "recheck": [location],
+                "verified": True,
+                "tool_claim": {"relies": False, "basis": "none", "version": ""},
+            }
+        return claude.InvocationResult({"items": [item]}, RECORD)
+
+    observed: list[str] = []
+    unit = shards.diff_unit(
+        "sample",
+        (
+            "--- a/sample",
+            "+++ b/sample",
+            "@@ -2 +2 @@",
+            "-old",
+            "+kept context",
+            "@@ -15 +15 @@",
+            "-old",
+            "+unrelated context",
+        ),
+    )
+    locations = {"sample": shard_material.hunks(unit)}
+    location = {"path": "sample", "start_line": evidence_line, "end_line": evidence_line}
+    candidate = {**make_candidate(), "evidence": [location]}
+    settings = claude.RunSettings(
+        codex.review_budget(claude.RunBudget(codex.LOGIN_MODEL.name, 1, reserve_margin=False)),
+        codex.LOGIN_MODEL.effort,
+        invoke,
+        has_spending_limit=False,
+        allow_tools=False,
+    )
+    outcome = adversarial.verify(
+        [candidate],
+        group=MICRO,
+        changes="",
+        working_directory=tmp_path,
+        settings=settings,
+        static_evidence=lambda positions: shard_material.evidence(locations, positions, tmp_path),
+    )
+    assert observed == roles
+    assert [item.reason for item in outcome.unverified] == ([] if reason is None else [reason])
+    assert outcome.failed_splits == int(reason is not None)
+    assert len(outcome.findings) == int(reason is None)

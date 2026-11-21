@@ -6,6 +6,7 @@
 import argparse
 import json
 import sys
+from decimal import Decimal
 from typing import NoReturn, TypedDict
 
 from jigane.commands import debug_prompt, debug_stats, failures
@@ -17,15 +18,17 @@ from jigane.commands.mcp_argument import add_mcps_argument
 from jigane.commands.output import print_lines
 from jigane.commands.subcommands import run as run_subcommand
 from jigane.groups.definitions import Effort
+from jigane.llm_runs import codex
 from jigane.repository_docs.settings import settings_path
 from jigane.storage import store
+from jigane.storage.agent_selection import Agent
 
 
 class DebugRunAdded(TypedDict):
     """debug run が --json の本体へ足す鍵。run の鍵と重ならない名前にする。"""
 
     max_usd: float
-    estimated_usd: float
+    estimated_usd: float | None
     experimental: bool
 
 
@@ -40,6 +43,7 @@ class DebugStoppedJson(DebugRunAdded):
 
 
 DEBUG_RUN_JSON_KEYS = frozenset(DebugRunAdded.__annotations__)
+CODEX_DEBUG_MAX_USD = Decimal(1)
 PROVISIONAL_NOTICE = "出力は暫定で、jigane の版で変わることがあります"
 RUN_NOTICE = (
     "実験的な口です。AI の道具がこれを使うときは、`jigane estimate` の見積もりの額を"
@@ -54,6 +58,12 @@ class _UsageExitParser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         self.print_usage(sys.stderr)
         self.exit(EXIT_USAGE, f"{self.prog}: error: {message}\n")
+
+
+def _max_usd(text: str) -> Decimal:
+    # Claude の入力検査を保ち、Codex の見積もりとの照合には元の十進表現を使う。
+    positive_finite_usd(text)
+    return Decimal(text)
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
@@ -76,26 +86,32 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         help=RUN_NOTICE,
         description=RUN_NOTICE,
         epilog=(
+            "Codex CLI は保存済みの ChatGPT ログインを使います。"
+            "Codex の非対話実行では MCP を使えません。"
             "終了コード: --yes と --max-usd の片方が無いか --max-usd の値が不正なら 64、"
-            "見積もりが --max-usd を超えれば 2（どちらも起動しない）、上限内なら起動して "
-            "run と同じ 0、2、3。"
+            "上限の事前判定で止まれば 2、実行後は run と同じ 0、2、3。"
         ),
     )
     run_parser.add_argument("review")
     add_group_argument(run_parser)
     run_parser.add_argument(
-        "--yes", action="store_true", help="同意の問いを飛ばします。--max-usd が要ります"
+        "--yes",
+        action="store_true",
+        help="--max-usd が必須。レビュー資料の送信に同意します",
     )
     run_parser.add_argument(
         "--max-usd",
-        type=positive_finite_usd,
+        type=_max_usd,
         default=None,
         help=(
-            "群の見込みの上限（USD。有限で 0 より大きい値）です。"
-            "見積もりがこれを超えるときは起動しません"
+            "実行前に指定した群の見込みと照合します。"
+            f"Codex は {CODEX_DEBUG_MAX_USD:g} USD 以下です"
         ),
     )
     run_parser.add_argument("--effort", type=Effort, choices=list(Effort), default=None)
+    run_parser.add_argument(
+        "--expect-agent", type=Agent, choices=list(Agent), help=argparse.SUPPRESS
+    )
     add_mcps_argument(run_parser)
     run_parser.add_argument("--json", action="store_true")
     # `jigane run` の準備の処理を共有するため、受けない引数は既定値で埋める
@@ -155,12 +171,8 @@ def debug_run_json(body: run_subcommand.RunJson, added: DebugRunAdded) -> DebugR
 
 
 def run_run(args: argparse.Namespace, context: Context) -> int:
-    if not args.yes or args.max_usd is None:
-        print(
-            "jigane: debug run は非対話のための口です。"
-            "--yes と --max-usd <額> を両方渡してください",
-            file=sys.stderr,
-        )
+    if error := _run_argument_error(args):
+        print(f"jigane: {error}", file=sys.stderr)
         return EXIT_USAGE
     # 群の実行より前に確かめる。重なったまま走らせると、実行の後に本体を組めず費用だけが残る
     if clash := clashing_json_keys():
@@ -169,22 +181,61 @@ def run_run(args: argparse.Namespace, context: Context) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
+    is_codex = args.agent is Agent.CODEX
+    if is_codex and args.max_usd > CODEX_DEBUG_MAX_USD:
+        return _stop_above_codex_limit(args)
     prepared = run_subcommand.prepare_run(args, context)
-    estimated = prepared.plan.expectation.total_usd
-    added = added_json(args.max_usd, estimated)
+    return _run_estimated(args, prepared, is_codex=is_codex)
+
+
+def _run_estimated(
+    args: argparse.Namespace, prepared: run_subcommand.PreparedRun, *, is_codex: bool
+) -> int:
+    expectation = prepared.plan.expectation
+    if expectation is None:
+        raise ValueError("費用の見込みがないため debug run を実行できません")
+    estimated = expectation.total_usd
+    max_usd = float(args.max_usd)
+    added = added_json(max_usd, estimated)
     # nan を超過の側に倒すため、否定の形で比べる
-    if not (estimated <= args.max_usd):
+    if not (estimated <= max_usd) or (is_codex and Decimal(str(estimated)) > args.max_usd):
         print(
-            f"jigane: 群の見込み {estimated:.4f} USD が --max-usd {args.max_usd:g} USD を"
+            f"jigane: 群の見込み {estimated} USD が --max-usd {args.max_usd} USD を"
             "超えるので、起動しません",
             file=sys.stderr,
         )
         if args.json:
             run_subcommand.print_run_json(stopped_json(added))
         return EXIT_ESTIMATE_OVER_LIMIT
-    result = run_subcommand.run_group(prepared.assembly, prepared.settings, plan=prepared.plan)
-    report = run_subcommand.report_group_result(result, as_json=args.json)
+    if is_codex:
+        codex.check_chatgpt_login()
+    return _execute(prepared, added, as_json=args.json)
+
+
+def _run_argument_error(args: argparse.Namespace) -> str | None:
+    if not args.yes or args.max_usd is None:
+        return "debug run は非対話のための口です。--yes と --max-usd <額> を両方渡してください"
+    if args.agent == Agent.CODEX and (args.mcps or args.mcp_guide is not None):
+        return codex.NO_DEBUG_MCP
+    return None
+
+
+def _stop_above_codex_limit(args: argparse.Namespace) -> int:
+    print(
+        "jigane: Codex の非対話実行には "
+        f"{CODEX_DEBUG_MAX_USD:g} USD 以下の上限を指定してください。送信しません",
+        file=sys.stderr,
+    )
     if args.json:
+        added = DebugRunAdded(max_usd=float(args.max_usd), estimated_usd=None, experimental=True)
+        run_subcommand.print_run_json(DebugStoppedJson(**added, stopped="confirmation_required"))
+    return EXIT_ESTIMATE_OVER_LIMIT
+
+
+def _execute(prepared: run_subcommand.PreparedRun, added: DebugRunAdded, *, as_json: bool) -> int:
+    result = run_subcommand.run_group(prepared.assembly, prepared.settings, plan=prepared.plan)
+    report = run_subcommand.report_group_result(result, as_json=as_json)
+    if as_json:
         run_subcommand.print_run_json(debug_run_json(report.body, added))
     return report.exit_code
 

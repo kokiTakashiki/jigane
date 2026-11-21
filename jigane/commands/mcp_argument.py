@@ -15,8 +15,8 @@ def add_mcps_argument(parser: argparse.ArgumentParser) -> None:
         default=(),
         metavar="NAME",
         help=(
-            "セキュリティの群だけが使う MCP サーバの名前です（データの置き場の mcp.json の "
-            "mcpServers のキー）。省略すると MCP を使いません"
+            "セキュリティの群で使う、選択したエージェントに登録済みの MCP サーバ名です。"
+            "省略すると MCP を使いません"
         ),
     )
     parser.add_argument(
@@ -33,7 +33,11 @@ def add_mcps_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def load_mcp_selection(
-    mcp_names: Iterable[str], group: GroupId, guide_path: Path | None = None
+    mcp_names: Iterable[str],
+    group: GroupId,
+    guide_path: Path | None = None,
+    *,
+    codex_cli: bool = False,
 ) -> McpSelection:
     mcps = tuple(dict.fromkeys(mcp_names))
     if mcps and group != GroupId.SECURITY:
@@ -43,5 +47,4 @@ def load_mcp_selection(
         raise ValueError(
             f"--mcp-guide はセキュリティの群だけが受け付けます（指定した群: {group}）"
         )
-    # mcp.json の欠落と名前の誤りは、同意を求める前に止める
-    return McpSelection.load(mcps, guide_path)
+    return McpSelection.load(mcps, guide_path, codex_cli=codex_cli)

@@ -157,6 +157,13 @@ def main() -> int:
     mcp_config = None
     if "--mcp-config" in argv:
         mcp_config = Path(argv[argv.index("--mcp-config") + 1]).read_text(encoding="utf-8")
+    if mcp_config is not None and argv[argv.index("--output-format") + 1] == "stream-json":
+        servers = [
+            {"name": name, "status": "connected"} for name in json.loads(mcp_config)["mcpServers"]
+        ]
+        sys.stdout.write(
+            json.dumps({"type": "system", "subtype": "init", "mcp_servers": servers}) + "\n"
+        )
     output = output_for(role, schema, prompt)
     record = {
         "role": role,

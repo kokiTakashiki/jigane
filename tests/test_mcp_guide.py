@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,11 @@ from jigane.groups.definitions import SECURITY
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import security, shards
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.mcp import MCP_CONFIG_FILE, McpSelection, McpServer, SecurityConfigError
+from jigane.skills.mcp import MCP_CONFIG_DIRECTORY, McpSelection, McpServer, SecurityConfigError
 from jigane.storage.store import data_home
-from jigane.text.json_input import SETTINGS_NESTING_LIMIT
+
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 IOS_USE = "iOS と Android のアプリのコード"
 SERVER_USE = "サーバ、API、サーバ上で動くプラグインのコード"
@@ -182,29 +185,50 @@ def test_too_deep_guide_toml_is_an_error(project: Path) -> None:
         McpSelection.load(NAMES, write_guide(project, deep))
 
 
-@pytest.mark.usefixtures("project")
-def test_too_deep_mcp_json_is_an_error() -> None:
-    write_mcp()
-    depth = SETTINGS_NESTING_LIMIT + 1
-    (data_home() / MCP_CONFIG_FILE).write_text("[" * depth + "]" * depth, encoding="utf-8")
-    with pytest.raises(SecurityConfigError) as raised:
-        McpSelection.load(NAMES)
-    path = data_home() / MCP_CONFIG_FILE
-    assert str(raised.value) == (
-        f"{path} の JSON の入れ子が深すぎます（上限 {SETTINGS_NESTING_LIMIT} 段）。"
-        f"{path} を直してから、もう一度実行してください。"
-    )
-
-
-@pytest.mark.usefixtures("project")
-def test_recursion_error_in_json_loads_on_mcp_json_is_an_error(
+def test_selection_does_not_open_native_or_legacy_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     write_mcp()
+    legacy = data_home() / "mcp.json"
+    legacy.write_bytes(b"legacy config is opaque")
 
-    def raise_recursion_error(*_args: object, **_kwargs: object) -> object:
-        raise RecursionError
+    def unexpected_open(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("jigane opened a config")
 
-    monkeypatch.setattr("jigane.text.json_input.json.loads", raise_recursion_error)
-    with pytest.raises(SecurityConfigError, match="JSON の入れ子が深すぎます"):
-        McpSelection.load(NAMES)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", unexpected_open)
+        patch.setattr(os, "open", unexpected_open)
+        selection = McpSelection.load(NAMES)
+    assert selection.config_paths == tuple(
+        data_home().resolve() / MCP_CONFIG_DIRECTORY / f"{name}.json" for name in NAMES
+    )
+    assert legacy.read_bytes() == b"legacy config is opaque"
+
+
+def test_claude_can_use_a_separate_registration_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review_home = data_home()
+    registrations = tmp_path / "mcp registry"
+    path = registrations / MCP_CONFIG_DIRECTORY / "refs.json"
+    path.parent.mkdir(mode=0o700, parents=True)
+    path.write_text("opaque Claude Code configuration", encoding="utf-8")
+    path.chmod(0o600)
+    monkeypatch.setenv("JIGANE_MCP_HOME", str(registrations))
+
+    assert McpSelection.load(("refs",)).config_paths == (path.resolve(),)
+    assert data_home() == review_home
+    assert not (review_home / MCP_CONFIG_DIRECTORY).exists()
+
+
+@pytest.mark.parametrize("value", ["", "relative", "file", "missing"])
+def test_mcp_home_requires_an_existing_absolute_directory(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if value == "file":
+        (tmp_path / value).touch()
+    override = str(tmp_path / value) if value in {"file", "missing"} else value
+    monkeypatch.setenv("JIGANE_MCP_HOME", override)
+    assert McpSelection.load(()) == McpSelection.none()
+    with pytest.raises(SecurityConfigError, match="既存のディレクトリの絶対パス"):
+        McpSelection.load(("refs",))

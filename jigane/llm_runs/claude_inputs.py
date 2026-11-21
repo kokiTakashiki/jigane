@@ -345,7 +345,8 @@ class ClaudeInput(Enum):
     )
     OUTPUT_SCHEMA = InputSpec(
         Channel.ARGV,
-        "--output-format json と --json-schema（段ごとの出力の形）",
+        "--output-format（通常は json、MCP 付きは stream-json）と "
+        "--json-schema（段ごとの出力の形）",
         (
             "jigane/llm_runs/claude.py:_schema_for_cli",
             "jigane/llm_runs/claude_schema.py:json_schema_of",
@@ -367,15 +368,17 @@ class ClaudeInput(Enum):
     )
     MCP_SERVERS = InputSpec(
         Channel.ARGV,
-        "--mcp-config の一時ファイル（利用者の mcp.json から選んだサーバの定義）と --allowedTools",
+        "--mcp-config のパス、--settings の allowedMcpServers の選択名、"
+        "--allowedTools、--setting-sources、--verbose、--no-session-persistence。"
+        "Claude Code がファイルを開いて接続と認証を行う",
         (
             "jigane/llm_runs/claude.py:build_command",
-            "jigane/skills/mcp.py:mcp_config_path",
+            "jigane/skills/mcp.py:config_paths",
             "jigane/skills/security.py:run_security",
         ),
         _SECURITY,
         user_can_provide=True,
-        user_can_provide_reason="利用者の MCP の設定。認証情報を含みうる",
+        user_can_provide_reason="利用者が用意した Claude Code 用の MCP 設定",
     )
     ADDED_ENVIRONMENT = InputSpec(
         Channel.ENVIRONMENT,
@@ -473,6 +476,8 @@ PLACEHOLDER_INPUTS: Mapping[str, tuple[ClaudeInput, ...]] = {
     ),
     "standards": _INSTRUCTIONS,
     "history_rule": _INSTRUCTIONS,
+    # macro_codex.md の役ごとの固定指示。Claude Code の起動には渡さない。
+    "role": _INSTRUCTIONS,
     "division": _INSTRUCTIONS,
     "viewpoints": _INSTRUCTIONS,
     "principles": _INSTRUCTIONS,
@@ -600,7 +605,10 @@ ARGV_INPUTS: Mapping[str, ClaudeInput] = {
     "--effort": _C.RUN_LIMITS,
     "--max-budget-usd": _C.RUN_LIMITS,
     "--mcp-config": _C.MCP_SERVERS,
+    "--setting-sources": _C.MCP_SERVERS,
     "--allowedTools": _C.MCP_SERVERS,
+    "--verbose": _C.MCP_SERVERS,
+    "--no-session-persistence": _C.MCP_SERVERS,
 }
 
 # 子の環境へ足された変数と、親から除かれた変数の名前

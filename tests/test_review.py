@@ -49,6 +49,9 @@ from jigane.storage.store import (
 )
 from jigane.storage.store_format import OlderFormatError
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 PUBLIC_SOURCE = "def build_widget():\n    return 1\n"
 
 

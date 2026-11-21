@@ -14,6 +14,8 @@ from jigane.findings import records as findings_module
 from jigane.findings.records import HISTORY_FILE
 from jigane.storage.store import ReviewKind
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

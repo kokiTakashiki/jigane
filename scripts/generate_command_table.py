@@ -1,8 +1,8 @@
-"""README.md の「使い方」にある副コマンドの一覧表を作る。
+"""docs/commands.md の「コマンド一覧」にある副コマンドの一覧表を作る。
 
     uv run --locked python scripts/generate_command_table.py
 
-表は README.md の開始と終了の印の間に書く。段階の割り当てはここの STAGES が持ち、
+表は docs/commands.md の開始と終了の印の間に書く。段階の割り当てはここの STAGES が持ち、
 役割の文は build_parser の各副コマンドの help をそのまま使う。
 """
 
@@ -15,6 +15,7 @@ from pathlib import Path
 from jigane.commands import build_parser
 
 ROOT = Path(__file__).resolve().parent.parent
+DESTINATION = Path("docs/commands.md")
 
 BEGIN = "<!-- BEGIN GENERATED: command-table (scripts/generate_command_table.py) -->"
 END = "<!-- END GENERATED: command-table -->"
@@ -30,7 +31,7 @@ STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("解析する", ("run", "flaky")),
     ("指摘を選ぶ", ("pick", "unpick", "hold", "unhold", "object", "unobject")),
     ("書き出す", ("export-reply", "export-report", "templates")),
-    ("導入", ("languages",)),
+    ("導入", ("select-agent", "languages")),
     ("確かめる", ("debug",)),
 )
 
@@ -50,15 +51,17 @@ def references_attribute(name: str, attribute: str) -> bool:
 def calls_function(name: str, function: str) -> bool:
     """副コマンドのモジュールが、名前 function の関数を呼んでいるか。import だけでは数えない。"""
     tree = ast.parse(subcommand_module(name).read_text(encoding="utf-8"))
-    return any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == function
-        for node in ast.walk(tree)
-    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            match node.func:
+                case ast.Name(id=called) | ast.Attribute(attr=called) if called == function:
+                    return True
+    return False
 
 
-def launches_claude(name: str) -> bool:
-    """claude を起動するか。起動の口は Context.invoke で、これを読むのは起動する副コマンドだけ。"""
-    return references_attribute(name, "invoke")
+def launches_model(name: str) -> bool:
+    """直接の起動口を参照するコマンドと、共有の群の実行を呼ぶコマンドを数える。"""
+    return references_attribute(name, "invoke") or calls_function(name, "run_group")
 
 
 def subcommand_helps() -> dict[str, str]:
@@ -85,28 +88,30 @@ def render_table(helps: dict[str, str]) -> str:
     lines = [
         BEGIN,
         "",
-        "| 段階 | コマンド | claude を起動する | 役割 |",
+        "| 段階 | コマンド | モデルを呼び出す | 役割 |",
         "| --- | --- | --- | --- |",
     ]
     for stage, names in STAGES:
         for name in names:
-            launches = "はい" if launches_claude(name) else "いいえ"
+            launches = "はい" if launches_model(name) else "いいえ"
             lines.append(f"| {stage} | `{name}` | {launches} | {helps[name]} |")
     return "\n".join([*lines, "", END])
 
 
-def replace_region(readme: str, table: str) -> str:
-    if len(REGION.findall(readme)) != 1:
-        raise ValueError("README.md に表の印（開始と終了の組）がちょうど一つ要る")
-    return REGION.sub(lambda _: table, readme)
+def replace_region(document: str, table: str) -> str:
+    if len(REGION.findall(document)) != 1:
+        raise ValueError(f"{DESTINATION.as_posix()} に表の印（開始と終了の組）がちょうど一つ要る")
+    return REGION.sub(lambda _: table, document)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="README.md の副コマンドの一覧表を作る")
-    parser.add_argument("--root", type=Path, default=ROOT, help="README.md の置き場")
-    readme = parser.parse_args(argv).root / "README.md"
-    readme.write_text(
-        replace_region(readme.read_text(encoding="utf-8"), render_table(subcommand_helps())),
+    parser = argparse.ArgumentParser(
+        description=f"{DESTINATION.as_posix()} の副コマンドの一覧表を作る"
+    )
+    parser.add_argument("--root", type=Path, default=ROOT, help="リポジトリの根")
+    destination = parser.parse_args(argv).root / DESTINATION
+    destination.write_text(
+        replace_region(destination.read_text(encoding="utf-8"), render_table(subcommand_helps())),
         encoding="utf-8",
     )
     return 0

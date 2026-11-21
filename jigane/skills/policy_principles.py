@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from jigane.groups.viewpoints import (
+    INFORMATION_HIDING,
     KISS,
     SEPARATION_OF_CONCERNS,
     SINGLE_SOURCE,
@@ -17,7 +18,7 @@ from jigane.reviews.catalog import scope_files
 from jigane.skills import adversarial, macro, policy_figures
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.policy_figures import REGISTRY, FigureKey, PolicySections
-from jigane.skills.policy_principle_shapes import Shape, present_shapes
+from jigane.skills.policy_principle_shapes import Shape, information_hiding_shapes, present_shapes
 
 PROMPT = "macro_principles"
 
@@ -28,6 +29,7 @@ FIGURE_KEYS_BY_PRINCIPLE: dict[Viewpoint, tuple[FigureKey, ...]] = {
     YAGNI: ("sequence", "classes", "readers", "callers"),
     KISS: ("value_sets", "classes", "discriminators"),
     SEPARATION_OF_CONCERNS: ("sequence", "classes", "readers"),
+    INFORMATION_HIDING: ("stores", "readers", "classes"),
 }
 
 # 原則を起動する図の形。どれか一つがあれば起動し、一つも無ければ見送る
@@ -38,6 +40,7 @@ SHAPES_BY_PRINCIPLE: dict[Viewpoint, frozenset[Shape]] = {
         {Shape.VALUE_SETS, Shape.DISCRIMINATORS, Shape.INHERITANCE, Shape.WIDE_SIGNATURE}
     ),
     SEPARATION_OF_CONCERNS: frozenset({Shape.SEQUENCE}),
+    INFORMATION_HIDING: frozenset({Shape.STORES, Shape.PRIVATE_TYPE}),
 }
 
 
@@ -93,16 +96,28 @@ def principle_prompt(
     )
 
 
+def applicable_principles(
+    assembly: AssemblyInput, *, include_policy_only: bool = False
+) -> tuple[Viewpoint, ...]:
+    sections = policy_figures.shared_policy_sections(assembly)
+    shapes = present_shapes(assembly, sections.sequence)
+    if include_policy_only:
+        shapes |= information_hiding_shapes(assembly)
+    return tuple(
+        principle
+        for principle in design_principles(include_policy_only=include_policy_only)
+        if SHAPES_BY_PRINCIPLE[principle] & shapes
+    )
+
+
 def principle_prompts(assembly: AssemblyInput) -> tuple[PrinciplePrompt, ...]:
     """問える図の形がある原則だけの、原則ごとのプロンプト。表の順（P1〜P4）で返す。"""
     sections = policy_figures.shared_policy_sections(assembly)
-    shapes = present_shapes(assembly, sections.sequence)
     return tuple(
         PrinciplePrompt(
             principle=principle,
             figure_keys=figure_keys_of(principle),
             prompt=principle_prompt(assembly, principle, sections),
         )
-        for principle in design_principles()
-        if SHAPES_BY_PRINCIPLE[principle] & shapes
+        for principle in applicable_principles(assembly)
     )

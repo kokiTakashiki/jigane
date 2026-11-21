@@ -89,6 +89,8 @@ _.M4  # 同上
 _.M6  # 同上
 # pytest.mark.usefixtures が文字列で引く fixture。
 _.all_principle_shapes
+_.selected_agent
+_.pytestmark  # pytest が読み込むモジュール単位のマーカー
 
 # --- 後続の枝（手順 2 以降）が呼ぶ公開関数 ---
 _.settings_path  # repository_docs/settings.py。setup のスクリプトが追記先を引く（手順 6）

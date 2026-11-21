@@ -1,4 +1,4 @@
-"""`jigane estimate`: 入力の大きさを見積もる。"""
+"""`jigane estimate`: レビュー資料の大きさと費用を見積もる。"""
 
 import argparse
 import json
@@ -18,7 +18,8 @@ from jigane.commands.run_guide import run_guide
 from jigane.commands.unparsed_files import print_unparsed_notice
 from jigane.findings.records import HistoryWarning
 from jigane.groups.definitions import Effort, GroupId
-from jigane.llm_runs import claude, pricing
+from jigane.llm_runs import claude, codex, pricing
+from jigane.llm_runs.codex_mcp import REFERENCE_NOTICE
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import Review
@@ -32,15 +33,25 @@ from jigane.skills.estimate_result import (
     SecurityEstimate,
 )
 from jigane.skills.estimator import estimate_of
-from jigane.skills.group_expectation import GroupExpectation, read_expectation
-from jigane.skills.launch_prompts import LaunchInput
+from jigane.skills.group_expectation import (
+    CODEX_LOGIN_OUTPUT_TOKENS,
+    GroupExpectation,
+    codex_login_expectation,
+    read_expectation,
+)
+from jigane.skills.launch_prompts import LaunchInput, LaunchPrompt, launch_prompts
 from jigane.skills.mcp import NO_MCP, McpSelection
 from jigane.skills.output_estimate import skipped_rows_message
 from jigane.skills.review_docs import read_docs_for_review
+from jigane.storage.agent_selection import Agent
 
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
-    estimate = subparsers.add_parser("estimate", help="入力の大きさを見積もります")
+    estimate = subparsers.add_parser(
+        "estimate",
+        help="レビュー資料の大きさと費用を見積もります",
+        epilog="Codex CLI は保存済みの ChatGPT ログインを使います。",
+    )
     estimate.add_argument("review")
     add_group_argument(estimate)
     estimate.add_argument(
@@ -61,11 +72,13 @@ def past_run_lines(past_run: dict[str, Any] | None, current_model: str) -> list[
         return []
     model = past_run["model"] or "不明"
     mismatch = "（モデルが違うため金額は目安になりません）" if model != current_model else ""
+    cost = past_run["cost_usd"]
+    amount = "金額不明" if cost is None else f"{cost:.4f} USD"
     return [
         (
             f"過去の実行の実測（キャッシュ込み、モデル {model}）{mismatch}: "
             f"入力 {past_run['input_tokens']} トークン、"
-            f"{past_run['cost_usd']:.4f} USD、起動 {past_run['invocation_count']} 回"
+            f"{amount}、起動 {past_run['invocation_count']} 回"
         )
     ]
 
@@ -231,6 +244,136 @@ def print_estimate(
     )
 
 
+def print_codex_estimate(
+    report: EstimateReport,
+    review: Review,
+    group: GroupId,
+    prompts: tuple[LaunchPrompt, ...],
+    *,
+    as_json: bool,
+    mcp_names: tuple[str, ...],
+) -> None:
+    boundary = codex.review_boundary(uses_mcp=bool(mcp_names))
+    sizes = [launch.size + len(boundary.encode("utf-8")) for launch in prompts]
+    fits = all(size <= codex.MAX_PROMPT_BYTES for size in sizes)
+    sizes_text = ", ".join(map(str, sizes)) or "なし"
+    launches = [
+        codex_launch_estimate(launch, size, uses_mcp=bool(mcp_names))
+        for launch, size in zip(prompts, sizes, strict=True)
+    ]
+    default = codex.LOGIN_MODEL
+    expectation = (
+        codex_login_expectation(prompts, has_verifier=report.estimate.has_verifier)
+        if not mcp_names
+        else None
+    )
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "group": group.value,
+                    **report.estimate.to_record(),
+                    "agent": Agent.CODEX,
+                    "cli_auth": "chatgpt_login",
+                    "model": default.name,
+                    "effort": default.effort,
+                    "max_budget_usd_per_call": None,
+                    "run_guide": run_guide(
+                        review,
+                        group,
+                        include_policy_only=isinstance(report.estimate, DiagramPolicyEstimate),
+                    ).to_json(),
+                    "history_warnings": [warning.to_json() for warning in report.warnings],
+                    "input_cost_usd": None,
+                    "expected": (
+                        {"total_usd": None} if expectation is None else expectation.as_record()
+                    ),
+                    "planned_invocations": len(sizes),
+                    "has_verifier": report.estimate.has_verifier,
+                    "prompt_bytes": sizes,
+                    "launches": launches,
+                    "max_prompt_bytes": codex.MAX_PROMPT_BYTES,
+                    "exceeds_prompt_limit": not fits,
+                    "noninteractive_run_available": fits and expectation is not None,
+                    "noninteractive_requires": None if mcp_names else "codex login",
+                    "noninteractive_model": None if mcp_names else default.name,
+                    **(
+                        {"mcp_servers": mcp_names, "noninteractive_unavailable_reason": "mcp"}
+                        if mcp_names
+                        else {}
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    print_lines(
+        [
+            *size_lines(report.estimate),
+            f"Codex の初期起動 {len(sizes)} 回（各プロンプト {sizes_text} バイト）",
+            *([] if fits else ["32 KiB を超える初期プロンプトがあるため実行できません"]),
+            *(
+                ["検証などの追加起動数は実行時に決まります"]
+                if report.estimate.has_verifier
+                else []
+            ),
+            *past_run_lines(report.estimate.past_run, default.name),
+            "Codex CLI は保存された ChatGPT ログインを使います。",
+            *(
+                f"{row['principle'] or row['role']}: {row['model']}"
+                f"（effort {row['effort'] or '既定'}、本文の入力概算 {row['input_usd']:.6f} USD）"
+                for row in launches
+            ),
+            *([f"使う MCP: {', '.join(mcp_names)}", f"{REFERENCE_NOTICE}。"] if mcp_names else []),
+            (
+                "本文の入力概算はバイト数と公開 API 単価で換算し、"
+                "スキーマ、キャッシュ、出力、推論を含みません"
+                + ("。MCP から実行中に取得する資料も含みません。" if mcp_names else "。")
+            ),
+            *(
+                [f"{codex.NO_DEBUG_MCP}。"]
+                if mcp_names
+                else codex_debug_estimate_lines(expectation)
+            ),
+            f"{codex.NO_SPENDING_LIMIT}。",
+            *(f"警告: {warning.text()}" for warning in report.warnings),
+        ]
+    )
+
+
+def codex_debug_estimate_lines(expectation: GroupExpectation | None) -> list[str]:
+    if expectation is None:
+        return ["群の費用を見積もれないため非対話の単群は実行できません。"]
+    return [
+        (
+            f"群の見込み: {expectation.total_usd} USD"
+            f"（初期起動の入力と出力・推論 {CODEX_LOGIN_OUTPUT_TOKENS:,} トークン/回の概算"
+            f" × 検証役の倍率 {expectation.multiplier:g}）"
+        )
+    ]
+
+
+def codex_launch_estimate(
+    launch: LaunchPrompt, size: int, *, uses_mcp: bool = False
+) -> dict[str, Any]:
+    model = launch.codex_model()
+    tokens = pricing.estimate_input_tokens(size)
+    return {
+        "role": launch.role,
+        "principle": launch.principle,
+        "model": model.name,
+        "effort": model.effort,
+        "input_tokens": tokens,
+        "input_usd": tokens * model.input_price / codex.NANOS_PER_USD,
+        "noninteractive_model": None if uses_mcp else model.name,
+        "noninteractive_effort": None if uses_mcp else model.effort,
+        "noninteractive_input_usd": (
+            None if uses_mcp else tokens * model.input_price / codex.NANOS_PER_USD
+        ),
+    }
+
+
 def estimate_and_print(
     text: str,
     group: GroupId,
@@ -239,6 +382,7 @@ def estimate_and_print(
     effort: Effort | None = None,
     max_budget_usd: float | None = None,
     mcp: McpSelection = NO_MCP,
+    agent: Agent | None = None,
 ) -> None:
     review = load_review(resolve_review(text))
     assembly = AssemblyInput.load(review, docs=read_docs_for_review(review, group))
@@ -246,10 +390,24 @@ def estimate_and_print(
     warnings = (*assembly.source.own.warnings, *assembly.source.related_warnings)
     # シャードの数は実行と同じ上限の組から決まる（実行の入口と同じ resolve_run_defaults）
     budget = resolve_run_defaults(group, None, effort, max_budget_usd=max_budget_usd).budget
-    estimate = estimate_of(LaunchInput(assembly, group, mcp, budget))
+    if agent is Agent.CODEX:
+        budget = codex.review_budget(budget, uses_mcp=bool(mcp.reference_servers))
+    launch_input = LaunchInput(assembly, group, mcp, budget)
+    estimate = estimate_of(launch_input)
+    report = EstimateReport(estimate, warnings)
     print_unparsed_notice(review)
+    if agent is Agent.CODEX:
+        print_codex_estimate(
+            report,
+            review,
+            group,
+            launch_prompts(launch_input),
+            as_json=as_json,
+            mcp_names=mcp.names,
+        )
+        return
     print_estimate(
-        EstimateReport(estimate, warnings),
+        report,
         review,
         group,
         as_json=as_json,
@@ -261,7 +419,14 @@ def estimate_and_print(
 
 def run(args: argparse.Namespace, context: Context) -> int:
     del context  # 見積もりは LLM を呼ばない
-    mcp = load_mcp_selection(args.mcps, args.group, args.mcp_guide)
+    if args.agent == Agent.CODEX:
+        codex.check_options(
+            effort=args.effort,
+            max_budget_usd=args.max_budget_usd_per_call,
+        )
+    mcp = load_mcp_selection(
+        args.mcps, args.group, args.mcp_guide, codex_cli=args.agent == Agent.CODEX
+    )
     estimate_and_print(
         args.review,
         args.group,
@@ -269,5 +434,6 @@ def run(args: argparse.Namespace, context: Context) -> int:
         effort=args.effort,
         max_budget_usd=args.max_budget_usd_per_call,
         mcp=mcp,
+        agent=args.agent,
     )
     return EXIT_OK

@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, assert_never
@@ -40,7 +40,7 @@ from jigane.groups.definitions import (
     RunShape,
 )
 from jigane.groups.policy_runs import PolicyShape
-from jigane.llm_runs import claude, failure_views, launch_failure
+from jigane.llm_runs import claude, codex, failure_views, launch_failure
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import Review
@@ -57,10 +57,11 @@ from jigane.skills import (
 )
 from jigane.skills.assembly import AssemblyInput, HistorySource
 from jigane.skills.estimator import estimate_of
-from jigane.skills.group_expectation import read_expectation
-from jigane.skills.launch_prompts import LaunchInput
+from jigane.skills.group_expectation import codex_login_expectation, read_expectation
+from jigane.skills.launch_prompts import LaunchInput, launch_prompts
 from jigane.skills.mcp import McpSelection
 from jigane.skills.review_docs import read_docs_for_review
+from jigane.storage.agent_selection import Agent, codex_supported
 
 
 def _model_defaults_text() -> str:
@@ -89,6 +90,7 @@ def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") 
         "run",
         help="スキルを実行します",
         epilog=(
+            "Codex CLI は保存済みの ChatGPT ログインを使います。"
             "終了コード: 0 は正常終了、2 は処理の失敗、3 はシャードか検証の分割が失敗し、"
             "結果に未検証の候補を含むこと。"
         ),
@@ -150,9 +152,12 @@ def run_json_body(
     *,
     notice: str | None = None,
 ) -> RunJson:
+    stored = run.to_json()
+    if isinstance(run, pipeline.ShardedGroupRun) and (reads := run.mcp_read_servers) is not None:
+        stored["mcp_read_servers"] = reads
     return RunJson(
         findings=triaged_dicts(findings),
-        run=run.to_json(),
+        run=stored,
         totals=pipeline.totals_record(totals),
         policy_notice=policy_notice,
         notice=notice,
@@ -174,8 +179,15 @@ def print_run_json(body: Mapping[str, object]) -> None:
 
 
 def _total_cost_line(totals: dict[str, Any], run: pipeline.GroupRun) -> str:
+    precision = 6 if totals["usage_priced_cost_usd"] else 4
+    cost = totals["cost_usd"]
+    amount = "不明" if cost is None else f"{cost:.{precision}f} USD"
+    if totals["usage_priced_cost_usd"]:
+        amount += f"（使用量から換算 {totals['usage_priced_cost_usd']:.6f} USD）"
+    if totals["unknown_cost_invocation_count"]:
+        amount += f"（既知分 {totals['known_cost_usd']:.6f} USD）"
     return (
-        f"実行全体の金額: {totals['cost_usd']:.4f} USD"
+        f"実行全体の金額: {amount}"
         f"（起動 {totals['invocation_count']} 回）、"
         f"所要 {pipeline.format_elapsed(run.elapsed_s or 0.0)}"
     )
@@ -336,6 +348,7 @@ def report_sharded(
                     f"ファイル {run.reviewed_files}/{run.target_files}"
                 ),
                 *retry_lines(run.launch_failures or ()),
+                *([pipeline.mcp_label(run)] if run.mcp.servers else []),
                 _total_cost_line(totals, run),
             ],
             over_budget_lines(totals),
@@ -471,14 +484,43 @@ def print_group_result(result: GroupRunResult, *, as_json: bool) -> int:
 
 
 def plan_of(
-    assembly: AssemblyInput, group: GroupId, settings: claude.RunSettings, mcp: McpSelection
+    assembly: AssemblyInput,
+    group: GroupId,
+    settings: claude.RunSettings,
+    mcp: McpSelection,
+    *,
+    agent: Agent = Agent.CLAUDE,
 ) -> LaunchPlan:
     """同意の問いも回の記録の刻印も、ここで組んだ計画の群の見込みを使う。"""
-    estimate = estimate_of(LaunchInput(assembly, group, mcp, settings.budget))
-    expectation = read_expectation(
-        estimate, settings.budget, Path(assembly.review.repository_root), group
+    launch_input = LaunchInput(assembly, group, mcp, settings.budget)
+    estimate = estimate_of(launch_input)
+    discovery_calls = None
+    codex_principles: tuple[str, ...] = ()
+    expectation = None
+    if agent is Agent.CODEX:
+        prompts = launch_prompts(launch_input)
+        for launch in prompts:
+            codex.check_prompt(launch.text, uses_mcp=bool(mcp.reference_servers))
+        discovery_calls = len(prompts)
+        codex_principles = tuple(
+            launch.principle for launch in prompts if launch.principle is not None
+        )
+        if not mcp.reference_servers:
+            expectation = codex_login_expectation(prompts, has_verifier=estimate.has_verifier)
+    if settings.has_spending_limit:
+        expectation = read_expectation(
+            estimate, settings.budget, Path(assembly.review.repository_root), group
+        )
+    plan = launch_plan(
+        estimate,
+        expectation,
+        group,
+        settings,
+        mcp,
+        discovery_calls=discovery_calls,
+        codex_principles=codex_principles,
     )
-    return launch_plan(estimate, expectation, group, settings, mcp)
+    return replace(plan, agent=agent)
 
 
 def run_group(
@@ -490,8 +532,8 @@ def run_group(
     """同意の後の処理。記録を取って群を走らせ、結果を返す。出力は呼ぶ側が行う。
 
     plan は同意の問いで見せた計画。群も見込みも MCP の選択もここから取り、
-    回の記録の刻印も plan.expectation から作る。plan は plan_of が settings から組むので、
-    effort と予算は settings と同じ値を持つ。
+    Claude Code の回の記録の刻印も plan.expectation から作る。
+    plan は plan_of が settings から組むので、effort と予算は settings と同じ値を持つ。
 
     同意は呼ぶ側が取る。公開の CLI（handle）は端末の確認を済ませてから呼び、開発の道具は
     CLI を通さずにここを直接呼ぶ。
@@ -500,10 +542,6 @@ def run_group(
     group = plan.group
     history = HistoryNotice.from_source(assembly.source)
     label = GROUP_BY_ID[group].label
-    # 検証役の倍率の元になる。同意の問いで見せた見込みの発見役の見積もりをそのまま刻む
-    stamp = pipeline.EstimateStamp(
-        plan.expectation.discovery_usd, pipeline.ESTIMATE_COUNTING_VERSION
-    )
     started_at = datetime.now(UTC)
     # 実行の途中で止めても、起動したことと終わった起動の金額が残るようにする
     with run_record.tracking(review, group, settings) as tracked:
@@ -526,7 +564,12 @@ def run_group(
                 else security.run_security(assembly, tracked, plan.mcp)
             )
             result = ShardedGroupResult(label, outcome, policy_notice, history)
-        pipeline.record_estimate(review.id.directory(), group, stamp, started_at)
+        if plan.expectation is not None and settings.has_spending_limit:
+            # 同意で示した発見役の見積もりを検証役の倍率の計算に使う
+            stamp = pipeline.EstimateStamp(
+                plan.expectation.discovery_usd, pipeline.ESTIMATE_COUNTING_VERSION
+            )
+            pipeline.record_estimate(review.id.directory(), group, stamp, started_at)
         return result
 
 
@@ -576,6 +619,17 @@ class PreparedRun:
 
 def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
     """資料と設定と計画を組む。何も書き始めない。`run` と `debug run` が共有する。"""
+    uses_codex = args.agent == Agent.CODEX
+    if uses_codex:
+        if not codex_supported():
+            raise ValueError("Codex は macOS と Linux に対応しています")
+        codex.check_options(
+            model=args.model,
+            effort=args.effort,
+            max_budget_usd=args.max_budget_usd_per_call,
+        )
+    group: GroupId = args.group
+    mcp = load_mcp_selection(args.mcps, group, args.mcp_guide, codex_cli=uses_codex)
     review = load_review(resolve_review(args.review))
     defaults = resolve_run_defaults(
         args.group,
@@ -585,13 +639,21 @@ def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
         args.max_budget_usd_per_call,
     )
     settings = run_settings(args.group, context.invoke, defaults)
-    group: GroupId = args.group
-    mcp = load_mcp_selection(args.mcps, group, args.mcp_guide)
+    if uses_codex:
+        settings = replace(
+            settings,
+            budget=codex.review_budget(settings.budget, uses_mcp=bool(mcp.reference_servers)),
+            effort=codex.LOGIN_MODEL.effort,
+            invoke=codex.run,
+            has_spending_limit=False,
+            allow_tools=False,
+        )
     # 前の回の指摘を資料にする前に読めるかを見る。実行の中で壊れが直ることは想定しない。
     # 同意の見積もりも実行の資料も、ここで読んだ履歴から組む。読むだけで、何も書き始めない
     history = load_history_checked(review.id.directory())
     assembly = AssemblyInput.from_loaded(review, history, docs=read_docs_for_review(review, group))
-    return PreparedRun(assembly, settings, plan_of(assembly, group, settings, mcp))
+    plan = plan_of(assembly, group, settings, mcp, agent=args.agent)
+    return PreparedRun(assembly, settings, plan)
 
 
 def handle(args: argparse.Namespace, context: Context) -> int:

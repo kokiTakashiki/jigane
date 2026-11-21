@@ -22,6 +22,8 @@ from jigane.skills.assembly import AssemblyInput
 from jigane.skills.mcp import McpSelection
 from jigane.storage.store import data_home
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -36,10 +38,13 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def write_mcp(servers: tuple[str, ...] = ("mobile-sec", "server-sec")) -> None:
-    home = data_home()
-    home.mkdir(parents=True, exist_ok=True)
-    config = {"mcpServers": {name: {"type": "stdio", "command": "x"} for name in servers}}
-    (home / mcp.MCP_CONFIG_FILE).write_text(json.dumps(config), encoding="utf-8")
+    directory = data_home() / mcp.MCP_CONFIG_DIRECTORY
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for name in servers:
+        path = directory / f"{name}.json"
+        config = {"mcpServers": {name: {"type": "stdio", "command": "x"}}}
+        path.write_text(json.dumps(config), encoding="utf-8")
+        path.chmod(0o600)
 
 
 def s_finding(
@@ -107,7 +112,7 @@ def test_default_run_needs_no_mcp_json_and_passes_no_mcp_config(project: Path) -
     discovery = discovery_calls(fake)
     assert len(discovery) == 2
     for call in discovery:
-        assert call.mcp_config is None
+        assert call.mcp_configs == ()
         assert call.allowed_mcp_tools == ()
         assert call.tools == ("Read", "Grep", "Glob")
         command = claude.build_command(call)
@@ -120,7 +125,8 @@ def test_mcps_without_mcp_json_stops_before_invoking(project: Path) -> None:
     create_feature_review(project, ["src"], "p")
     with pytest.raises(mcp.SecurityConfigError) as raised:
         McpSelection.load(("mobile-sec",))
-    assert str(data_home() / "mcp.json") in str(raised.value)
+    assert mcp.MCP_CONFIG_DIRECTORY in str(raised.value)
+    assert "旧 mcp.json" in str(raised.value)
 
 
 def test_mcps_naming_an_absent_server_stops_before_invoking(project: Path) -> None:
@@ -130,40 +136,20 @@ def test_mcps_naming_an_absent_server_stops_before_invoking(project: Path) -> No
         McpSelection.load(("mobile-sec", "server-sec", "other"))
     message = str(raised.value)
     assert "server-sec" in message
-    assert "other" in message
     assert "mobile-sec," not in message
 
 
-class ConfigCapture(SecurityFake):
-    """起動の最中に、渡された設定ファイルの中身と権限を読む。"""
-
-    def __init__(self) -> None:
-        super().__init__({1: [], 2: []})
-        self.seen: list[tuple[Path, dict[str, Any], int]] = []
-
-    def __call__(self, invocation: claude.Invocation) -> claude.InvocationResult:
-        if invocation.mcp_config is not None:
-            path = invocation.mcp_config
-            self.seen.append(
-                (path, json.loads(path.read_text(encoding="utf-8")), path.stat().st_mode & 0o777)
-            )
-        return super().__call__(invocation)
-
-
-def test_mcps_writes_only_the_selected_servers_to_a_temporary_file(project: Path) -> None:
+def test_mcps_passes_only_the_selected_native_file(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     write_mcp(("mobile-sec", "server-sec", "unrelated"))
-    fake = ConfigCapture()
-    security.run_security(
-        AssemblyInput.load(review), settings_for(fake), McpSelection.load(("mobile-sec",))
-    )
+    fake = SecurityFake({1: [], 2: []})
+    selection = McpSelection.load(("mobile-sec",))
+    security.run_security(AssemblyInput.load(review), settings_for(fake), selection)
     discovery = discovery_calls(fake)
     assert len(discovery) == 2
-    assert fake.seen
-    for path, content, _mode in fake.seen:
-        assert set(content["mcpServers"]) == {"mobile-sec"}
-        assert path != data_home() / "mcp.json"
-        assert not path.exists()
+    path = data_home().resolve() / mcp.MCP_CONFIG_DIRECTORY / "mobile-sec.json"
+    assert path.exists()
+    assert all(call.mcp_configs == (path,) for call in discovery)
     for call in discovery:
         assert call.allowed_mcp_tools == (
             "mcp__mobile-sec",
@@ -179,14 +165,16 @@ def test_mcps_writes_only_the_selected_servers_to_a_temporary_file(project: Path
 def test_run_review_passes_mcps_to_the_security_group(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     write_mcp(("mobile-sec", "server-sec"))
-    fake = ConfigCapture()
+    fake = SecurityFake({1: [], 2: []})
     run_review(str(review.id), SECURITY, invoke=fake, mcps=("mobile-sec", "server-sec"))
     discovery = discovery_calls(fake)
     assert discovery
-    for path, content, _mode in fake.seen:
-        assert set(content["mcpServers"]) == {"mobile-sec", "server-sec"}
-        assert not path.exists()
     for call in discovery:
+        assert tuple(path.name for path in call.mcp_configs) == (
+            "mobile-sec.json",
+            "server-sec.json",
+        )
+        assert all(path.exists() for path in call.mcp_configs)
         assert "mcp__mobile-sec" in call.allowed_mcp_tools
         assert "mcp__server-sec" in call.allowed_mcp_tools
         assert "--mcp-config" in claude.build_command(call)
@@ -199,21 +187,22 @@ def test_run_review_without_mcps_passes_no_mcp_config(project: Path) -> None:
     discovery = discovery_calls(fake)
     assert discovery
     for call in discovery:
-        assert call.mcp_config is None
+        assert call.mcp_configs == ()
         assert "--mcp-config" not in claude.build_command(call)
 
 
-def test_temporary_mcp_file_is_removed_when_the_run_fails(project: Path) -> None:
+def test_native_mcp_file_is_untouched_when_the_run_fails(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     write_mcp()
-    fake = ConfigCapture()
+    fake = SecurityFake({1: [], 2: []})
     fake.by_shard = {1: None, 2: None}
+    selection = McpSelection.load(("mobile-sec",))
+    (path,) = selection.config_paths
+    before = path.read_bytes()
     with pytest.raises(Exception, match="発見役が失敗"):
-        security.run_security(
-            AssemblyInput.load(review), settings_for(fake), McpSelection.load(("mobile-sec",))
-        )
-    assert fake.seen
-    assert all(not path.exists() for path, _, _ in fake.seen)
+        security.run_security(AssemblyInput.load(review), settings_for(fake), selection)
+    assert discovery_calls(fake)
+    assert path.read_bytes() == before
 
 
 def test_mcps_is_rejected_for_other_groups_before_invoking(
@@ -406,10 +395,14 @@ def test_run_records_the_mcp_servers_and_show_prints_them(
     )
     stored = json.loads((review.id.directory() / "runs.json").read_text("utf-8"))["security"]
     assert stored["mcp_servers"] == ["refs-a"]
+    assert main(["show", str(review.id), "security", "--json"]) == EXIT_OK
+    shown = json.loads(capsys.readouterr().out)["run"]
+    assert shown["mcp_servers"] == ["refs-a"]
+    assert "mcp_read_servers" not in shown
     assert main(["show", str(review.id), "security"]) == EXIT_OK
-    assert "MCP: refs-a" in capsys.readouterr().out
+    assert "MCP: 選択 refs-a、本文取得の記録 未計測" in capsys.readouterr().out
     assert main(["usage", str(review.id)]) == EXIT_OK
-    assert "MCP: refs-a" in capsys.readouterr().out
+    assert "MCP: 選択 refs-a、本文取得の記録 未計測" in capsys.readouterr().out
 
 
 def test_run_without_mcps_records_an_empty_list_and_old_records_read_as_unknown(

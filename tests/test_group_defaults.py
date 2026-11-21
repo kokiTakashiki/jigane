@@ -15,6 +15,8 @@ from jigane.llm_runs import claude
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.storage.store import REVIEW_FILE
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

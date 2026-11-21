@@ -11,7 +11,8 @@ from enum import StrEnum
 from typing import assert_never
 
 from jigane.groups.definitions import GroupId
-from jigane.llm_runs import claude
+from jigane.groups.policy_runs import PolicyRole
+from jigane.llm_runs import claude, codex
 from jigane.llm_runs.launch_failure import DISCOVERY_ROLE
 from jigane.skills import macro, macro_principles_run, micro, security, sharded
 from jigane.skills.assembly import AssemblyInput
@@ -30,11 +31,16 @@ class LaunchRole(StrEnum):
 class LaunchPrompt:
     role: LaunchRole
     text: str
+    principle: str | None = None
 
     @property
     def size(self) -> int:
         """本文の UTF-8 のバイト数。"""
         return len(self.text.encode("utf-8"))
+
+    def codex_model(self) -> codex.Model:
+        role = PolicyRole.PRINCIPLE if self.role is LaunchRole.PRINCIPLE else None
+        return codex.model_for(role, self.principle)
 
 
 @dataclass(frozen=True)
@@ -42,7 +48,7 @@ class LaunchInput:
     """起動の組み立てに要る入力。
 
     mcp はセキュリティの群の MCP の注記を変える。budget は上限に収まるまでシャードを増やすので、
-    起動の数と分け方を変える。方針の群はどちらにも影響されない。
+    起動の数と分け方を変える。方針の群ではバイト上限がある場合に短い資料を組む。
     """
 
     assembly: AssemblyInput
@@ -71,18 +77,34 @@ def group_launch(launch_input: LaunchInput) -> GroupLaunch:
         planned = sharded.plan_shards(assembly, group, mcp, budget)
         return tuple(LaunchPrompt(LaunchRole.DISCOVERY, text) for text in planned.prompts)
 
+    compact_policy = budget is not None and budget.max_prompt_bytes is not None
+
+    def policy_prompts() -> tuple[LaunchPrompt, ...]:
+        if compact_policy and macro.remembered_plan(assembly).missing:
+            return ()
+        return (
+            LaunchPrompt(
+                LaunchRole.DISCOVERY,
+                macro_principles_run.main_prompt(assembly, compact=compact_policy),
+            ),
+            *(
+                LaunchPrompt(LaunchRole.PRINCIPLE, launch.prompt, launch.viewpoint)
+                for launch in macro_principles_run.principle_launches(
+                    assembly, compact=compact_policy
+                )
+            ),
+        )
+
     match group:
         case GroupId.MACRO:
             return GroupLaunch(
-                prompts=lambda: (
-                    LaunchPrompt(LaunchRole.DISCOVERY, macro.remembered_prompt(assembly)),
-                    *(
-                        LaunchPrompt(LaunchRole.PRINCIPLE, launch.prompt)
-                        for launch in macro_principles_run.principle_launches(assembly)
-                    ),
-                ),
+                prompts=policy_prompts,
                 # 差し替えが効くよう、呼ぶ時点で属性を引く
-                estimate=lambda: macro_principles_run.estimate_policy(assembly),
+                estimate=lambda: (
+                    macro_principles_run.estimate_policy(assembly, compact=True)
+                    if compact_policy
+                    else macro_principles_run.estimate_policy(assembly)
+                ),
             )
         case GroupId.MICRO:
             return GroupLaunch(

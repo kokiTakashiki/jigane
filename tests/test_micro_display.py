@@ -29,6 +29,9 @@ from jigane.findings.records import (
 from jigane.groups.definitions import MICRO
 from jigane.reviews.lifecycle import create_feature_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 EXIT_OK = 0
 SCOPE = {"paths": ["x.py"], "reason": "範囲の外"}
 

@@ -78,6 +78,7 @@ def write_unfinished(context: RunContext, steps: Sequence[RecordStep]) -> pipeli
                 previous,
                 record_kind=RunRecordKind.SUCCEEDED_THEN_FAILED.value,
                 shape=context.shape,
+                latest_attempt_elapsed_s=round(time.monotonic() - context.started, 1),
             )
         else:
             base = replace(

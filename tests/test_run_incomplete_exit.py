@@ -33,6 +33,9 @@ from jigane.skills.assembly import AssemblyInput
 from jigane.skills.input_budget import StoredBudgetStop
 from jigane.skills.pipeline import run_gaps
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 NO_HISTORY = HistoryNotice((), ())
 HUGE_PROMPT = "x" * 5_000_000
 TURNS = claude.FailureKind.TURNS_EXCEEDED

@@ -17,6 +17,8 @@ from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import micro, shards, shared_rules
 from jigane.skills.assembly import AssemblyInput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -219,21 +221,7 @@ def test_previous_round_rules_follow_only_the_shard_with_previous_findings(proje
     assert "前の回の主張" in with_history
 
 
-def _ranges(prefix: str) -> list[str]:
-    numbers = [int(item[1:]) for item in micro.VIEWPOINTS if item.startswith(prefix)]
-    runs: list[list[int]] = []
-    for number in numbers:
-        if runs and runs[-1][-1] + 1 == number:
-            runs[-1].append(number)
-        else:
-            runs.append([number])
-    return [
-        f"{prefix}{run[0]}" if run[0] == run[-1] else f"{prefix}{run[0]}〜{prefix}{run[-1]}"
-        for run in runs
-    ]
-
-
-def test_readme_lists_the_viewpoints_of_micro() -> None:
-    readme = (Path(micro.__file__).parents[2] / "README.md").read_text(encoding="utf-8")
-    listed = "、".join(_ranges("D") + _ranges("P") + _ranges("T"))
-    assert f"実装（{listed}）" in section_prose(readme, "### 機能")
+def test_review_guide_lists_the_viewpoints_of_micro() -> None:
+    guide = (Path(micro.__file__).parents[2] / "docs" / "reviews.md").read_text(encoding="utf-8")
+    listed = re.findall(r"^[DPT]\d+$", section_prose(guide, "## 実装"), flags=re.MULTILINE)
+    assert sorted(listed) == sorted(micro.VIEWPOINTS)

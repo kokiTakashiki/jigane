@@ -44,6 +44,8 @@ from jigane.skills import macro, shards
 from jigane.skills.assembly import AssemblyInput
 from jigane.storage.store import ReviewId, ReviewKind
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 def test_create_pull_request_review(pr: dict[str, Any]) -> None:
     review = create_pull_request_review(URL)

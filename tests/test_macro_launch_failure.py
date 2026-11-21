@@ -257,6 +257,7 @@ def test_total_by_source_counts_the_limit_substitutes_apart() -> None:
     totals = total_by_source(map(cost_from_record, items))
     assert totals.limit_substitute == 0.5
     assert totals.measured == pytest.approx(0.5)
+    assert totals.unknown_count == 1
 
 
 def test_usage_separates_the_substituted_cost(

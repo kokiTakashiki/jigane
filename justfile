@@ -52,9 +52,10 @@ debug-paths *args:
 debug-review-id *args:
     uv run --locked --directory {{quote(invocation_directory())}} --project {{quote(justfile_directory())}} jigane debug review-id {{quote(args)}}
 
-# 依存を uv.lock のとおりに入れ、文法を取得する（組み込みと、例のパッケージの言語の分）。
+# レビューエージェントを選び、依存と文法を取得する。
 [no-quiet]
 setup:
+    uv run --no-project python -X utf8 -m scripts.select_agent_setup
     uv sync --locked
     uv run --locked python scripts/grammar_bundle_cache.py seed
     uv run --locked python -m jigane.languages.fetch_main fetch
@@ -99,7 +100,7 @@ fmt:
 test:
     uv run --locked --project {{quote(justfile_directory())}} python {{quote(justfile_directory() / "scripts/with_temp_jigane_home.py")}} uv run --locked pytest
 
-# この定義から Makefile と justfile を、build_parser から README の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す。
+# この定義から Makefile と justfile を、build_parser から docs/commands.md の副コマンドの一覧表を、ClaudeInput から SECURITY.md の Claude Code への入力の表を、層と兄弟の依存の表から import-linter の兄弟の契約を、層の契約と各サブパッケージの README から jigane/README.md の表と層の図を、grimp で測った import から各サブパッケージの README の依存の一覧を作り直す。
 generate:
     uv run --locked --directory {{quote(justfile_directory())}} python scripts/generate_entrypoints.py
     uv run --locked --directory {{quote(justfile_directory())}} python scripts/generate_command_table.py

@@ -131,10 +131,10 @@ def literal_strings(values: Sequence[str | None]) -> list[str] | None:
 
 
 def ordered_comparisons(
-    found: Iterable[tuple[str, ComparisonKind, int]], path: str
+    found: Iterable[tuple[str, ComparisonKind, int, bool]], path: str
 ) -> list[StringLiteralComparison]:
-    """見つけた（値, 種類, 行）を、行の順の `StringLiteralComparison` にする。"""
+    """見つけた比較を、行の順の `StringLiteralComparison` にする。"""
     return [
-        StringLiteralComparison(value, kind, path, line)
-        for value, kind, line in sorted(found, key=lambda f: f[2])
+        StringLiteralComparison(value, kind, path, line, uses_named_set=uses_named_set)
+        for value, kind, line, uses_named_set in sorted(found, key=lambda f: f[2])
     ]

@@ -35,6 +35,9 @@ from jigane.skills.group_result import (
 )
 from jigane.skills.pipeline import PolicyGroupRun
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 MISSING = (MissingMaterial.DOCUMENT, MissingMaterial.CURRENT_SHAPE)
 MISSING_VALUES = ["document", "current_shape"]
 

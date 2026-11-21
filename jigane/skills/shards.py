@@ -84,6 +84,7 @@ class Unit:
     path: str
     text: str
     size: int
+    diff_lines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,7 @@ class _UnitShard:
 
     @property
     def paths(self) -> list[str]:
-        return sorted(unit.path for unit in self.units)
+        return sorted({unit.path for unit in self.units})
 
     @property
     def size(self) -> int:
@@ -103,7 +104,10 @@ class _UnitShard:
 
 @dataclass(frozen=True)
 class DiffShard(_UnitShard):
-    """差分の周りを受け持つシャード。units は変更したファイルごとの差分。"""
+    """差分の周りを受け持つシャード。"""
+
+    note: str = ""
+    contracts: str = ""
 
 
 @dataclass(frozen=True)
@@ -182,10 +186,16 @@ class ShardPlan:
     drifts: tuple[VersionDrift, ...] = ()
     # 秘密のファイル名に当たるため、単位に入れず送らなかったパス。利用者へ知らせる
     withheld: tuple[str, ...] = ()
+    omissions: tuple[str, ...] = ()
 
 
 def _unit(path: str, text: str) -> Unit:
     return Unit(path, text, len(text.encode("utf-8")))
+
+
+def diff_unit(path: str, lines: tuple[str, ...]) -> Unit:
+    text = fence("\n".join(lines)) + "\n"
+    return Unit(path, text, len(text.encode("utf-8")), lines)
 
 
 def build_units(review: Review) -> list[Unit]:
@@ -193,17 +203,25 @@ def build_units(review: Review) -> list[Unit]:
     return build_units_and_withheld(review)[0]
 
 
-def build_units_and_withheld(review: Review) -> tuple[list[Unit], tuple[str, ...]]:
+def build_units_and_withheld(
+    review: Review, *, omissions: list[str] | None = None
+) -> tuple[list[Unit], tuple[str, ...]]:
     """単位と、秘密のファイル名に当たるため単位に入れなかったパス。本文は読まない。"""
     withheld: list[str] = []
     root = Path(review.repository_root)
     base_tree = review.base_tree_path
     if plan_kind_of(review.origin) is ShardPlanKind.DIFF and base_tree is not None:
-        return _diff_units(review, root, base_tree, withheld), tuple(withheld)
+        return _diff_units(review, root, base_tree, withheld, omissions), tuple(withheld)
     return _file_units(review, root, withheld), tuple(withheld)
 
 
-def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]) -> list[Unit]:
+def _diff_units(
+    review: Review,
+    root: Path,
+    base_tree: Path,
+    withheld: list[str],
+    omissions: list[str] | None = None,
+) -> list[Unit]:
     # PR の作者が設定を緩められないよう、除外は変更前のツリーから読む
     config = load_config(base_tree)
     units: list[Unit] = []
@@ -213,6 +231,8 @@ def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]
             continue
         new_path = required(pair.new_path)
         if is_excluded(new_path, config):
+            if omissions is not None:
+                omissions.append(f"{one_line(new_path)}: {OMITTED_GENERATED}")
             continue
         # file_change は old_path の本文も base_tree から読むため、改名や複写の旧名も見る
         secret = next(
@@ -224,8 +244,10 @@ def _diff_units(review: Review, root: Path, base_tree: Path, withheld: list[str]
             continue
         lines = file_change(base_tree, root, pair, config)
         if lines[-1] in _OMITTED_MARKERS:
+            if omissions is not None:
+                omissions.append(f"{one_line(new_path)}: {lines[-1]}")
             continue
-        units.append(_unit(new_path, fence("\n".join(lines)) + "\n"))
+        units.append(diff_unit(new_path, tuple(lines)))
     return units
 
 
@@ -318,10 +340,15 @@ def _design_shards(
     return [document_shard, *file_shards], drifts
 
 
-def build_plan(review: Review, group: GroupId, limit: int = MAX_SHARDS) -> ShardPlan:
+def build_plan(
+    review: Review, group: GroupId, limit: int = MAX_SHARDS, *, track_omissions: bool = False
+) -> ShardPlan:
     """群と出所から、計画の種類、単位、シャードを組む。種類ごとの分岐はここだけ。"""
     kind = plan_kind_for(group, review)
-    units, withheld = build_units_and_withheld(review)
+    omissions: list[str] = []
+    units, withheld = build_units_and_withheld(
+        review, omissions=omissions if track_omissions else None
+    )
     match kind:
         case ShardPlanKind.DIFF:
             return ShardPlan(
@@ -329,6 +356,7 @@ def build_plan(review: Review, group: GroupId, limit: int = MAX_SHARDS) -> Shard
                 tuple(units),
                 tuple(assign_shards(units, DiffShard, limit)),
                 withheld=withheld,
+                omissions=tuple(omissions),
             )
         case ShardPlanKind.FILES:
             return ShardPlan(

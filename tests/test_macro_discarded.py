@@ -33,6 +33,9 @@ from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 DISCARDED = [
     {"source": "S1", "reason": "図に現れていない呼び出しに頼る"},
     {"source": "S2", "reason": "保存されない内部の型である"},

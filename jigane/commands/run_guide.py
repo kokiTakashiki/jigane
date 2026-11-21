@@ -25,7 +25,7 @@ def _micro_span(kind: ViewpointKind) -> str:
 _MACRO = (
     "宣言、背景、ツリー図と表から、変更の道筋が目的に届くかを "
     f"{_span(viewpoints.of_group(MACRO))} の観点と設計の原則 "
-    f"{_span(viewpoints.design_principles())} で問う。"
+    "{principles} で問う。"
 )
 
 _MICRO_VIEWPOINTS = (
@@ -74,7 +74,8 @@ class RunGuide:
         return {"review_kind": self.review_kind.value, "text": self.text}
 
 
-def run_guide(review: Review, group: GroupId) -> RunGuide:
+def run_guide(review: Review, group: GroupId, *, include_policy_only: bool = False) -> RunGuide:
     if group is GroupId.MACRO:
-        return RunGuide(review.kind, _MACRO)
+        principles = viewpoints.design_principles(include_policy_only=include_policy_only)
+        return RunGuide(review.kind, _MACRO.format(principles=_span(principles)))
     return RunGuide(review.kind, _SHARD_GUIDE_TEXT[(plan_kind_for(group, review), group)])

@@ -8,6 +8,7 @@ import pytest
 from jigane.design import division
 from jigane.groups.definitions import GroupId
 from jigane.groups.viewpoints import (
+    INFORMATION_HIDING,
     SEPARATION_OF_CONCERNS,
     VIEWPOINTS,
     ViewpointKind,
@@ -56,15 +57,20 @@ def test_rendered_prompts_list_every_question() -> None:
         GroupId.SECURITY: "security",
         GroupId.MACRO: "macro_diagram",
     }
-    principle_lines = [principle_text(principle) for principle in design_principles()]
+    principle_lines = [
+        principle_text(principle) for principle in design_principles(include_policy_only=True)
+    ]
     checked = 0
     for viewpoint in VIEWPOINTS:
         if not viewpoint.question:
             continue
         if viewpoint.kind == ViewpointKind.DESIGN_PRINCIPLE:
-            # 設計の原則は実装の群の雛形と、方針の一層目の雛形へ差し込む文の両方に載る
             line = f"- {viewpoint.number} {viewpoint.name}: {viewpoint.question}"
             assert line in principle_lines, viewpoint.number
+            if viewpoint == INFORMATION_HIDING:
+                assert line not in shared_rules.viewpoint_list_text(GroupId.MICRO)
+                checked += 1
+                continue
             name = "micro"
         else:
             assert viewpoint.group is not None
@@ -138,13 +144,16 @@ def test_of_group_micro_ends_with_design_principles_in_table_order() -> None:
 
 
 def test_design_principle_uuids_are_stable() -> None:
-    assert {viewpoint.number: str(viewpoint.uuid) for viewpoint in design_principles()} == {
+    principles = design_principles(include_policy_only=True)
+    assert {viewpoint.number: str(viewpoint.uuid) for viewpoint in principles} == {
         "P1": "622e8c84-0d44-4b94-9b9e-807506dd7048",
         "P2": "9e4f5789-d0d4-4fa1-be1b-c085fbc8e20e",
         "P3": "eb86c3ec-abd3-4830-aa1e-c7a160687071",
         "P4": "7dfa8c6a-d367-4f5b-ae32-cce643a7ec85",
+        "P5": "561ff3b2-0ec3-41bd-b611-7865229b46c7",
     }
     assert SEPARATION_OF_CONCERNS is by_number("P4")
+    assert INFORMATION_HIDING is by_number("P5")
 
 
 def test_micro_prompt_lists_design_principles_from_the_table() -> None:

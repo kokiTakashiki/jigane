@@ -55,6 +55,9 @@ from jigane.technology_list import tables as technology_tables
 from jigane.technology_list.build import build_model
 
 # 抜粋の本文を重ねて送っていないことを確かめるための、プロンプトの長さの上限
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 PROMPT_LENGTH_LIMIT = 20_000
 
 

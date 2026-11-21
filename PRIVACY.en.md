@@ -14,9 +14,13 @@ The Software does not collect any data, including personal information, does not
 
 Where data goes in the Software's operation is documented in `docs/data-destinations.md` in the repository. The Software not collecting data is a separate matter from data flowing from the user's environment to third-party services. The user decides whether content may be sent.
 
+When the user selects Codex, the Software sends review materials and the output schema to OpenAI (`chatgpt.com`) using the ChatGPT login saved by the Codex CLI. The user consents through interactive confirmation or with `--yes` for a non-interactive run.
+
+If the user selects an MCP server for a security review, the chosen CLI sends reference requests to that server. Retrieved material may be sent to Anthropic with Claude Code or to OpenAI with Codex.
+
 ## 4. Handling at Third-Party Services
 
-How data is handled at the third-party services listed in `docs/data-destinations.md` (Anthropic, GitHub, and the MCP servers the user chooses) is governed by each service's privacy policy and terms. The Developer does not control them.
+How data is handled at the third-party services listed in `docs/data-destinations.md` (Anthropic, OpenAI, GitHub, and the MCP servers the user chooses) is governed by each service's privacy policy and terms. The Developer does not control them.
 
 ## 5. GitHub Issues
 
@@ -37,4 +41,4 @@ Send inquiries through GitHub Issues in the repository (<https://github.com/koki
 ---
 
 Effective date: 2026-10-24
-Last updated: 2026-10-24
+Last updated: 2026-11-20

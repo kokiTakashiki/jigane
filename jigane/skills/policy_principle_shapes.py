@@ -7,8 +7,15 @@
 from enum import StrEnum
 
 from jigane.figures.models import SequenceFigure
+from jigane.languages import registry
 from jigane.policy_materials.classes import by_simple_name
-from jigane.policy_materials.type_deltas import TypeDelta, type_deltas
+from jigane.policy_materials.type_deltas import (
+    _IDENTIFIER,
+    TypeDelta,
+    TypeDeltas,
+    members_of,
+    type_deltas,
+)
 from jigane.sequence.index import Member, TypeInfo, TypeKey
 from jigane.sequence.indexes import Indexes
 from jigane.skills.assembly import AssemblyInput
@@ -22,9 +29,11 @@ class Shape(StrEnum):
     FIELD_COPIES = "field_copies"
     CALLERS = "callers"
     DISCRIMINATORS = "discriminators"
+    STORES = "stores"
     SEQUENCE = "sequence"
     SINGLE_IMPLEMENTATION = "single_implementation"
     INHERITANCE = "inheritance"
+    PRIVATE_TYPE = "private_type"
     WIDE_SIGNATURE = "wide_signature"
 
 
@@ -90,6 +99,62 @@ def _has_wide_signature(deltas: tuple[TypeDelta, ...], before_indexes: Indexes |
     return False
 
 
+def shared_type_deltas(assembly: AssemblyInput) -> TypeDeltas:
+    return assembly.remember("type_deltas", lambda: type_deltas(assembly.review))
+
+
+def _is_private_name(name: str) -> bool:
+    return (
+        len(name) > 1
+        and name.startswith("_")
+        and not (name.startswith("__") and name.endswith("__"))
+    )
+
+
+def private_type_members(result: TypeDeltas) -> tuple[tuple[Member, tuple[str, ...]], ...]:
+    """クラス図に出る Python の公開項目から、内部名の型注記とその位置を拾う。"""
+    found = []
+    adapters = registry.adapters()
+    for delta in result.deltas:
+        info = delta.info
+        adapter = registry.adapter_for(info.path)
+        if (
+            adapter is None
+            or adapter.name != "python"
+            or registry.is_test_path(info.path, adapters)
+        ):
+            continue
+        if info.kind != "module" and any(
+            _is_private_name(name) for name in result.indexes.display(info).split(".")
+        ):
+            continue
+        for member in members_of(info):
+            if _is_private_name(member.name):
+                continue
+            annotations = [member.type_name or "", *(p.type_name for p in member.parameters)]
+            names = {
+                name
+                for annotation in annotations
+                for name in _IDENTIFIER.findall(annotation)
+                if _is_private_name(name)
+            }
+            if names:
+                found.append((member, tuple(sorted(names))))
+    return tuple(found)
+
+
+def information_hiding_shapes(assembly: AssemblyInput) -> frozenset[Shape]:
+    """Codex の方針で P5 を問える図の形。"""
+    found = {
+        Shape.STORES
+        for figure in REGISTRY
+        if figure.key == Shape.STORES.value and build_figure(figure, assembly) is not None
+    }
+    if private_type_members(shared_type_deltas(assembly)):
+        found.add(Shape.PRIVATE_TYPE)
+    return frozenset(found)
+
+
 def present_shapes(assembly: AssemblyInput, sequence: SequenceFigure) -> frozenset[Shape]:
     """レビューの図にある形。重い図は一度だけ読む。sequence は節の組み立てで作った値。"""
     found = {
@@ -100,7 +165,7 @@ def present_shapes(assembly: AssemblyInput, sequence: SequenceFigure) -> frozens
     }
     if sequence.flows:
         found.add(Shape.SEQUENCE)
-    result = type_deltas(assembly.review)
+    result = shared_type_deltas(assembly)
     shown = [delta.info for delta in result.deltas]
     edges = _edges(shown)
     if edges:

@@ -541,7 +541,7 @@ def earlier_failures(failures: Iterable[StoredFailure]) -> EarlierFailures | Non
     costs = failed_invocation_costs(earlier)
     totals = total_by_source(costs)
     unrecorded = sum(1 for failure in earlier if failure.invocation is None)
-    if not selected and not totals.usd and not unrecorded:
+    if not selected and not totals.usd and not totals.unknown_count and not unrecorded:
         # 全て走らせ直して通り、課金も無いので、利用者へ知らせる事実が無い
         return None
     recovered = sum(1 for failure in earlier if failure.disposition is Disposition.RECOVERED)

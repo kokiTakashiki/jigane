@@ -11,7 +11,7 @@ from jigane.figures.models import Panel, SequenceFigure, SequenceFlow
 from jigane.reviews.lifecycle import Review, create_feature_review
 from jigane.skills import macro_principles_run
 from jigane.skills.assembly import AssemblyInput
-from jigane.skills.policy_principle_shapes import Shape, present_shapes
+from jigane.skills.policy_principle_shapes import Shape, information_hiding_shapes, present_shapes
 from jigane.skills.policy_principles import SHAPES_BY_PRINCIPLE, principle_prompts
 
 NO_FLOWS = SequenceFigure(())
@@ -86,6 +86,23 @@ def test_sequence_shape_needs_a_flow_not_a_sentence(tmp_path: Path) -> None:
     assert Shape.SEQUENCE in _shapes(review, SequenceFigure((flow,)))
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("class Container:\n    value: _Internal\n", True),
+        ("def convert(value: list[_Internal]):\n    return value\n", True),
+        ("class _Container:\n    value: _Internal\n", False),
+        ("class Container:\n    _value: _Internal\n", False),
+    ],
+)
+def test_private_type_shape_requires_a_public_member(
+    tmp_path: Path, source: str, *, expected: bool
+) -> None:
+    review = feature_review(tmp_path, "m.py", source)
+    shapes = information_hiding_shapes(AssemblyInput.load(review))
+    assert (Shape.PRIVATE_TYPE in shapes) is expected
+
+
 def test_table_shapes_come_from_the_tables(tmp_path: Path) -> None:
     (tmp_path / "a").mkdir()
     field_copies = _range_review(tmp_path / "a", *_before_after(P1_CASE))
@@ -108,6 +125,7 @@ def test_table_maps_each_principle_to_its_shapes() -> None:
             Shape.WIDE_SIGNATURE,
         },
         "P4": {Shape.SEQUENCE},
+        "P5": {Shape.STORES, Shape.PRIVATE_TYPE},
     }
 
 

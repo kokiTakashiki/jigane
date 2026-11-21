@@ -26,7 +26,7 @@ class Viewpoint:
     """uuid は変わらない識別子。number は表示の番号で、改番しても uuid は変わらない。"""
 
     uuid: uuid.UUID
-    # None は群に属さない。設計の原則（P1〜P4）が方針と実装の両方の群で問われるため
+    # None は群に属さない。設計の原則はどの群で問うかを別に決める
     group: GroupId | None
     kind: ViewpointKind
     number: str
@@ -94,10 +94,13 @@ def by_uuid(identifier: uuid.UUID) -> Viewpoint:
     raise KeyError(identifier)
 
 
-def design_principles() -> tuple[Viewpoint, ...]:
-    """設計の原則（P1〜P4）を表の順に返す。群に属さず、方針と実装の群が問う。"""
+def design_principles(*, include_policy_only: bool = False) -> tuple[Viewpoint, ...]:
+    """表の順に共通の原則を返す。Codex の方針（図の形）は P5 も含める。"""
     return tuple(
-        viewpoint for viewpoint in VIEWPOINTS if viewpoint.kind == ViewpointKind.DESIGN_PRINCIPLE
+        viewpoint
+        for viewpoint in VIEWPOINTS
+        if viewpoint.kind == ViewpointKind.DESIGN_PRINCIPLE
+        and (include_policy_only or viewpoint != INFORMATION_HIDING)
     )
 
 
@@ -118,8 +121,9 @@ PATH = by_uuid(uuid.UUID("edf5f49f-e80b-4611-84d7-977bb5929dc7"))
 STRUCTURE = by_uuid(uuid.UUID("2abd6c81-5831-4059-986d-aee4695d9074"))
 BOT_RESPONSE = by_uuid(uuid.UUID("287c11c4-9787-43ef-8ee2-87bfb84fc951"))
 
-# 設計の原則。番号は P1〜P4 で、同じく uuid で指す。
+# 設計の原則。番号は P1〜P5 で、同じく uuid で指す。
 SINGLE_SOURCE = by_uuid(uuid.UUID("622e8c84-0d44-4b94-9b9e-807506dd7048"))
 YAGNI = by_uuid(uuid.UUID("9e4f5789-d0d4-4fa1-be1b-c085fbc8e20e"))
 KISS = by_uuid(uuid.UUID("eb86c3ec-abd3-4830-aa1e-c7a160687071"))
 SEPARATION_OF_CONCERNS = by_uuid(uuid.UUID("7dfa8c6a-d367-4f5b-ae32-cce643a7ec85"))
+INFORMATION_HIDING = by_uuid(uuid.UUID("561ff3b2-0ec3-41bd-b611-7865229b46c7"))

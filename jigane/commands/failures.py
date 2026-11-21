@@ -27,6 +27,7 @@ from jigane.reviews.lifecycle import ReviewError
 from jigane.sequence.roots import SequenceError
 from jigane.skills.discovery_errors import DiscoveryError, InputBudgetError
 from jigane.skills.mcp import SecurityConfigError
+from jigane.storage.agent_selection import AgentSelectionError
 from jigane.storage.atomic_write import StoredFileInUseError
 from jigane.storage.locking import LockTimeoutError
 from jigane.storage.review_error import ReviewExistsError
@@ -133,6 +134,15 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         ),
     ),
     (
+        AgentSelectionError,
+        Kind(
+            "agent_selection",
+            "レビューエージェントの選択を確認してください",
+            "`jigane select-agent` を実行してください。"
+            "明示指定は `jigane select-agent claude` または `jigane select-agent codex` です",
+        ),
+    ),
+    (
         ReviewError,
         Kind(
             "review",
@@ -221,11 +231,9 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         SecurityConfigError,
         Kind(
             BlockerKind.SECURITY_CONFIG.value,
-            "セキュリティ解析の設定が足りません",
-            "理由に出ている mcp.json に、"
-            "`mcpServers` と --mcps に指定した MCP サーバの起動の設定を"
-            "書くか、--mcps を外してください。--mcp-guide を渡したなら、"
-            "その TOML の形と名前が --mcps と合っているかも確かめて、もう一度実行してください",
+            "セキュリティ解析の設定を確認してください",
+            "理由に沿って設定を直してから、もう一度実行してください。"
+            "MCP を使わずに進む場合は --mcps と --mcp-guide を外してください",
         ),
     ),
     (

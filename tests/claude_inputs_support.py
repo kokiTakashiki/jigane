@@ -21,6 +21,7 @@ from jigane.languages.grammars import CACHE_ENV
 from jigane.llm_runs.claude import REVIEWER_STRIPPED_ENVIRONMENT_VARIABLES
 from jigane.skills import policy_principles
 from jigane.skills.policy_principle_shapes import Shape
+from jigane.storage.agent_selection import Agent, save_agent
 from jigane.storage.store import ReviewKind
 
 FAKE_SCRIPT = Path(__file__).parent / "claude_inputs_fake.py"
@@ -196,6 +197,7 @@ def recorded_launches(work: Path) -> Iterator[list[RecordedLaunch]]:
     try:
         home = work / "home"
         monkeypatch.setenv("JIGANE_HOME", str(home))
+        save_agent(Agent.CLAUDE)
         monkeypatch.setattr("jigane.commands.context.stdio_is_terminal", lambda: True)
         monkeypatch.setattr("jigane.commands.context.read_answer", lambda _prompt: "y")
         # 題材によらず、原則の起動の入力も記録する
@@ -212,7 +214,8 @@ def recorded_launches(work: Path) -> Iterator[list[RecordedLaunch]]:
         # MCP の案内とサーバの定義は、どの種類のレビューでも同じ組み立てを通る。
         # そのためファイルのレビューだけで走らせる
         servers = {MCP_SERVER: {"command": "no-such-mcp-server-binary", "args": ["--x"]}}
-        mcp_json = home / "mcp.json"
+        mcp_json = home / "mcp-claude" / f"{MCP_SERVER}.json"
+        mcp_json.parent.mkdir(mode=0o700, exist_ok=True)
         _write(mcp_json, json.dumps({"mcpServers": servers}))
         mcp_json.chmod(0o600)
         launches += _run(

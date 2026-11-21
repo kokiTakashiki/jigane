@@ -104,9 +104,15 @@ def run_record(review: Review, group: GroupId) -> dict[str, Any] | None:
     return {
         "ran_at": run.ran_at,
         "elapsed_s": run.elapsed_s,
+        "latest_attempt_elapsed_s": (
+            run.latest_attempt_elapsed_s if isinstance(run, pipeline.PolicyGroupRun) else None
+        ),
         "model": run.model,
         "invocation_count": totals["invocation_count"],
         "cost_usd": totals["cost_usd"],
+        "known_cost_usd": totals["known_cost_usd"],
+        "usage_priced_cost_usd": totals["usage_priced_cost_usd"],
+        "unknown_cost_invocation_count": totals["unknown_cost_invocation_count"],
         # cost_usd のうち、金額が報告されず上限の額で代えた分
         "substituted_cost_usd": totals["substituted_cost_usd"],
         "shards": run.shards if isinstance(run, pipeline.ShardedGroupRun) else None,
@@ -115,6 +121,12 @@ def run_record(review: Review, group: GroupId) -> dict[str, Any] | None:
         ),
         "mcp_servers": (
             None if not isinstance(run, pipeline.ShardedGroupRun) else run.mcp.to_stored()
+        ),
+        **(
+            {"mcp_read_servers": reads}
+            if isinstance(run, pipeline.ShardedGroupRun)
+            and (reads := run.mcp_read_servers) is not None
+            else {}
         ),
         # 検証の分割が失敗した数と、判定の付かなかった候補の数。
         # 実装とセキュリティの群の実行だけが持つ

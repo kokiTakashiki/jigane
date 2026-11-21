@@ -73,16 +73,17 @@ def _first_argument(node: Node) -> Node | None:
 
 def _membership(
     receiver: Node, named: dict[str, list[str]]
-) -> Iterator[tuple[str, ComparisonKind]]:
-    if receiver.type == "identifier":
+) -> Iterator[tuple[str, ComparisonKind, bool]]:
+    uses_named_set = receiver.type == "identifier"
+    if uses_named_set:
         strings = named.get((receiver.text or b"").decode())
     else:
         strings = _literal_strings(receiver)
     for value in strings or []:
-        yield value, ComparisonKind.MEMBERSHIP
+        yield value, ComparisonKind.MEMBERSHIP, uses_named_set
 
 
-def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, ComparisonKind]]:
+def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, ComparisonKind, bool]]:
     name_node, receiver = node.child_by_field_name("name"), node.child_by_field_name("object")
     first = _first_argument(node)
     if name_node is None or receiver is None or first is None:
@@ -91,26 +92,26 @@ def _call(node: Node, named: dict[str, list[str]]) -> Iterator[tuple[str, Compar
     if name == "equals":
         for side in (receiver, first):
             if (value := _string(side)) is not None:
-                yield value, ComparisonKind.EQUALS
+                yield value, ComparisonKind.EQUALS, False
     elif name == "contains":
         yield from _membership(receiver, named)
     elif name in _AFFIX_KINDS:
         if (value := _string(first)) is not None:
-            yield value, _AFFIX_KINDS[name]
+            yield value, _AFFIX_KINDS[name], False
     elif (
         name == "matches"
         or (name == "compile" and receiver.type == "identifier" and receiver.text == b"Pattern")
     ) and (value := _string(first)) is not None:
-        yield value, ComparisonKind.REGEX
+        yield value, ComparisonKind.REGEX, False
 
 
 def string_comparisons_of(root: Node, path: str) -> list[StringLiteralComparison]:
     """ファイルの文字列との比較を、行の順に返す。"""
     named = _named_sequences(root)
     found = [
-        (value, kind, node.start_point.row + 1)
+        (value, kind, node.start_point.row + 1, uses_named_set)
         for node in walk_nodes(root)
         if node.type == "method_invocation"
-        for value, kind in _call(node, named)
+        for value, kind, uses_named_set in _call(node, named)
     ]
     return ordered_comparisons(found, path)

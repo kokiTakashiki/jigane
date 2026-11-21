@@ -15,6 +15,8 @@ from jigane.commands.subcommands import debug
 from jigane.commands.subcommands import run as run_subcommand
 from jigane.reviews.lifecycle import create_feature_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def review_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:

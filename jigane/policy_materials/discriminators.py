@@ -4,7 +4,7 @@
 返す値だけ。読む側の対応は、任意の項目への属性の参照を持つ公開の関数の名前だけ。
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
 from tree_sitter import Node
@@ -288,16 +288,13 @@ def _is_public(member: Member) -> bool:
     return not member.name.startswith("_")
 
 
-def reader_diagram(review: Review) -> MermaidFigure | None:
-    """読む側の対応。ER 図に任意の項目が無ければ None。"""
+def reader_rows(review: Review) -> Iterator[tuple[str, str, list[Member], int]]:
+    """任意の項目ごとに、型を解決できた読み手と未解決の参照数を返す。"""
     indexes = _indexes_of(review)
     changed = _changed_types(indexes, review.map_kind.segments)
     ordered = er.er_types(indexes, changed)
     optional = [(info, m) for info in ordered for m in er.data_fields(info) if er.is_optional(m)]
-    if not optional:
-        return None
-    lines = ["flowchart LR"]
-    for number, (info, field) in enumerate(optional):
+    for info, field in optional:
         found: list[Member] = []
         unverified = 0
         for index in indexes.indexes:
@@ -309,15 +306,21 @@ def reader_diagram(review: Review) -> MermaidFigure | None:
                 if confirmed:
                     found.append(member)
         readers = sorted(found, key=lambda m: (m.path, m.line))
+        yield indexes.display(info), field.name, readers, unverified
+
+
+def reader_diagram(review: Review) -> MermaidFigure | None:
+    """読む側の対応。ER 図に任意の項目が無ければ None。"""
+    lines = ["flowchart LR"]
+    for number, (display, field, readers, unverified) in enumerate(reader_rows(review)):
         node = f"f{number}"
-        display = indexes.display(info)
         suffix = f"、受け手の型を確かめられない参照 {unverified} 件" if unverified else ""
         lines.append(
-            f'    {node}["{_label(display)}.{_label(field.name)} (読む側 {len(readers)}{suffix})"]'
+            f'    {node}["{_label(display)}.{_label(field)} (読む側 {len(readers)}{suffix})"]'
         )
         for position, reader in enumerate(readers):
             lines.append(
                 f'    {node} --> {node}r{position}["{_label(reader.qualified_name)} '
                 f'{reader.path}:{reader.line}"]'
             )
-    return MermaidFigure(READER_LEGEND, (Panel("", "\n".join(lines)),))
+    return MermaidFigure(READER_LEGEND, (Panel("", "\n".join(lines)),)) if len(lines) > 1 else None

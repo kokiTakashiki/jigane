@@ -6,13 +6,15 @@
 """
 
 import re
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from jigane.figures.models import RowChange, TableFigure, TableRow
 from jigane.git.tree_files import read_tree_file
 from jigane.judgment_map.changes import CHANGES_FILE, split_file_sections
 from jigane.languages.base import ComparisonKind, DefinitionKind
+from jigane.markdown.fence import fence, one_line
 from jigane.policy_materials.value_sets import (
     FileKind,
     ValueSetLocation,
@@ -47,6 +49,15 @@ INTRO = (
     "並びは、テストでないファイルにある定義の数が多い順、同じならコードと文書の数の合計が多い順。"
 )
 HEADER = ("定義", "値", "コード", "文書", "テスト", "文字列での比較", "この変更での触れ方")
+P1_HEADER = (HEADER[0], HEADER[5], *HEADER[1:5], HEADER[6])
+P1_INTRO = (
+    "変更に関わる組を掲載。珍しい値が重なる組をまとめた。"
+    "文字列での比較は、リテラルを直接使う箇所の数と、パス・行・形・組に当たる値を示す。"
+    "等値と所属は否定形を含み、正規表現はパターンの構築を含む。"
+    "同じ行にある定義欄のリテラルと比較は、重なる場合がある。"
+    "コード・文書・テストは、組の値を半数以上含むファイルの数。"
+    "この変更での触れ方は追加行で判定する。"
+)
 NO_TOUCH = "なし"
 HUNK_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 # 表に出す行の上限。超えた分は注記に件数だけを出す
@@ -212,9 +223,9 @@ def _touch_cell(row: ValueSetRow, added: dict[str, dict[int, str]], root: Path) 
     return _touch_text(value_set_touch(row, added, root))
 
 
-def _with_remainder(places: list[str]) -> str:
+def _with_remainder(places: list[str], *, total: int | None = None) -> str:
     shown = ", ".join(places[:MAX_LOCATIONS])
-    rest = len(places) - MAX_LOCATIONS
+    rest = (len(places) if total is None else total) - MAX_LOCATIONS
     return f"{shown} ほか {rest} 件" if rest > 0 else shown
 
 
@@ -247,9 +258,29 @@ def _comparison_cell(row: ValueSetRow) -> str:
     return f"{len(places)} ({_with_remainder(places)})"
 
 
+def _direct_comparison_cell(row: ValueSetRow) -> str:
+    values_by_site: dict[tuple[str, int, ComparisonKind], set[str]] = {}
+    for comparison in row.direct_comparisons:
+        site = (comparison.path, comparison.line, comparison.comparison_kind)
+        values_by_site.setdefault(site, set()).add(comparison.literal_value)
+    if not values_by_site:
+        return "0"
+    sites = sorted(values_by_site, key=lambda site: (kind_of(site[0]) == FileKind.TEST, site))
+    places = [
+        f"{path}:{line} {COMPARISON_WORDS[kind]} "
+        + _shown_values(sorted(values_by_site[(path, line, kind)]), repr)
+        for path, line, kind in sites[:MAX_LOCATIONS]
+    ]
+    return f"{len(sites)} ({_with_remainder(places, total=len(sites))})"
+
+
 def _values_cell(row: ValueSetRow) -> str:
-    shown = ", ".join(f"`{value}`" for value in row.values[:SHOWN_VALUES])
-    rest = len(row.values) - SHOWN_VALUES
+    return _shown_values(row.values, lambda value: f"`{value}`")
+
+
+def _shown_values(values: Sequence[str], render: Callable[[str], str]) -> str:
+    shown = ", ".join(render(value) for value in values[:SHOWN_VALUES])
+    rest = len(values) - SHOWN_VALUES
     return f"{shown} ほか {rest} 個" if rest > 0 else shown
 
 
@@ -278,14 +309,44 @@ def value_set_table(review: Review, max_rows: int = MAX_ROWS) -> TableFigure | N
     return _table(review, value_set_rows(Path(review.repository_root)), max_rows)
 
 
-def value_set_table_of(assembly: AssemblyInput, max_rows: int = MAX_ROWS) -> TableFigure | None:
+def value_set_table_of(
+    assembly: AssemblyInput, max_rows: int = MAX_ROWS, *, compact_p1: bool = False
+) -> TableFigure | None:
     """`value_set_table` と同じ表。値の組の読み込みは assembly ごとに一度で済ませる。"""
     root = Path(assembly.review.repository_root)
     rows = assembly.remember(("value_set_rows", root), lambda: value_set_rows(root))
-    return _table(assembly.review, rows, max_rows)
+    return _table(assembly.review, rows, max_rows, compact_p1=compact_p1)
 
 
-def _table(review: Review, all_rows: tuple[ValueSetRow, ...], max_rows: int) -> TableFigure | None:
+def compact_p1_text(assembly: AssemblyInput) -> str:
+    """Codex の P1 用に、定義と直接比較の列を隣に置く。"""
+    figure = value_set_table_of(assembly, compact_p1=True)
+    return f"### {SECTION_VALUE_SETS}\n\n{fence(figure.text())}" if figure else ""
+
+
+def _p1_cells(row: ValueSetRow, added: dict[str, dict[int, str]], root: Path) -> tuple[str, ...]:
+    direct = replace(row, comparisons=row.direct_comparisons)
+    return tuple(
+        one_line(cell)
+        for cell in (
+            _definition_cell(row),
+            _direct_comparison_cell(row),
+            _values_cell(row),
+            str(row.files.code),
+            str(row.files.document),
+            str(row.files.test),
+            _touch_cell(direct, added, root),
+        )
+    )
+
+
+def _table(
+    review: Review,
+    all_rows: tuple[ValueSetRow, ...],
+    max_rows: int,
+    *,
+    compact_p1: bool = False,
+) -> TableFigure | None:
     """表を組む。all_rows は変更したファイルで絞る前の、リポジトリの全行。"""
     shown, over = _selected_rows(review, all_rows, max_rows)
     if not shown:
@@ -294,14 +355,16 @@ def _table(review: Review, all_rows: tuple[ValueSetRow, ...], max_rows: int) -> 
     root = Path(review.repository_root)
     table_rows = tuple(
         TableRow(
-            (
+            _p1_cells(row, added, root)
+            if compact_p1
+            else (
                 _definition_cell(row),
                 _values_cell(row),
                 str(row.files.code),
                 str(row.files.document),
                 str(row.files.test),
                 _comparison_cell(row),
-                _touch_text(value_set_touch(row, added, root)),
+                _touch_cell(row, added, root),
             ),
             RowChange.UNCHANGED,
         )
@@ -309,4 +372,6 @@ def _table(review: Review, all_rows: tuple[ValueSetRow, ...], max_rows: int) -> 
     )
     omitted = max(over, 0)
     note = f"上限を超えた {omitted} 件は載せていない。" if omitted else None
-    return TableFigure(INTRO, HEADER, table_rows, note)
+    return TableFigure(
+        P1_INTRO if compact_p1 else INTRO, P1_HEADER if compact_p1 else HEADER, table_rows, note
+    )

@@ -17,6 +17,8 @@ from jigane.findings.records import (
 )
 from jigane.reviews.lifecycle import Review, create_feature_review
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Review:

@@ -9,7 +9,7 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 | `macro_principles_run` | 方針 | `macro_principles_run.run_policy` | 方針の群を走らせる唯一の入口です。図の形は図の起動に加えて、その原則を問える図の形があるときだけ原則ごとに一本ずつ、最大五本を走らせ、設計書の形は一本です。見積もりは `estimate_policy` で、図の形は実際に組み立てた起動のプロンプトの和で数えます。図の起動は claude-sonnet-5-5 で上限 0.36 USD、原則の起動は claude-haiku-5-5 で 1 本の上限 0.04 USD です。原則の起動の出力は `findings` だけで、捨てた候補（`discarded`）は持ちません。違反か nit かだけを判断させ、迷う候補は nit の指摘で出させます |
 | `macro` | 方針 | `macro.run_macro` | 変更の道筋の誤りを、図と表だけから外形を問います。`extras` を受け、図の形では図の起動に、形のある原則ごとの起動（`ExtraLaunch`）を足した最大五本を並列に走らせます。どの起動にも道具は渡しません。起動は見直しと範囲の判断まで行い、最終の指摘を返します。検証は行わず、`adjudication` を持ちません |
 | `micro` | 実装 | `micro.run_micro`（実行は `sharded.run_sharded`） | 差分をシャードに分け、シャードごとの発見役を並列に起動し、敵対的検証にかけます |
-| `security` | セキュリティ | `security.run_security`（実行は `sharded.run_sharded`） | シャードごとの発見役が MCP の参照体系を引き、敵対的検証にかけます。MCP の設定が要ります |
+| `security` | セキュリティ | `security.run_security`（実行は `sharded.run_sharded`） | シャードごとの発見役が、MCP を選んだときに参照体系を引き、敵対的検証にかけます |
 
 各群に `estimate_*` があり、実行前に費用を見積もります。実装とセキュリティは `sharded.py` の実行器を共有し、見積もりの型と選択は `estimate_result.py`、`estimator.py`、`output_estimate.py` が持ちます。実行の途中経過は `run_record.py` が記録します。
 
@@ -42,7 +42,7 @@ LLM に指摘を作らせるスキル群を持ちます。レビューの群を�
 | `bundle_disclosed.bundle_disclosed` | 開示済みの限界の nit が 2 件以上のときだけ、同じ限界を束ねる役を道具なしで一回起動し、シャードをまたぐ同じ限界を一件にします。起動の失敗と、スキーマに合わない出力のときは、まとめずに指摘をそのまま返します |
 | `config_head.config_heads_section` | 設定ファイル（justfile、Makefile、pyproject）の冒頭の宣言を、差分のシャードと反証役の資料に添えます。差分は変更の周りの数行しか渡さないためです |
 | `output_models.role_output_model` | LLM の出力を検証して型へ読むモデルを持ちます。claude に渡すスキーマも同じモデルから作ります。未知の項目を拒み、型の変換をしません |
-| `mcp.McpSelection` | `--mcps` で選んだ MCP サーバを、`mcp.json` で確かめた名前と設定の不変の値にまとめます。空が「MCP 無し」の唯一の表し方です |
+| `mcp.McpSelection` | `--mcps` で選んだサーバ名と、上流 CLI へ渡す設定または実行ファイルのパスを持ちます。空の場合は MCP を使いません |
 | `language_support.support_of` | 言語アダプタが満たす口と、方針の資料の図（`REGISTRY`）のどれに対応するかを求めます |
 
 ## 方針の資料

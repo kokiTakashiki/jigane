@@ -12,6 +12,9 @@ from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import macro
 from jigane.skills.assembly import AssemblyInput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 BODY_MARKER = "SECRET_BODY_MARKER"
 
 

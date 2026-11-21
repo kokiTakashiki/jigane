@@ -6,6 +6,7 @@
 名前と数だけを渡し、コードの文は渡さない。変更前の木を持たないファイルのレビューは、足したものが定まらないので描かない。
 """
 
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from jigane.git.tree_files import read_tree_text, walk_tree_files
 from jigane.languages import registry
 from jigane.languages.base import AddedPublicName, AddedPublicNameFinder, PublicNameKind
 from jigane.policy_materials import changed_files
+from jigane.policy_materials.compact import ChangeNodes
 from jigane.reviews.lifecycle import Review
 
 SECTION_CALLERS = "足した公開の口と呼ぶ側"
@@ -74,10 +76,9 @@ def _by_reader(paths: Iterable[str]) -> dict[str, tuple[AddedPublicNameFinder, l
     return groups
 
 
-def caller_table(review: Review) -> TableFigure | None:
-    """足した公開の口と呼ぶ側の表。足した名前が無い、または変更前の木が無ければ None。"""
+def public_names(review: Review) -> list[AddedPublicName]:
     if not review.is_diff or review.base_tree_path is None:
-        return None
+        return []
     root = Path(review.repository_root)
     changed_by_reader = _by_reader(
         path for path, entry in changed_files.file_changes(review).items() if entry.exists_after
@@ -93,5 +94,78 @@ def caller_table(review: Review) -> TableFigure | None:
             _sources(root, tree_paths),
             set(changed),
         )
-    rows = tuple(_row(name) for name in names)
+    return names
+
+
+def caller_table(review: Review) -> TableFigure | None:
+    """足した公開の口と呼ぶ側の表。足した名前が無い、または変更前の木が無ければ None。"""
+    rows = tuple(_row(name) for name in public_names(review))
     return TableFigure(INTRO, HEADER, rows) if rows else None
+
+
+def compact_callers(
+    review: Review, names: list[AddedPublicName], nodes: ChangeNodes, *, cross_file_only: bool
+) -> str:
+    """定義と変更ファイルの呼ぶ側を残し、変更外の同名照合は代表と件数で表す。"""
+    paths = set(changed_files.file_changes(review))
+    lines = [
+        "### 追加した公開 API と呼ぶ側",
+        (
+            "変更後の同名照合（型解決なし）。未検出は未使用の根拠にしない。"
+            "変更ファイルを優先した代表 1 件と全照合数を掲示する。"
+            "照合先の呼び出し行は未収録。"
+        ),
+    ]
+    adapters = registry.adapters()
+    omitted_test = 0
+    omitted_local = 0
+    rows_by_path: dict[str, list[str]] = defaultdict(list)
+    boundary_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for name in names:
+        if registry.is_test_path(name.path, adapters):
+            omitted_test += 1
+            continue
+        relevant = (
+            [
+                site
+                for site in name.callers
+                if (caller_path := site.rpartition(" の ")[0]) in paths
+                and caller_path != name.path
+            ]
+            if cross_file_only
+            else name.callers
+        )
+        if cross_file_only and not relevant:
+            omitted_local += 1
+            continue
+        representative = min(
+            relevant,
+            key=lambda site: (site.rpartition(" の ")[0] not in paths, site),
+            default=NO_CALLER,
+        )
+        caller_path, sep, caller_name = representative.rpartition(" の ")
+        if cross_file_only:
+            boundary = name.path, caller_path
+            boundary_counts[boundary] += 1
+            if boundary_counts[boundary] > 1:
+                continue
+        shown = f"{nodes.path(caller_path)}{sep}{caller_name}" if sep else representative
+        rows_by_path[name.path].append(f"{name.line} {name.name} → {shown} ({len(name.callers)})")
+    for path, rows in sorted(rows_by_path.items()):
+        lines.extend((nodes.path(path), *rows))
+    if cross_file_only:
+        lines.append(
+            "定義ファイル・代表の照合先ファイルの組ごとに定義を 1 件掲載。省略した定義数:"
+        )
+        lines.extend(
+            f"{nodes.path(path)} → {nodes.path(caller)}: {count - 1}"
+            for (path, caller), count in sorted(boundary_counts.items())
+            if count > 1
+        )
+        lines.append(
+            f"別の変更ファイルに照合先がない定義 {omitted_local} 件を省略。"
+            "各定義の照合は原則 P2 に掲載。"
+        )
+    if omitted_test:
+        lines.append(f"テストの定義 {omitted_test} 件は省略。")
+    return "\n".join(lines)

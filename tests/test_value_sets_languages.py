@@ -178,9 +178,9 @@ def test_swift_skips_enums_without_string_values() -> None:
 
 def _comparisons(
     adapter: StringLiteralComparisonExtractor, source: str
-) -> list[tuple[int, ComparisonKind, str]]:
+) -> list[tuple[int, ComparisonKind, str, bool]]:
     return [
-        (c.line, c.comparison_kind, c.literal_value)
+        (c.line, c.comparison_kind, c.literal_value, c.uses_named_set)
         for c in adapter.string_literal_comparisons(source, "m")
     ]
 
@@ -199,15 +199,15 @@ def test_java_collects_the_four_comparison_shapes() -> None:
         "}\n"
     )
     assert _comparisons(JavaAdapter(), source) == [
-        (4, ComparisonKind.EQUALS, "e1"),
-        (4, ComparisonKind.EQUALS, "e2"),
-        (5, ComparisonKind.MEMBERSHIP, "n1"),
-        (5, ComparisonKind.MEMBERSHIP, "n2"),
-        (6, ComparisonKind.MEMBERSHIP, "s1"),
-        (7, ComparisonKind.PREFIX, "p1"),
-        (7, ComparisonKind.SUFFIX, "q1"),
-        (8, ComparisonKind.REGEX, "r1"),
-        (8, ComparisonKind.REGEX, "r2"),
+        (4, ComparisonKind.EQUALS, "e1", False),
+        (4, ComparisonKind.EQUALS, "e2", False),
+        (5, ComparisonKind.MEMBERSHIP, "n1", True),
+        (5, ComparisonKind.MEMBERSHIP, "n2", True),
+        (6, ComparisonKind.MEMBERSHIP, "s1", False),
+        (7, ComparisonKind.PREFIX, "p1", False),
+        (7, ComparisonKind.SUFFIX, "q1", False),
+        (8, ComparisonKind.REGEX, "r1", False),
+        (8, ComparisonKind.REGEX, "r2", False),
     ]
 
 
@@ -238,15 +238,15 @@ def test_csharp_collects_the_four_comparison_shapes() -> None:
         "}\n"
     )
     assert _comparisons(CSharpAdapter(), source) == [
-        (4, ComparisonKind.EQUALS, "e1"),
-        (4, ComparisonKind.EQUALS, "e2"),
-        (5, ComparisonKind.MEMBERSHIP, "n1"),
-        (5, ComparisonKind.MEMBERSHIP, "n2"),
-        (6, ComparisonKind.MEMBERSHIP, "s1"),
-        (7, ComparisonKind.PREFIX, "p1"),
-        (7, ComparisonKind.SUFFIX, "q1"),
-        (8, ComparisonKind.REGEX, "r1"),
-        (8, ComparisonKind.REGEX, "r2"),
+        (4, ComparisonKind.EQUALS, "e1", False),
+        (4, ComparisonKind.EQUALS, "e2", False),
+        (5, ComparisonKind.MEMBERSHIP, "n1", True),
+        (5, ComparisonKind.MEMBERSHIP, "n2", True),
+        (6, ComparisonKind.MEMBERSHIP, "s1", False),
+        (7, ComparisonKind.PREFIX, "p1", False),
+        (7, ComparisonKind.SUFFIX, "q1", False),
+        (8, ComparisonKind.REGEX, "r1", False),
+        (8, ComparisonKind.REGEX, "r2", False),
     ]
 
 
@@ -276,15 +276,15 @@ def test_swift_collects_the_four_comparison_shapes() -> None:
         "}\n"
     )
     assert _comparisons(SwiftAdapter(), source) == [
-        (3, ComparisonKind.EQUALS, "e1"),
-        (3, ComparisonKind.EQUALS, "e2"),
-        (4, ComparisonKind.MEMBERSHIP, "n1"),
-        (4, ComparisonKind.MEMBERSHIP, "n2"),
-        (5, ComparisonKind.MEMBERSHIP, "s1"),
-        (6, ComparisonKind.PREFIX, "p1"),
-        (6, ComparisonKind.SUFFIX, "q1"),
-        (7, ComparisonKind.REGEX, "r1"),
-        (7, ComparisonKind.REGEX, "r2"),
+        (3, ComparisonKind.EQUALS, "e1", False),
+        (3, ComparisonKind.EQUALS, "e2", False),
+        (4, ComparisonKind.MEMBERSHIP, "n1", True),
+        (4, ComparisonKind.MEMBERSHIP, "n2", True),
+        (5, ComparisonKind.MEMBERSHIP, "s1", False),
+        (6, ComparisonKind.PREFIX, "p1", False),
+        (6, ComparisonKind.SUFFIX, "q1", False),
+        (7, ComparisonKind.REGEX, "r1", False),
+        (7, ComparisonKind.REGEX, "r2", False),
     ]
 
 

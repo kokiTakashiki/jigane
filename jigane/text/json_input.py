@@ -16,6 +16,7 @@ import re
 _STRING_OR_BRACKET_TEXT = re.compile(r'"[^"\\]*(?:\\(?:[\s\S]|\Z)[^"\\]*)*(?:"|\Z)|[\[\]{}]')
 _OPENERS = frozenset({"[", "{"})
 _CLOSERS = frozenset({"]", "}"})
+_CLOSER_FOR = {"[": "]", "{": "}"}
 
 
 # 人間が書く設定のファイル（mcp.json、languages.json など）の入れ子の上限。正しい形は数段で収まる
@@ -53,6 +54,28 @@ def reject_deep_json(document: str, limit: int) -> None:
         else:
             # 文字列の字句。中の括弧を数えないために読み飛ばすだけ
             pass
+
+
+def elide_nested_containers(document: str, keep_depth: int) -> str:
+    """JSON の外側を残し、指定の深さより内側で始まる配列とオブジェクトを空にする。"""
+    expected_closers: list[str] = []
+    parts: list[str] = []
+    cursor = 0
+    for token in _STRING_OR_BRACKET_TEXT.finditer(document):
+        lexeme = token.group()
+        if lexeme in _OPENERS:
+            if len(expected_closers) == keep_depth:
+                parts.append(document[cursor : token.end()])
+            expected_closers.append(_CLOSER_FOR[lexeme])
+        elif lexeme in _CLOSERS:
+            if not expected_closers or expected_closers.pop() != lexeme:
+                raise ValueError("JSON の括弧が対応していません")
+            if len(expected_closers) == keep_depth:
+                cursor = token.start()
+    if expected_closers:
+        raise ValueError("JSON の括弧が閉じていません")
+    parts.append(document[cursor:])
+    return "".join(parts)
 
 
 def loads_bounded(document: str | bytes, limit: int, *, strict: bool = True) -> object:

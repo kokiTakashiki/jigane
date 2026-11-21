@@ -8,7 +8,7 @@
 ## Article 2 (Nature of the Software)
 
 1. The Software is Python code that runs in the user's environment. The Developer does not have a server for the Software.
-2. In the user's environment, the Software starts external tools that the user installs separately, and the MCP servers the user chooses. See README.md for the list of external tools.
+2. In the user's environment, the Software starts external tools that the user installs separately. When the user selects an MCP server, the chosen review CLI connects to that server. See README.md for the list of external tools.
 3. All source code distributed as the Software is public. Before using the Software, the user can verify how it behaves and where data goes.
 
 ## Article 3 (Relationship with the MIT License)
@@ -32,12 +32,14 @@
 2. Use of data for training and retention periods at third-party services follow the settings and contract of the user's own account.
 3. The Developer is not responsible for the provision, changes, suspension, fees, or terms of third-party services. The user is responsible for checking them.
 
-## Article 6 (Information Passed to Claude Code)
+## Article 6 (Information Sent for Review)
 
 1. The Software formats, on the user's behalf, data that the user could pass to Claude Code on their own, and passes it to Claude Code in the user's environment.
 2. The kinds of information passed are listed in the table in the section "レビューの入力と Claude Code" (Review inputs and Claude Code) of SECURITY.md.
 3. When the user answers y, the user is deemed to have understood and approved that the information shown in the table is passed to Claude Code.
 4. How Claude Code handles the information it receives follows the terms of Claude Code and Anthropic and the user's settings.
+5. When the user selects Codex, the Software sends review materials and the output schema to OpenAI (`chatgpt.com`) using the ChatGPT login saved by the Codex CLI. Materials may include diagrams, tables and code excerpts derived from the selected changes, and findings and evidence used for verification. They may also include reference material retrieved by Codex CLI from the selected MCP servers. [Data destinations](docs/data-destinations.md) lists the inputs and destinations.
+6. For an interactive Codex run, the user reviews the transmission notice and confirms it. For a non-interactive run, the user reviews the destination and materials for one review group and specifies an amount to compare with the group's USD estimate. The user gives consent with `--yes`. OpenAI handles the information under the user's agreement and settings and the applicable OpenAI terms.
 
 ## Article 7 (Handling of Data)
 
@@ -84,4 +86,4 @@ Send inquiries through GitHub Issues in the repository (<https://github.com/koki
 ---
 
 Effective date: 2026-10-24
-Last updated: 2026-10-24
+Last updated: 2026-11-20

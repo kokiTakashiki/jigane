@@ -7,6 +7,7 @@
 関数の本体は鍵の集合だけを読み、値は読まない。
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,7 +22,10 @@ from jigane.languages.base import (
     StoreSide,
 )
 from jigane.policy_materials import changed_files
+from jigane.policy_materials.compact import ChangeNodes
 from jigane.reviews.lifecycle import Review
+from jigane.sequence.indexes import Indexes
+from jigane.skills.assembly import AssemblyInput
 
 SECTION_STORES = "保存物の書く側と読む側"
 INTRO = (
@@ -140,8 +144,7 @@ def _union(sides: list[StoreSide]) -> set[str]:
     return set().union(*(s.keys for s in sides)) if sides else set()
 
 
-def store_table(review: Review) -> TableFigure | None:
-    """保存物の書く側と読む側の表。変更が保存物に触らなければ None。"""
+def _touched_stores(review: Review) -> dict[str, _Store]:
     root = Path(review.repository_root)
     files = changed_files.file_changes(review)
     changed = {
@@ -150,7 +153,7 @@ def store_table(review: Review) -> TableFigure | None:
         if entry.exists_after and isinstance(registry.adapter_for(p), StoreAccessExtractor)
     }
     if not changed:
-        return None
+        return {}
     adapters = registry.adapters()
     paths = [
         p
@@ -158,8 +161,25 @@ def store_table(review: Review) -> TableFigure | None:
         if isinstance(registry.adapter_for(p), StoreAccessExtractor)
         and not registry.is_test_path(p, adapters)
     ]
+    return _collect(root, paths, changed)
+
+
+def store_table(review: Review) -> TableFigure | None:
+    """保存物の書く側と読む側の表。変更が保存物に触らなければ None。"""
+    return _table(_touched_stores(review))
+
+
+def shared_store_table(assembly: AssemblyInput) -> TableFigure | None:
+    return _table(_shared_stores(assembly))
+
+
+def _shared_stores(assembly: AssemblyInput) -> dict[str, _Store]:
+    return assembly.remember("touched_stores", lambda: _touched_stores(assembly.review))
+
+
+def _table(stores: dict[str, _Store]) -> TableFigure | None:
     rows = []
-    for name, store in _collect(root, paths, changed).items():
+    for name, store in stores.items():
         by_parameter = PARAMETER_STORE_MARK in name
         written, read = _union(store.writers), _union(store.readers)
         rows.append(
@@ -186,3 +206,85 @@ def store_table(review: Review) -> TableFigure | None:
             )
         )
     return TableFigure(INTRO, HEADER, tuple(rows)) if rows else None
+
+
+def _compact_side(
+    sides: list[StoreSide], other: list[StoreSide], nodes: ChangeNodes, *, by_parameter: bool
+) -> str:
+    if not sides:
+        return _cell(sides, with_types=False, other=other, by_parameter=by_parameter)
+    places = {(nodes.path(side.path), side.function_qualified_name) for side in sides}
+    return ", ".join(f"{path} {function}" for path, function in sorted(places))
+
+
+def _side_locations(indexes: Indexes) -> dict[tuple[str, str], set[int]]:
+    locations: dict[tuple[str, str], set[int]] = defaultdict(set)
+    for index in indexes.indexes:
+        for member in index.callables.values():
+            if member.declaration is not None:
+                locations[(member.path, member.declaration.qualified_name)].add(member.line)
+    return locations
+
+
+def _side_evidence(
+    store: _Store,
+    nodes: ChangeNodes,
+    locations: dict[tuple[str, str], set[int]],
+    *,
+    by_parameter: bool,
+) -> list[str]:
+    lines = []
+    for label, sides, other in (
+        ("書", store.writers, store.readers),
+        ("読", store.readers, store.writers),
+    ):
+        if not sides:
+            absence = _cell(sides, with_types=False, other=other, by_parameter=by_parameter)
+            lines.append(f"  {label} {absence}")
+        for side in sorted(sides, key=lambda s: (s.path, s.function_qualified_name)):
+            name = side.function_qualified_name
+            found = locations.get((side.path, name), set())
+            line_numbers = ",".join(str(line) for line in sorted(found))
+            place = f"{nodes.path(side.path)}:{line_numbers}" if found else nodes.path(side.path)
+            keys = ", ".join(sorted(side.keys)) or "（鍵の抽出なし）"
+            lines.append(f"  {label} {place} {name}: {keys}")
+    return lines
+
+
+def compact_text(
+    assembly: AssemblyInput, nodes: ChangeNodes, *, indexes: Indexes | None = None
+) -> str:
+    """保存物ごとに鍵を示す。索引を受ける P5 には関数別の鍵と宣言位置も載せる。"""
+    stores = _shared_stores(assembly)
+    if not stores:
+        return ""
+    locations = _side_locations(indexes) if indexes is not None else None
+    heading = (
+        "書く・読む関数と保存物単位の鍵。関数別の鍵、値、入れ子、未解決の鍵、テストは省略。"
+        if locations is None
+        else "書く・読む関数、照合できた宣言位置、関数別と保存物単位の鍵。"
+        "値、入れ子、未解決の鍵、テストは省略。"
+    )
+    lines = [f"### {SECTION_STORES}", heading]
+    for name, store in stores.items():
+        by_parameter = PARAMETER_STORE_MARK in name
+        written, read = _union(store.writers), _union(store.readers)
+        formats = "、".join(sorted({side.format for side in (*store.writers, *store.readers)}))
+        lines.append(f"{name} ({formats})")
+        if locations is None:
+            writers = _compact_side(store.writers, store.readers, nodes, by_parameter=by_parameter)
+            readers = _compact_side(store.readers, store.writers, nodes, by_parameter=by_parameter)
+            lines.append(f"  書 {writers} / 読 {readers}")
+        else:
+            lines.extend(_side_evidence(store, nodes, locations, by_parameter=by_parameter))
+        for label, keys in (
+            ("両", written & read),
+            ("書", written - read),
+            ("読", read - written),
+        ):
+            if keys:
+                lines.append(f"  鍵 {label} {' '.join(sorted(keys))}")
+        created = {name for side in store.readers for name in side.created_type_names}
+        if created:
+            lines.append(f"  作る型 {' '.join(sorted(created))}")
+    return "\n".join(lines)

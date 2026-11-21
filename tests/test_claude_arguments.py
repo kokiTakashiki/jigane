@@ -68,7 +68,8 @@ def command_for(
         json_schema={"type": "object"},
         working_directory=tmp_path,
         tools=tools,
-        mcp_config=mcp[0] if mcp else None,
+        mcp_configs=(mcp[0],) if mcp else (),
+        mcp_server_names=("mobile-sec",) if mcp else (),
         allowed_mcp_tools=mcp[1] if mcp else (),
     )
     return claude.build_command(invocation)
@@ -140,10 +141,13 @@ def test_security_mcp_launch_allows_only_selected_servers(tmp_path: Path) -> Non
         security.DISCOVERY_TOOLS,
         (
             tmp_path / "mcp.json",
-            McpSelection((McpServer("mobile-sec", {}, None),)).allowed_tools(),
+            McpSelection((McpServer("mobile-sec", Path("fixture.json"), None),)).allowed_tools(),
         ),
     )
     assert command[command.index("--mcp-config") + 1] == str(tmp_path / "mcp.json")
+    settings = json.loads(command[command.index("--settings") + 1])
+    assert settings["allowedMcpServers"] == [{"serverName": "mobile-sec"}]
+    assert command[command.index("--setting-sources") + 1] == ""
     allowed = command[command.index("--allowedTools") + 1].split(",")
     assert set(allowed) == {"mcp__mobile-sec", *claude.MCP_RESOURCE_TOOLS}
     assert not tools_outside_allowed_list(tools_argument(command))
@@ -169,7 +173,7 @@ def test_only_security_passes_an_mcp_config() -> None:
     for path in SKILLS_DIRECTORY.glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Call) and _keyword_names(node) & {
-                "mcp_config",
+                "mcp_configs",
                 "allowed_mcp_tools",
             }:
                 passing.add(path.name)

@@ -189,7 +189,7 @@ def test_discovery_launch_failure_is_recorded_without_rerun(
             "scope": "launch",
             "round": "current",
             # 発見役の失敗は金額も時刻も持たない
-            "cost_usd": 0.0,
+            "cost_usd": None,
             "cost_source": "unreported",
             "ran_at": None,
         }

@@ -14,6 +14,8 @@ from jigane.text.document_files import (
     all_documents,
 )
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 @pytest.fixture
 def repo(repo_template: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

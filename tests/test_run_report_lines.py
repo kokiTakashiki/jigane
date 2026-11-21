@@ -15,6 +15,8 @@ from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import macro, pipeline
 from jigane.skills.assembly import AssemblyInput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
 
 def record(
     stage: str, index: int, kind: str, reason: str, attempt: int, disposition: str

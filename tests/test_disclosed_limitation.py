@@ -16,6 +16,9 @@ from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import macro, shared_rules
 from jigane.skills.assembly import AssemblyInput
 
+pytestmark = pytest.mark.usefixtures("selected_agent")
+
+
 DISCLOSED = DiscardKind.DISCLOSED_LIMITATION
 DISCLOSURE_SENTENCE = "既知の限界として書かれた論点は、指摘を消さず"
 CONCERN = "保存形式の旧版を読めない点に懸念がある（README の既知の限界）。"

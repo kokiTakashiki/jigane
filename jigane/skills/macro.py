@@ -337,6 +337,8 @@ def check_input_budget(
     方針は起動ごとに道具を渡さず、往復も 群の表の DIAGRAM_SHAPE.max_turns で絞るため、
     次の一往復の余裕は引かず、上限そのものと比べる（RunSettings.budget.reserve_margin が偽）。
     """
+    if not settings.has_spending_limit:
+        return None
     check = input_budget.check_input_budget(prompt, settings, index=index)
     if check.stop is not None:
         raise discovery_errors.InputBudgetError(GROUP, check.stop.message(), check.stop)
@@ -370,6 +372,8 @@ def expected_budget_warning(
     上限は目安であって約束ではないので、起動は止めない。入力だけで上限に達する場合の止めは
     check_input_budget が行う。
     """
+    if not settings.has_spending_limit:
+        return None
     expected = expected_output(review, shape, prompt, settings.budget.model)
     if expected is None:
         return None
@@ -430,7 +434,7 @@ def _outcome(
         )
     )
     role = role_of(plan.shape) if extra is None else role_of_kind(LaunchKind.PRINCIPLE)
-    stamp = plan.stamp(prompt) if extra is None else stamp_template(PRINCIPLE_PROMPT, prompt)
+    stamp = plan.stamp(prompt) if extra is None else plan.stamp_principle(extra)
     notice = join_notices(
         check_input_budget(prompt, settings, index),
         expected_budget_warning(review, plan.shape, prompt, settings),
@@ -440,6 +444,9 @@ def _outcome(
         json_schema=spec.schema(),
         working_directory=working_directory,
         tools=DIAGRAM_TOOLS,
+    )
+    invocation = replace(
+        invocation, policy_role=role, principle=None if extra is None else extra.viewpoint
     )
     try:
         result = settings.invoke(invocation)
@@ -523,6 +530,9 @@ class MacroPlan:
     shape: PolicyShape
     # 実行を止めないが利用者へ知らせる文
     warning: str | None = None
+    stamp_principle: Callable[[ExtraLaunch], PromptStamp] = lambda launch: stamp_template(
+        PRINCIPLE_PROMPT, launch.prompt
+    )
 
 
 ESTIMATE_NOTE = (
@@ -651,15 +661,21 @@ def _no_material_run(
     return MacroRun((), run_state, join_notices(warning, notice))
 
 
+def _run_plan(assembly: AssemblyInput) -> MacroPlan:
+    return replace(remembered_plan(assembly), build_prompt=lambda: remembered_prompt(assembly))
+
+
 def run_macro(
     assembly: AssemblyInput,
     settings: claude.RunSettings,
     extras: Sequence[ExtraLaunch] = (),
+    *,
+    plan: MacroPlan | None = None,
 ) -> MacroRun:
     """assembly の履歴は縁が読んだもので、資料の組み立てで読み直さない。"""
     review = assembly.review
     started = time.monotonic()
-    plan = remembered_plan(assembly)
+    plan = _run_plan(assembly) if plan is None else plan
     # 資料が空なら、読ませるものが無いので起動の前に止める。入力の見積もりも要らない
     if plan.missing:
         return _no_material_run(
@@ -667,7 +683,7 @@ def run_macro(
         )
     context = policy_record.RunContext(review, settings, started, plan.shape)
     # 並列の起動へ入る前に主の流れで組み立てておき、起動の中では組み立てない
-    main_prompt = remembered_prompt(assembly)
+    main_prompt = plan.build_prompt()
     drops = pipeline.DropCounts()
     has_bot_findings = bot_findings(review) is not None
     # 起動の通し番号は、ここで一度だけ決まる
@@ -771,10 +787,10 @@ def run_macro(
     )
 
 
-def estimate_macro(assembly: AssemblyInput) -> PolicyEstimate:
+def estimate_macro(assembly: AssemblyInput, prompt: str | None = None) -> PolicyEstimate:
     review = assembly.review
     plan = remembered_plan(assembly)
-    prompt = remembered_prompt(assembly)
+    prompt = remembered_prompt(assembly) if prompt is None else prompt
     prompt_bytes = len(prompt.encode("utf-8"))
     discovery_input_tokens = resolve_run_defaults(GROUP, plan.shape, None).budget.prompt_tokens(
         prompt_bytes

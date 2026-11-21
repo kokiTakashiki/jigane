@@ -15,6 +15,7 @@ from jigane.git import process
 from jigane.languages import registry
 from jigane.skills import policy_principles
 from jigane.skills.policy_principle_shapes import Shape
+from jigane.storage.agent_selection import Agent, save_agent
 from jigane.storage.store import default_data_home
 
 
@@ -40,6 +41,13 @@ def pytest_configure() -> None:
 def _jigane_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """実際のホームを読み書きしないよう、全テストのデータの置き場を tmp_path 配下へ向ける。"""
     monkeypatch.setenv("JIGANE_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("JIGANE_MCP_HOME", raising=False)
+
+
+@pytest.fixture
+def selected_agent(_jigane_home: None) -> None:
+    """CLI のレビュー実行を試すテストに Claude Code の選択を保存する。"""
+    save_agent(Agent.CLAUDE)
 
 
 @pytest.fixture(autouse=True)

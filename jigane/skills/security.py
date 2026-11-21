@@ -1,5 +1,8 @@
 """セキュリティのスキル。シャードごとの発見役が MCP の参照体系を引き、敵対的検証にかける。"""
 
+from dataclasses import replace
+from pathlib import Path
+
 from jigane.findings.records import StoredFinding, triaged
 from jigane.groups import viewpoints
 from jigane.groups.definitions import SECURITY
@@ -37,18 +40,19 @@ def run_security(
     settings: claude.RunSettings,
     mcp: McpSelection = NO_MCP,
 ) -> SecurityRun:
-    """mcp は mcp.json で確かめ済みの選択。空なら MCP を使わない。"""
-    with mcp.config_file() as mcp_config:
-        spec = sharded.ShardedGroup(
-            group=GROUP,
-            spec=DISCOVERY,
-            tools=DISCOVERY_TOOLS if mcp.servers else macro.DISCOVERY_TOOLS,
-            select=_select,
-            mcp_config=mcp_config,
-            mcp=mcp,
-            allowed_mcp_tools=mcp.allowed_tools(),
-        )
-        return sharded.run_sharded(spec, assembly, settings)
+    """mcp はエージェントに渡す設定の選択。空なら MCP を使わない。"""
+    mcp.require_outside(Path(assembly.review.repository_root))
+    if mcp.reference_servers:
+        settings = replace(settings, reference_mcp=mcp.reference_servers)
+    spec = sharded.ShardedGroup(
+        group=GROUP,
+        spec=DISCOVERY,
+        tools=DISCOVERY_TOOLS if mcp.servers else macro.DISCOVERY_TOOLS,
+        select=_select,
+        mcp=mcp,
+        allowed_mcp_tools=mcp.allowed_tools(),
+    )
+    return sharded.run_sharded(spec, assembly, settings)
 
 
 def estimate_security(
@@ -57,4 +61,5 @@ def estimate_security(
     budget: claude.RunBudget | None = None,
 ) -> SecurityEstimate:
     """mcp は実行に渡す選択。プロンプトの MCP の注記が選択で変わるため、見積もりも同じ値で組む。"""
+    mcp.require_outside(Path(assembly.review.repository_root))
     return sharded.estimate_sharded(SecurityEstimate, assembly, GROUP, ESTIMATE_NOTE, mcp, budget)
