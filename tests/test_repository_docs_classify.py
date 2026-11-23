@@ -40,13 +40,13 @@ def test_repository_without_origin_has_owner_local(tmp_path: Path) -> None:
     assert isinstance(classify_path(str(tmp_path / "work" / "a.md"), "a", "work"), Outside)
 
 
-def test_work_side_link_is_followed_before_classifying(tmp_path: Path) -> None:
+def test_work_side_link_keeps_the_name_to_read_from_the_base(tmp_path: Path) -> None:
     make_repository(tmp_path / "work", "https://github.com/a/b.git")
     (tmp_path / "work" / "AGENTS.md").write_text("x", encoding="utf-8")
     link = tmp_path / "work" / "CLAUDE.md"
     link.symlink_to("AGENTS.md")
 
-    assert classify_path(str(link), "a", "b") == Inside((tmp_path / "work").resolve(), "AGENTS.md")
+    assert classify_path(str(link), "a", "b") == Inside((tmp_path / "work").resolve(), "CLAUDE.md")
 
 
 def test_path_outside_the_reported_root_is_outside(

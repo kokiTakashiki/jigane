@@ -190,7 +190,8 @@ class RunBudget:
     # と単価で起動の費用を見積もる。方針の図の形は応答 1 回分、実装とセキュリティは最後の一往復分。
     # None の組は入力だけの見積もりのまま
     output_allowance_tokens: int | None = None
-    max_prompt_bytes: int | None = None
+    # 図の方針と差分の発見・検証に、縮約した資料を使う
+    compact_materials: bool = False
 
     @property
     def counts_output(self) -> bool:

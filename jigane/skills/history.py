@@ -12,7 +12,7 @@ from jigane.findings.records import (
     read_stored_state,
 )
 from jigane.groups.definitions import MACRO, GroupId
-from jigane.markdown.fence import one_line
+from jigane.markdown.fence import fence, one_line
 from jigane.reviews.selection import Held, Objected, Selection, load_selection
 from jigane.skills.assembly import AssemblyInput
 
@@ -185,7 +185,10 @@ def _round_text(
             # 別のレビューの空の回は行にしない。指摘のある行だけが判断の材料になる
             older.extend(_unresolved_lines(label, findings, other_selection, paths))
     lines.extend(_capped(older))
-    return ("\n".join(lines) if lines else NO_HISTORY_TEXT), _Found(found, bool(older))
+    text = "\n".join(lines) if lines else NO_HISTORY_TEXT
+    if found or older:
+        text = fence(text)
+    return text, _Found(found, bool(older))
 
 
 def history_text(

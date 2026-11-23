@@ -13,7 +13,7 @@ from jigane.git import process
 from jigane.git.command_line import GitSubcommand
 from jigane.git.repository import Repository, identify, identify_git
 from jigane.git.revision import CommitSha, parse_commit_sha
-from jigane.git.tree_files import walk_tree_files
+from jigane.git.tree_files import read_input_text, walk_tree_files
 from jigane.judgment_map.changes import CHANGES_CHAR_LIMIT, CHANGES_FILE, render_changes
 from jigane.judgment_map.classification import (
     BotTouch,
@@ -913,7 +913,7 @@ def read_intent(
     if intent is not None and intent_file is not None:
         raise ReviewError("--intent と --intent-file は同時に指定できません")
     if intent_file is not None:
-        return intent_declaration((working_directory / intent_file).read_text(encoding="utf-8"))
+        return intent_declaration(read_input_text(working_directory, intent_file))
     if intent is not None:
         return intent_declaration(intent)
     return None

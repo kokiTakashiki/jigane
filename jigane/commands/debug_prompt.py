@@ -89,7 +89,7 @@ def run_prompt(args: argparse.Namespace, context: Context) -> int:
         args.group, None, None, max_budget_usd=args.max_budget_usd_per_call
     ).budget
     if uses_codex:
-        budget = codex.review_budget(budget, uses_mcp=bool(mcp.reference_servers))
+        budget = codex.review_budget(budget)
     entries = launch_prompts(LaunchInput(assembly, args.group, mcp, budget))
     if mcp.reference_servers:
         boundary = codex.review_boundary(uses_mcp=True)

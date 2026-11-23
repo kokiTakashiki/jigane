@@ -16,7 +16,7 @@ from jigane.design.mermaid import (
 )
 from jigane.design.parse import DesignDocument, Section
 from jigane.groups.definitions import GROUP_BY_ID, GroupId
-from jigane.markdown.fence import one_line
+from jigane.markdown.fence import fence, one_line
 from jigane.text.prompt_labels import SECTION_TREE_LABEL
 
 NO_STRUCTURE_TEXT = "見出し、図、表のどれも読めなかった。"
@@ -29,7 +29,7 @@ def _section_lines(
     for section in sections:
         mark = GROUP_BY_ID[marks[section]].label
         lines.append(
-            f"{'  ' * depth}- {section.title}"
+            f"{'  ' * depth}- {one_line(section.title)}"
             f"（{section.start_line}-{section.end_line} 行、印 {mark}）"
         )
         lines += _section_lines(section.children, marks, depth + 1)
@@ -87,7 +87,7 @@ def structure_text(
                 f"- {block.start_line}-{block.end_line} 行（{where}）: "
                 f"{_diagram_elements(block.diagram)}"
             )
-        parts.append("Mermaid の図:\n\n" + "\n".join(entries))
+        parts.append("Mermaid の図:\n\n" + fence("\n".join(entries)))
     if document.tables:
         entries = []
         for table in document.tables:

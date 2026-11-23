@@ -169,7 +169,9 @@ def test_codex_uses_selected_resources_and_records_reads(
     assert main(["estimate", *args]) == 0
     estimate = json.loads(capsys.readouterr().out)
     assert estimate["cli_auth"] == "chatgpt_login"
-    assert not estimate["noninteractive_run_available"]
+    assert estimate["noninteractive_run_available"] is False
+    assert estimate["noninteractive_unavailable_reason"] == "mcp"
+    assert estimate["expected"]["total_usd"] is None
     assert estimate["mcp_servers"] == ["local-refs", "other-refs"]
     assert main(["debug", "prompt", *args]) == 0
     prompt = json.loads(capsys.readouterr().out)["prompts"][0]

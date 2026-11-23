@@ -104,9 +104,9 @@ def codex_login_expectation(
     prompts: tuple[LaunchPrompt, ...], *, has_verifier: bool
 ) -> GroupExpectation | None:
     """初期起動ごとの入力・出力と、追加検証を含む単群の USD 換算見込み。"""
-    prefix_size = len(codex.REVIEW_BOUNDARY.encode("utf-8"))
-    if not prompts or any(p.size + prefix_size > codex.MAX_PROMPT_BYTES for p in prompts):
+    if not prompts:
         return None
+    prefix_size = len(codex.REVIEW_BOUNDARY.encode("utf-8"))
     nanos = sum(
         prompt.codex_model().estimate_nanos(
             pricing.estimate_input_tokens(prompt.size + prefix_size), CODEX_LOGIN_OUTPUT_TOKENS

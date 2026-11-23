@@ -499,8 +499,6 @@ def plan_of(
     expectation = None
     if agent is Agent.CODEX:
         prompts = launch_prompts(launch_input)
-        for launch in prompts:
-            codex.check_prompt(launch.text, uses_mcp=bool(mcp.reference_servers))
         discovery_calls = len(prompts)
         codex_principles = tuple(
             launch.principle for launch in prompts if launch.principle is not None
@@ -642,7 +640,7 @@ def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
     if uses_codex:
         settings = replace(
             settings,
-            budget=codex.review_budget(settings.budget, uses_mcp=bool(mcp.reference_servers)),
+            budget=codex.review_budget(settings.budget),
             effort=codex.LOGIN_MODEL.effort,
             invoke=codex.run,
             has_spending_limit=False,

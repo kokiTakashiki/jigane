@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any, ClassVar
 
 from jigane.markdown.cells import markdown_table
-from jigane.markdown.fence import fence
+from jigane.markdown.fence import fence, one_line
 
 DELETED_SIGNATURE_TEXT = "（削除）"
 ADDED_SIGNATURE_TEXT = "（新規）"
@@ -240,16 +240,16 @@ class SequenceFigure:
     def text(self) -> str:
         """資料の文。判断の箇所の番号を持つ入口を先に、残りを元の順で、すべて載せる。"""
         if not self.flows:
-            return " ".join(note.material for note in self.notes)
+            return " ".join(one_line(note.material) for note in self.notes)
         tagged = [f for f in self.flows if f.regions]
         untagged = [f for f in self.flows if not f.regions]
         chosen = [*tagged, *untagged]
         blocks = [SEQUENCE_INTRO]
         for flow in chosen:
-            lines = [f"#### {flow.title}", ""]
+            lines = [f"#### {one_line(flow.title)}", ""]
             for panel in flow.panels:
                 lines += [
-                    f"{panel.title}",
+                    one_line(panel.title),
                     "",
                     fence(panel.mermaid.rstrip("\n"), "mermaid"),
                     "",

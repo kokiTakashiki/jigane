@@ -146,6 +146,7 @@ def test_login_debug_refuses_unavailable_estimate(
     report = json.loads(capsys.readouterr().out)
     assert report["expected"]["total_usd"] is None
     assert report["noninteractive_run_available"] is False
+    assert report["prompt_bytes"] == []
     assert main(["debug", "run", REVIEW, "macro", "--yes", "--max-usd", "1"]) == 2
     assert "費用の見込みがない" in capsys.readouterr().err
     assert not codex_trace.exists()

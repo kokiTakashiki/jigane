@@ -23,9 +23,8 @@ from jigane.judgment_map.changes import (
     split_file_sections,
 )
 from jigane.languages import registry
-from jigane.llm_runs import claude
 from jigane.llm_runs.prompt_stamp import PromptStamp
-from jigane.markdown.fence import fence
+from jigane.markdown.fence import fence, one_line
 from jigane.policy_materials import changed_files, compact, discriminators, signature_evidence
 from jigane.policy_materials.compact import ChangeNodes
 from jigane.policy_materials.type_deltas import TypeDeltas, render_member
@@ -124,7 +123,7 @@ def _changes_in_panel(panel: Panel) -> tuple[str, int]:
 
 def _entry_title(title: str, nodes: ChangeNodes) -> str:
     name, sep, place = title.rpartition("（")
-    return f"{name}{sep}{nodes.place(place)}" if sep else title
+    return one_line(f"{name}{sep}{nodes.place(place)}" if sep else title)
 
 
 def _sequence_text(sequence: SequenceFigure, nodes: ChangeNodes) -> str:
@@ -137,12 +136,12 @@ def _sequence_text(sequence: SequenceFigure, nodes: ChangeNodes) -> str:
         lines.append(_entry_title(flow.title, nodes))
         for panel in flow.panels:
             text, omitted = _changes_in_panel(panel)
-            lines.append(f"{panel.title} ({omitted})")
+            lines.append(f"{one_line(panel.title)} ({omitted})")
             if text:
                 lines.append(fence(text))
         if flow.note is not None:
             lines.append(flow.note.material)
-    lines.extend(note.material for note in sequence.notes)
+    lines.extend(one_line(note.material) for note in sequence.notes)
     return "\n".join(lines)
 
 
@@ -155,6 +154,7 @@ def _boundary_calls(sequence: SequenceFigure, nodes: ChangeNodes) -> str:
             "同じ参加者内の呼び出しと残りの矢印は原則 P4 の資料を参照。"
         ),
     ]
+    samples = []
     missing = 0
     for flow in sequence.without_tagged_before().flows:
         sample = next(
@@ -162,12 +162,14 @@ def _boundary_calls(sequence: SequenceFigure, nodes: ChangeNodes) -> str:
             "",
         )
         if sample:
-            lines.append(f"{_entry_title(flow.title, nodes)} {sample}")
+            samples.append(f"{_entry_title(flow.title, nodes)} {sample}")
         else:
             missing += 1
+    if samples:
+        lines.append(fence("\n".join(samples)))
     if missing:
         lines.append(f"条件を満たす矢印のない入口 {missing} 件は省略。")
-    lines.extend(note.material for note in sequence.notes)
+    lines.extend(one_line(note.material) for note in sequence.notes)
     return "\n".join(lines)
 
 
@@ -465,14 +467,3 @@ def build_prompt(assembly: AssemblyInput, principle: Viewpoint | None = None) ->
         declaration=macro.declaration_prompt_text(review),
         materials="\n\n".join([materials, *filter(None, tail)]),
     )
-
-
-def check_size(prompt: str, budget: claude.RunBudget, role: str) -> None:
-    """境界文を除いた、実行設定が持つ本文上限で止める。"""
-    limit = budget.max_prompt_bytes
-    size = len(prompt.encode("utf-8"))
-    if limit is not None and size > limit:
-        raise ValueError(
-            f"Codex macro {role}: 静的資料の根拠を保持すると本文 {size:,} B"
-            f"（上限 {limit:,} B）です。送信前に停止しました。レビュー範囲を見直してください。"
-        )

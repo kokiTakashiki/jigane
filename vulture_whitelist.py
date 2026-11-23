@@ -47,6 +47,7 @@ _._language_states  # tests/conftest.py の autouse。言語の状態を試験�
 _._terminal_with_consent  # tests/conftest.py の autouse。run の同意の確認に y と答える偽物を与える
 _.real_read_answer  # tests/conftest.py。引数の名前で受ける試験が、偽物を本物へ戻す
 _.empty_store  # test_builtin_grammar_missing.py。引数の名前で受ける
+_.tree_walk  # test_review_input_paths.py。usefixtures が名前で引く
 _.permissive_mkstemp  # tests_posix/test_write_text_atomic_mode_posix.py。usefixtures が名前で引く
 _._fresh_query_cache  # test_language_data_places.py の autouse。問い合わせの記憶を試験ごとに捨てる
 _.empty_path  # test_missing_tool_guidance.py。引数の名前で受ける

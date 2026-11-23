@@ -653,7 +653,7 @@ def test_excerpt_drops_in_tree_symlink_and_oversized_file(tmp_path: Path) -> Non
     ("evidence_line", "challenge_length", "roles", "reason"),
     [
         (99, 1, [], adversarial.UnverifiedReason.MATERIALS_MISSING),
-        (2, 33_000, ["rebuttal"], adversarial.UnverifiedReason.MATERIALS_TOO_LARGE),
+        (2, 33_000, ["rebuttal", "judge"], None),
         (2, 1, ["rebuttal", "judge"], None),
     ],
 )
@@ -664,16 +664,18 @@ def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
     roles: list[str],
     reason: adversarial.UnverifiedReason | None,
 ) -> None:
+    challenge_text = "ぁ" * challenge_length
+
     def invoke(invocation: claude.Invocation) -> claude.InvocationResult:
         assert not invocation.tools
         assert "kept context" in invocation.prompt
         assert "unrelated context" not in invocation.prompt
-        assert len((codex.REVIEW_BOUNDARY + invocation.prompt).encode("utf-8")) <= 32_768
         if "challenge" in invocation.json_schema["properties"]["items"]["items"]["properties"]:
             observed.append("rebuttal")
-            item = {"index": 0, "challenge": "ぁ" * challenge_length, "checked": [location]}
+            item = {"index": 0, "challenge": challenge_text, "checked": [location]}
         else:
             observed.append("judge")
+            assert challenge_text in invocation.prompt
             item = {
                 "index": 0,
                 "verdict": "kept",

@@ -10,6 +10,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from jigane.git.tree_files import read_input_text
 from jigane.llm_runs.claude import MCP_RESOURCE_TOOLS
 from jigane.llm_runs.codex_mcp import StdioServer
 from jigane.storage.store import data_home, require_private_data_home
@@ -102,7 +103,7 @@ def _codex_executable(registration: Path, name: str) -> Path:
 def read_guide(path: Path, names: tuple[str, ...]) -> dict[str, str]:
     """--mcp-guide のファイルを読み、形と、名前の集合が --mcps と同じことを確かめる。"""
     try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        document = tomllib.loads(read_input_text(Path.cwd(), path))
     # 深い入れ子は tomllib が RecursionError で拒む。TOML として読めないものと同じに扱う
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, RecursionError) as error:
         raise SecurityConfigError(

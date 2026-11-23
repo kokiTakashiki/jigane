@@ -1,10 +1,11 @@
-"""パスの先が、レビューのリポジトリの中か外かを分ける。"""
+"""指定されたパスが、レビューのリポジトリの中か外かを分ける。"""
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from jigane.git.repository import identify_git
+from jigane.git.tree_files import split_input_path
 
 
 @dataclass(frozen=True)
@@ -21,22 +22,21 @@ class Outside:
 
 
 def classify_path(path: str, owner: str, repo: str) -> Inside | Outside:
-    """絶対パスを realpath で解き、親ディレクトリの git の owner と repo で中か外かを決める。
+    """指定された絶対パスを含むチェックアウトの owner と repo で中か外かを決める。
 
-    path は絶対パスであること。比べは大文字小文字を区別しない。
+    木内なら指定された相対パスで起点を読む。比べは大文字小文字を区別しない。
     """
-    resolved = Path(os.path.realpath(path))
-    repository = identify_git(resolved.parent)
-    if repository is None:
-        return Outside(resolved)
-    if (repository.owner.casefold(), repository.repo.casefold()) != (
-        owner.casefold(),
-        repo.casefold(),
-    ):
-        return Outside(resolved)
-    try:
-        relative = resolved.relative_to(repository.root).as_posix()
-    except ValueError:
-        # identify_git は親を解いた根を返すので通常は来ない。根の外なら外として読む
-        return Outside(resolved)
-    return Inside(repository.root, relative)
+    root, relative = split_input_path(Path.cwd(), Path(path))
+    original = root.resolve() / relative
+    for directory in original.parents:
+        repository = identify_git(directory)
+        # リンクを辿った先のリポジトリが返っても、指定の祖先に根が無ければ使わない
+        if repository is None or not directory.is_relative_to(repository.root):
+            continue
+        if (repository.owner.casefold(), repository.repo.casefold()) == (
+            owner.casefold(),
+            repo.casefold(),
+        ):
+            return Inside(repository.root, original.relative_to(repository.root).as_posix())
+        break
+    return Outside(Path(os.path.realpath(path)))

@@ -7,7 +7,7 @@ import pytest
 from fakes import MacroFake, MicroFake
 
 from jigane.commands import main
-from jigane.commands.exit_codes import EXIT_OK, EXIT_PROCESSING_FAILURE, EXIT_USAGE
+from jigane.commands.exit_codes import EXIT_OK, EXIT_USAGE
 from jigane.commands.subcommands import run as run_subcommand
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs import codex
@@ -136,40 +136,32 @@ def test_codex_p1_sends_the_guide_and_the_definition_with_direct_comparison_loca
     assert "src/defs.py:3 所属" in claude_p1
 
 
-@pytest.mark.parametrize("over", [0, 1])
-def test_codex_run_checks_p1_bytes_including_the_boundary_before_invoking(
+def test_codex_run_uses_the_full_p1_prompt_from_debug_prompt(
     value_set_review: str,
     codex_macro: MacroFake,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
-    over: int,
 ) -> None:
-    prompts = run_json(capsys, value_set_review, "macro")["prompts"]
-    [p1] = [entry for entry in prompts if "## P1の資料の読み方" in entry["text"]]
-    padding = codex.MATERIALS_MAX_BYTES - p1["bytes"] + over
     template_text = adversarial.template_text
     monkeypatch.setattr(
         adversarial,
         "template_text",
         lambda name: (
-            template_text(name) + "a" * padding
+            template_text(name) + "a" * 33_000
             if name == macro_compact.P1_GUIDE
             else template_text(name)
         ),
     )
-    code = main(
-        ["run", value_set_review, "macro"], is_terminal=lambda: True, read_answer=lambda _: "y"
+    prompts = run_json(capsys, value_set_review, "macro")["prompts"]
+    [p1] = [entry for entry in prompts if "## P1の資料の読み方" in entry["text"]]
+    assert p1["bytes"] > 32_768
+    assert (
+        main(
+            ["run", value_set_review, "macro"], is_terminal=lambda: True, read_answer=lambda _: "y"
+        )
+        == EXIT_OK
     )
-    if over:
-        assert code == EXIT_PROCESSING_FAILURE
-        assert "32 KiB" in capsys.readouterr().err
-        assert codex_macro.calls == []
-    else:
-        assert code == EXIT_OK
-        [prompt] = [
-            call.prompt for call in codex_macro.calls if "## P1の資料の読み方" in call.prompt
-        ]
-        assert len((codex.REVIEW_BOUNDARY + prompt).encode("utf-8")) == codex.MAX_PROMPT_BYTES
+    assert [call.prompt for call in codex_macro.calls if call.principle == "P1"] == [p1["text"]]
 
 
 @pytest.mark.usefixtures("project", "all_principle_shapes")

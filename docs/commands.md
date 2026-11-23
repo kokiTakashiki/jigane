@@ -259,9 +259,13 @@ jigane estimate <レビュー> macro|micro|security [--effort low|medium|high|xh
 # --mcp-guide: セキュリティの群だけが使う、MCP の使い分けの TOML
 ```
 
-レビュー資料の大きさと費用を見積もります。引数は `run` と同じ意味で、`--model` だけは受けません。
+レビュー資料の大きさと費用を見積もります。引数は `run` と同じ意味で、`--model` は受けません。
 
-`--json` の `expected` には、群の見込みを `total_usd`（発見役の見積もり × 検証役の倍率）、`version`、`discovery_estimate_usd`、`verifier_multiplier`、`verifier_multiplier_source` で出します。方針は検証役を持たないので倍率は 1 で、出所は `no_verifier` です。実装とセキュリティの倍率は、レビューの置き場の `runs.json` にある同じリポジトリの回の記録から引きます（`run_records`）。`jigane run` は回の記録へ、起動の前の発見役の見積もり（`discovery_estimate_usd`）と見積もりの数え方の版（`estimate_version`）を足します。倍率は、今の版の欄を持つ回について、群の実額を発見役の見積もりで割って平均した値です。欄の無い古い回と版の違う回は数えません。数える回が無ければ既定の 2.5 です（`default`）。`jigane usage` の出力には列を足しません。
+`--json` の `expected` には、群の見込みを `total_usd`（発見役の見積もり × 検証役の倍率）、`version`、`discovery_estimate_usd`、`verifier_multiplier`、`verifier_multiplier_source` で出します。方針は検証役を持たないので倍率は 1 で、出所は `no_verifier` です。Claude Code の実装とセキュリティの倍率は、レビューの置き場の `runs.json` にある同じリポジトリの回の記録から引きます（`run_records`）。`jigane run` は回の記録へ、起動の前の発見役の見積もり（`discovery_estimate_usd`）と見積もりの数え方の版（`estimate_version`）を足します。倍率は、今の版の欄を持つ回について、群の実額を発見役の見積もりで割って平均した値です。欄の無い古い回と版の違う回は数えません。数える回が無ければ既定の 2.5 です（`default`）。`jigane usage` の出力には列を足しません。
+
+Codex の `estimate --json` は、初期起動数を `planned_invocations`、各プロンプトの UTF-8 のバイト数を `prompt_bytes` に出します。バイト数には jigane が付けるレビューの指示を含みます。`launches` には初期起動ごとの担当モデルと本文の入力概算が入ります。群の USD 換算見込み（`expected.total_usd`）では、初期起動ごとに入力と、出力・推論を合わせた 8,192 トークンを担当モデルの単価で見積もります。その合計に、方針は 1、実装とセキュリティは追加起動を見込んで 2.5 を掛けます。MCP を指定した場合や見積もれない場合は `expected.total_usd` が `null` になります。Codex の `max_budget_usd_per_call` は常に `null` です。
+
+Codex の `noninteractive_run_available` は、MCP の指定がなく、初期起動の資料から群の見込みを算出できた場合に `true` になります。`noninteractive_requires` と `noninteractive_model` は、非対話実行に使う認証方法と既定のモデルを示し、MCP を指定すると両方が `null` になります。[非対話実行](#jigane-debug) の起動前には、ログインを確認し、群の見込みを `--max-usd` と照合します。Codex は `estimate` の `--effort` と `--max-budget-usd-per-call` を受け付けません。
 
 解析しない言語のソースのファイルが範囲にあるときは、「[解析しない言語の案内](#解析しない言語の案内)」と、読めない記述があるときは「[読めない記述の案内](#読めない記述の案内)」を出します。
 
@@ -305,9 +309,7 @@ jigane run <レビュー> macro|micro|security [--model <モデル>] [--effort l
 
 保存したエージェントで実行します。未選択の場合はレビューを読む前に止まり、`jigane select-agent` を案内します。環境変数 `JIGANE_AGENT` と PATH による自動選択は Make／Just のセットアップで使います。見積もり、作成、一覧、help は選択前から使えます。
 
-macOS と Linux では Codex を選んで `macro`、`micro`、`security` を 1 群ずつ実行できます。端末の `jigane run` では `codex login` で保存した ChatGPT ログインを使います。OpenAI に送る資料と認証方法を端末で確認します。実行後は報告された使用量から USD 換算額を記録します。
-
-Codex 選択時の `estimate --json` は、初期起動数、プロンプトのサイズ、非対話実行に使う認証の条件（`noninteractive_requires`）と担当モデル（`noninteractive_model`）を返します。`expected.total_usd` は群全体の USD 換算見込みです。初期起動ごとにプロンプト本文の入力と、出力・推論を合わせた 8,192 トークンを担当モデルの単価で見積もります。実装とセキュリティは検証などの追加起動を見込んで 2.5 倍、方針は 1 倍です。MCP 指定時、または見積もれない場合は `expected.total_usd` が `null` です。`max_budget_usd_per_call` は常に `null` です。`noninteractive_run_available` は資料と見積もりに関する判定で、ログイン状態は実行前に確認します。
+macOS と Linux では Codex を選んで `macro`、`micro`、`security` を 1 群ずつ実行できます。端末の `jigane run` では `codex login` で保存した ChatGPT ログインを使います。起動前に OpenAI への送信の同意を端末で求めます。Codex は `--model`、`--effort`、`--max-budget-usd-per-call` を受け付けません。実行後は報告された使用量から USD 換算額を記録します。[送る資料と送信先](data-destinations.md#codex-のレビュー)
 
 Claude Code の実行の前には費用の同意を尋ねます。問いには「発見役:」の行に続けて、「群の見込み: …」の行で発見役の見積もりと検証役の倍率、その積を示します。
 
@@ -315,7 +317,7 @@ Claude Code の実行の前には費用の同意を尋ねます。問いには�
 
 既定は群ごとに持ちます。実装とセキュリティの群は 0.5 USD です。方針は、PR と範囲のレビューでは図の起動が 0.36 USD、原則の起動が 1 回あたり 0.04 USD で、全起動の和の目安は 0.52 USD です。原則の起動は、その原則を問える形が図にあるときだけ走るので、実際の起動は最大 5 回です。設計書のレビューは 1 回の起動で 0.5 USD です。上限と effort の既定は設定ファイルから読まず、変えるときは引数で渡します。
 
-方針の図の形と設計書の形は、プロンプトの大きさと出力の見込みから見積もった額が 1 本の上限以上の起動を見送ります。式と、見送りが始まる大きさは [cost.md](cost.md) にあります。`jigane estimate` の `input_cost_usd` は、図の形と設計書の形では出力の見込みを含む額です。
+Claude Code の方針の図の形と設計書の形は、プロンプトの大きさと出力の見込みから見積もった額が 1 本の上限以上の起動を見送ります。式と、見送りが始まる大きさは [cost.md](cost.md) にあります。`jigane estimate` の `input_cost_usd` は、図の形と設計書の形では出力の見込みを含む額です。
 
 モデルも既定を持ちます。実装とセキュリティの群と、方針の図の起動と設計書のレビューは claude-sonnet-5-5 で、方針の原則の起動は claude-haiku-5-5 です。effort は方針が high で、他は渡しません。`--model` と `--effort`（low、medium、high、xhigh、max）で上書きできます。`--model` は方針の図と原則のすべての起動に効きます。起動ごとのモデルは `runs.json` に残り、`jigane usage` は起動のモデルごとに行を分けます。`jigane estimate` も `--effort` を受け、見積もりに解決した effort を出します。実行全体の金額と起動の回数は `run` の出力に示します。
 

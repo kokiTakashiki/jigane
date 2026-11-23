@@ -12,7 +12,6 @@ from jigane.skills.estimate_result import DiagramPolicyEstimate, PolicyEstimate
 COMPACT_ESTIMATE_NOTE = (
     "図の起動 1 回と、問える形がある原則ごとの起動を見積もります。"
     "宣言、変更節点と根拠位置、役に関係する図表、前の回の指摘を使い、道具は渡しません。"
-    "各起動の本文は境界文を足して 32 KiB 以内です。超える起動があれば送信前に止めます。"
     "出力と推論の分は含みません。"
 )
 
@@ -52,17 +51,13 @@ def main_prompt(assembly: AssemblyInput, *, compact: bool) -> str:
 def run_policy(assembly: AssemblyInput, settings: claude.RunSettings) -> macro.MacroRun:
     """方針の群を走らせる唯一の入口。"""
     budget = settings.budget
-    if budget.max_prompt_bytes is None:
-        return macro.run_macro(assembly, settings, principle_launches(assembly))
-    if macro.remembered_plan(assembly).missing:
-        return macro.run_macro(assembly, settings)
-    prompt = main_prompt(assembly, compact=True)
-    extras = principle_launches(assembly, compact=True)
-    macro_compact.check_size(prompt, budget, "主役")
-    for extra in extras:
-        macro_compact.check_size(extra.prompt, budget, extra.viewpoint)
     plan = macro.remembered_plan(assembly)
-    if plan.shape is PolicyShape.DIAGRAM:
+    if plan.missing:
+        return macro.run_macro(assembly, settings, plan=plan)
+    compact = budget.compact_materials
+    prompt = main_prompt(assembly, compact=compact)
+    extras = principle_launches(assembly, compact=compact)
+    if compact and plan.shape is PolicyShape.DIAGRAM:
         plan = replace(
             plan, stamp=macro_compact.stamp, stamp_principle=macro_compact.stamp_principle
         )
@@ -71,8 +66,11 @@ def run_policy(assembly: AssemblyInput, settings: claude.RunSettings) -> macro.M
     )
 
 
-def estimate_policy(assembly: AssemblyInput, *, compact: bool = False) -> PolicyEstimate:
+def estimate_policy(
+    assembly: AssemblyInput, *, budget: claude.RunBudget | None = None
+) -> PolicyEstimate:
     """方針の群の見積もり。図の形は図の起動と原則ごとの起動の和、設計書の形は一本。"""
+    compact = budget is not None and budget.compact_materials
     prompt = (
         main_prompt(assembly, compact=True)
         if compact and not macro.remembered_plan(assembly).missing
@@ -84,9 +82,9 @@ def estimate_policy(assembly: AssemblyInput, *, compact: bool = False) -> Policy
         return estimate
     launches = principle_launches(assembly, compact=compact)
     prompts = [launch.prompt.encode("utf-8") for launch in launches]
-    budget = resolve_run_defaults(macro.GROUP, PolicyShape.DIAGRAM, None).budget
+    basis = resolve_run_defaults(macro.GROUP, PolicyShape.DIAGRAM, None).budget
     tokens = [
-        budget.for_principle(launch.viewpoint).prompt_tokens(len(prompt))
+        basis.for_principle(launch.viewpoint).prompt_tokens(len(prompt))
         for launch, prompt in zip(launches, prompts, strict=True)
     ]
     return replace(

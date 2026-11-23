@@ -231,6 +231,82 @@ def read_tree(root: Path, relative: str, max_bytes: int | None) -> ReadOutcome:
     return Content(data)
 
 
+def split_input_path(root: Path, path: Path) -> tuple[Path, str]:
+    """明示された入力を、信頼する根と、解決していない相対パスに分ける。"""
+    if not path.is_absolute():
+        return root, path.as_posix()
+    root = root.absolute()
+    if path.is_relative_to(root):
+        return root, path.relative_to(root).as_posix()
+    anchor = Path(path.anchor)
+    if anchor == Path("/"):
+        # POSIX のシステムが管理する一時領域の入口は根として辿る
+        for system_directory in (anchor / "var", anchor / "tmp"):
+            if path.is_relative_to(system_directory):
+                return system_directory, path.relative_to(system_directory).as_posix()
+    return anchor, path.relative_to(anchor).as_posix()
+
+
+def check_input_parents(root: Path, path: Path) -> Path | NotOpened:
+    """明示パスの `..` を、そこまでのディレクトリを検査してから畳む。"""
+    directory, relative = split_input_path(root, path)
+    parts = Path(relative).parts
+    if ".." not in parts:
+        return path
+    if any(Path(part).anchor for part in parts):
+        return NotOpened(TreeFileState.UNREADABLE, "パスの途中にドライブ指定があります")
+    last_parent = max(index for index, part in enumerate(parts) if part == "..")
+    directory = directory.absolute()
+    current = directory
+    try:
+        for part in parts[: last_parent + 1]:
+            if part == "..":
+                # 呼び元が信頼した根自身のリンクを辿るのは、木の読み取りと同じ。
+                if current == directory:
+                    current = Path(os.path.realpath(directory, strict=True))
+                current = current.parent
+                continue
+            current /= part
+            status = os.lstat(current)
+            if _is_link_status(status):
+                return NotOpened(TreeFileState.REFUSED)
+            if not stat.S_ISDIR(status.st_mode):
+                return NotOpened(TreeFileState.MISSING, os.strerror(errno.ENOTDIR))
+    except OSError as error:
+        return _failed(error)
+    # ここでは名前だけを得る。残るパスの内容は、根から read_tree で開く。
+    return current.joinpath(*parts[last_parent + 1 :])
+
+
+def read_input_text(root: Path, path: Path) -> str:
+    """明示された通常ファイルを、UTF-8 と universal newlines で読む。"""
+    filename = str(root / path)
+    if path.anchor and not path.is_absolute():
+        raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), filename)
+    checked = check_input_parents(root, path)
+    outcome: ReadOutcome
+    if isinstance(checked, NotOpened):
+        outcome = checked
+    else:
+        directory, relative = split_input_path(root, checked)
+        if relative == ".":
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), filename)
+        outcome = read_tree(directory, relative, None)
+    if isinstance(outcome, Content):
+        return outcome.data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    if isinstance(outcome, TooLarge):
+        raise OSError(errno.EFBIG, os.strerror(errno.EFBIG), filename)
+    code = {
+        TreeFileState.MISSING: errno.ENOENT,
+        TreeFileState.NOT_REGULAR: errno.EISDIR,
+        TreeFileState.REFUSED: errno.ELOOP,
+    }.get(outcome.state, errno.EIO)
+    detail = outcome.detail
+    if outcome.state is TreeFileState.REFUSED:
+        detail = "シンボリックリンクを含むパスは読めません"
+    raise OSError(code, detail or os.strerror(code), filename)
+
+
 def tree_file_state(root: Path, relative: str) -> TreeFileState:
     """木の中のパスの扱いを返す。読める通常のファイル、無い、読まない、読めない。"""
     opened = _open_tree_file(root, relative)

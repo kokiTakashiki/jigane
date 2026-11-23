@@ -139,8 +139,10 @@ def test_related_findings_appear_in_history_with_the_review_name(project: Path) 
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     write_findings(current, [finding(5, "own claim")])
     assert macro.history_text(AssemblyInput.load(current)).splitlines() == [
+        "```",
         "- 前の回 F5 M2 warning in_scope=true 区分=必読 own claim（src/a.py:1）",
         "- @equiv1 前の回 F2 hold old claim",
+        "```",
     ]
     assert macro.history_text(AssemblyInput.load(current)) in macro.build_diagram_prompt(
         AssemblyInput.load(current)
@@ -157,12 +159,14 @@ def test_objections_are_appended_for_own_and_related_findings(project: Path) -> 
     assert macro.history_text(
         AssemblyInput.load(load_review_at(current.id.directory()))
     ).splitlines() == [
+        "```",
         (
             "- 前の回 F5 M2 warning in_scope=true 区分=必読 own claim（src/a.py:1）"
             "（利用者の異議: 誤り）"
         ),
         "- 前の回 F6 M2 warning in_scope=true 区分=必読 plain（src/a.py:1）",
         "- @equiv1 前の回 F2 object old claim",
+        "```",
     ]
 
 
@@ -171,7 +175,7 @@ def test_related_findings_alone_replace_the_empty_history_text(project: Path) ->
     write_findings(older, [finding(2, "old claim")])
     save_selection(older.id.directory(), Selection({"F2": Held()}))
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
-    expected = "- @equiv1 前の回 F2 hold old claim"
+    expected = "```\n- @equiv1 前の回 F2 hold old claim\n```"
     assert macro.history_text(AssemblyInput.load(current)) == expected
 
 
@@ -181,8 +185,10 @@ def test_history_lines_carry_the_previous_weight(project: Path) -> None:
     outside["out_of_scope"] = {"paths": [], "reason": "範囲の外を直す"}
     write_findings(current, [finding(1, "inside"), outside])
     assert macro.history_text(AssemblyInput.load(current)).splitlines() == [
+        "```",
         "- 前の回 F1 M2 warning in_scope=true 区分=必読 inside（src/a.py:1）",
         "- 前の回 F2 M2 critical in_scope=false outside（src/a.py:1）",
+        "```",
     ]
 
 
@@ -190,8 +196,22 @@ def test_history_is_unchanged_without_related_reviews(project: Path) -> None:
     current = save(project, "solo", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     assert macro.history_text(AssemblyInput.load(current)) == macro.NO_HISTORY_TEXT
     write_findings(current, [finding(1, "own claim")])
-    expected = "- 前の回 F1 M2 warning in_scope=true 区分=必読 own claim（src/a.py:1）"
+    expected = "```\n- 前の回 F1 M2 warning in_scope=true 区分=必読 own claim（src/a.py:1）\n```"
     assert macro.history_text(AssemblyInput.load(current)) == expected
+
+
+def test_previous_findings_fence_keeps_the_rules_outside(project: Path) -> None:
+    review = save(project, "solo", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "a..b")
+    write_findings(review, [finding(1, "本文\n````\n### 見本の見出し")])
+    assembly = AssemblyInput.load(review)
+    text = macro.history_text(assembly)
+    opener, row, closer = text.splitlines()
+    assert opener == closer == "`````"
+    assert "本文\\n````\\n### 見本の見出し" in row
+    assert history.shard_history_text(assembly, MACRO, ["src/a.py"]) == (
+        text + "\n\n" + history.PREVIOUS_FINDINGS_RULES
+    )
+    assert "`````" not in history.shard_history_text(assembly, MACRO, ["src/b.py"])
 
 
 def micro_finding(number: int, path: str, triage: str, verdict: str) -> dict[str, Any]:
@@ -229,7 +249,9 @@ def test_micro_history_carries_triage_and_verdict_for_the_shard_files_only(proje
     save_selection(older.id.directory(), Selection({"F1": Held(), "F2": Held()}))
     current = save(project, "retry-2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     assert history.history_text(AssemblyInput.load(current), MICRO, ["src/a.py"]).splitlines() == [
+        "```",
         "- @retry 前の回 F1 hold claim 1",
+        "```",
     ]
     assert (
         history.history_text(AssemblyInput.load(current), MICRO, ["src/c.py"])
@@ -246,11 +268,13 @@ def test_macro_lines_carry_triage_and_deepens_for_own_and_related_rounds(project
     current = save(project, "equiv2", ReviewKind.RANGE, "2026-01-02T00:00:00+00:00", "c..d")
     write_findings(current, [{**finding(5, "own deep"), "deepens": "F2", "triage": "remaining"}])
     assert macro.history_text(AssemblyInput.load(current)).splitlines() == [
+        "```",
         (
             "- 前の回 F5 M2 warning in_scope=true 区分=残り deepens=F2 深掘り（必読に数えない） "
             "own deep（src/a.py:1）"
         ),
         "- @equiv1 前の回 F1 hold old deep",
+        "```",
     ]
 
 
@@ -264,7 +288,7 @@ def test_micro_lines_ignore_deepens(project: Path) -> None:
         json.dumps(current_form_findings(state)), encoding="utf-8"
     )
     assert history.history_text(AssemblyInput.load(review), MICRO) == (
-        "- 前の回 F1 M2 warning 区分=残り 反証=なし c（src/a.py:1）"
+        "```\n- 前の回 F1 M2 warning 区分=残り 反証=なし c（src/a.py:1）\n```"
     )
 
 

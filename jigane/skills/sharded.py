@@ -30,7 +30,7 @@ from jigane.findings.records import (
 )
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, GroupId
 from jigane.judgment_map.changes import OMITTED_GENERATED
-from jigane.llm_runs import claude
+from jigane.llm_runs import claude, codex
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import (
@@ -451,8 +451,6 @@ class PlannedShards:
 
 
 def _any_prompt_stops(prompts: Sequence[str], budget: claude.RunBudget) -> bool:
-    if budget.max_prompt_bytes is not None:
-        return any(len(prompt.encode("utf-8")) > budget.max_prompt_bytes for prompt in prompts)
     return any(
         budget.input_stops_run(budget.prompt_tokens(len(prompt.encode("utf-8"))))
         for prompt in prompts
@@ -482,29 +480,29 @@ def plan_shards(
     def stops(candidate: PlannedShards) -> bool:
         return budget is not None and _any_prompt_stops(candidate.prompts, budget)
 
-    def grow() -> PlannedShards:
-        return _grow_shard_plan(planned, stops)
-
-    if budget is not None and budget.max_prompt_bytes is not None:
+    if budget is not None and budget.compact_materials:
         # 同意の計画と実行に同じシャードを渡す
-        limit = budget.max_prompt_bytes
         return assembly.remember(
-            ("codex_shards", group, limit, mcp_note(mcp), mcp_guide_note(mcp)),
-            lambda: _plan_codex_shards(assembly, group, mcp, limit),
+            (
+                "codex_shards",
+                group,
+                mcp_note(mcp),
+                mcp_guide_note(mcp),
+                bool(mcp.reference_servers),
+            ),
+            lambda: _plan_codex_shards(assembly, group, mcp),
         )
-    return grow()
+    return _grow_shard_plan(planned, stops)
 
 
 def _plan_codex_shards(
-    assembly: AssemblyInput, group: GroupId, mcp: McpSelection, limit: int
+    assembly: AssemblyInput, group: GroupId, mcp: McpSelection
 ) -> PlannedShards:
     review = assembly.review
     plan = shards.build_plan(review, group, track_omissions=True)
     if plan.kind is not shards.ShardPlanKind.DIFF:
         concerns = [shard_concerns(group, review, shard) for shard in plan.shards]
         prompts = build_shard_prompts(group, assembly, plan.shards, concerns, mcp)
-        if any(len(prompt.encode("utf-8")) > limit for prompt in prompts):
-            raise discovery_errors.DiscoveryError(group, "Codex の発見資料が 32 KiB を超えます")
         return PlannedShards(plan, tuple(concerns), tuple(prompts))
 
     unavailable = [note for note in plan.omissions if not note.endswith(OMITTED_GENERATED)]
@@ -519,20 +517,20 @@ def _plan_codex_shards(
         }
     except ValueError as error:
         raise discovery_errors.DiscoveryError(group, str(error)) from error
-    packed = _pack_codex_diff(assembly, group, mcp, limit, plan, index)
+    packed = _pack_codex_diff(assembly, group, mcp, plan, index)
     return replace(packed, hunks=index)
+
+
+_CODEX_DIFF_TARGET_BYTES = 32_768
 
 
 def _pack_codex_diff(
     assembly: AssemblyInput,
     group: GroupId,
     mcp: McpSelection,
-    limit: int,
     plan: shards.ShardPlan,
     index: dict[str, tuple[shard_material.Hunk, ...]],
 ) -> PlannedShards:
-    # 取り得る最大の番号の桁幅で詰め、確定した番号でもう一度描画する。
-    upper = sum(max(1, len(parts)) for parts in index.values())
     note = (
         "\n同じパスが複数のシャードに現れる場合、ここに載るハンクだけを担当します。"
         "根拠には資料で読める新側の行番号を使い、必要な契約も位置で示します。"
@@ -555,14 +553,18 @@ def _pack_codex_diff(
         )
         return concerns, prompt
 
+    # 取り得る最大の番号の桁幅で詰め、確定した番号でもう一度描画する。
+    upper = sum(max(1, len(parts)) for parts in index.values())
+    boundary = codex.review_boundary(uses_mcp=bool(mcp.reference_servers))
+    prefix_size = len(boundary.encode("utf-8"))
+
     def fits(units: tuple[shards.Unit, ...]) -> bool:
         _, prompt = render(make(units), upper, upper)
-        return len(prompt.encode("utf-8")) <= limit
+        return len(prompt.encode("utf-8")) + prefix_size <= _CODEX_DIFF_TARGET_BYTES
 
-    packed = [make(bucket) for bucket in _pack_diff_units(group, plan.units, index, fits)]
+    buckets = _pack_diff_units(plan.units, index, fits)
+    packed = [make(bucket) for bucket in buckets]
     rendered = [render(part, i, len(packed)) for i, part in enumerate(packed, start=1)]
-    if any(len(prompt.encode("utf-8")) > limit for _, prompt in rendered):
-        raise discovery_errors.DiscoveryError(group, "Codex の発見資料が 32 KiB を超えます")
     return PlannedShards(
         replace(plan, shards=tuple(packed)),
         tuple(concerns for concerns, _ in rendered),
@@ -571,7 +573,6 @@ def _pack_codex_diff(
 
 
 def _pack_diff_units(
-    group: GroupId,
     units: Sequence[shards.Unit],
     index: dict[str, tuple[shard_material.Hunk, ...]],
     fits: Callable[[tuple[shards.Unit, ...]], bool],
@@ -583,16 +584,11 @@ def _pack_diff_units(
             (unit,) if fits((unit,)) else tuple(hunk.unit for hunk in index[unit.path]) or (unit,)
         )
         for part in parts:
-            if fits((*bucket, part)):
-                bucket = (*bucket, part)
-                continue
-            if not fits((part,)):
-                location = " ".join(part.diff_lines[1:3])
-                raise discovery_errors.DiscoveryError(
-                    group, f"Codex の必須資料が 32 KiB に収まりません: {one_line(location)}"
-                )
-            packed.append(bucket)
-            bucket = (part,)
+            # 目安を超えるハンクも、本文と根拠を保ったままシャードに入れる。
+            if bucket and not fits((*bucket, part)):
+                packed.append(bucket)
+                bucket = ()
+            bucket = (*bucket, part)
     if bucket:
         packed.append(bucket)
 
@@ -899,7 +895,7 @@ def run_sharded(
         static_evidence=(
             lambda locations: shard_material.evidence(planned.hunks, locations, working_directory)
         )
-        if settings.budget.max_prompt_bytes is not None and plan.kind is shards.ShardPlanKind.DIFF
+        if settings.budget.compact_materials and plan.kind is shards.ShardPlanKind.DIFF
         else None,
     )
 

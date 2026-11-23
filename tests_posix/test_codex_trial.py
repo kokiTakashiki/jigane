@@ -3,19 +3,25 @@
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fakes import MacroFake
 from pr_support import commit_all
 
 from jigane.commands import main
+from jigane.design.review_documents import create_design_doc_review
+from jigane.groups.definitions import MACRO, MICRO
 from jigane.groups.policy_runs import PolicyRole
 from jigane.groups.viewpoints import Viewpoint
-from jigane.llm_runs import codex
+from jigane.llm_runs import claude, codex
 from jigane.reviews.catalog import load_review
 from jigane.reviews.resolution import resolve_review
-from jigane.skills import macro, macro_compact, policy_principles
+from jigane.skills import macro, macro_compact, macro_principles_run, policy_principles, sharded
 from jigane.skills.assembly import AssemblyInput
+from jigane.skills.launch_prompts import LaunchInput, group_launch
+from jigane.skills.mcp import NO_MCP
 from jigane.skills.policy_principle_shapes import Shape
 from jigane.storage.agent_selection import Agent, save_agent
 from tests_posix.codex_cli_support import FAKE_CODEX, fake_chatgpt_login
@@ -372,22 +378,123 @@ def test_claude_macro_debug_prompt_keeps_existing_materials(
     assert [item["text"] for item in prompts] == expected
 
 
-def test_oversize_codex_macro_principle_prevents_any_launch(
+@pytest.mark.usefixtures("synthetic_diff")
+def test_compact_materials_are_selected_independently_of_the_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(policy_principles, "present_shapes", lambda *_: {Shape.FIELD_COPIES})
+    assembly = AssemblyInput.load(load_review(resolve_review("octo/synthetic@sample")))
+    budget = codex.review_budget(claude.RunBudget("m", 1.0, reserve_margin=False))
+    full = replace(budget, compact_materials=False)
+
+    compact_launch = group_launch(LaunchInput(assembly, MACRO, budget=budget))
+    compact_prompts = compact_launch.prompts()
+    assert [prompt.principle for prompt in compact_prompts] == [None, "P1"]
+    assert all("### 変更節点と範囲" in prompt.text for prompt in compact_prompts)
+    assert compact_launch.estimate().to_record()["materials_bytes"] == sum(
+        prompt.size for prompt in compact_prompts
+    )
+    invoke = MacroFake([])
+    macro_principles_run.run_policy(
+        assembly,
+        claude.RunSettings(budget, None, invoke, has_spending_limit=False, allow_tools=False),
+    )
+    assert {call.principle: call.prompt for call in invoke.calls} == {
+        prompt.principle: prompt.text for prompt in compact_prompts
+    }
+    full_prompts = group_launch(LaunchInput(assembly, MACRO, budget=full)).prompts()
+    assert full_prompts[0].text == macro.remembered_prompt(assembly)
+    assert full_prompts[0].text != compact_prompts[0].text
+
+    compact_shards = sharded.plan_shards(assembly, MICRO, NO_MCP, budget)
+    assert compact_shards.hunks["sample.py"]
+    full_shards = sharded.plan_shards(assembly, MICRO, NO_MCP, full)
+    assert not full_shards.hunks
+    assert full_shards.prompts != compact_shards.prompts
+
+
+def test_large_codex_macro_principle_reaches_cli(
     codex_trace: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(policy_principles, "present_shapes", lambda *_: {Shape.FIELD_COPIES})
     build = macro_compact.build_prompt
 
-    def oversized(assembly: AssemblyInput, principle: Viewpoint | None = None) -> str:
+    def expanded(assembly: AssemblyInput, principle: Viewpoint | None = None) -> str:
         text = build(assembly, principle)
-        return text + ("契" * codex.MAX_PROMPT_BYTES if principle else "")
+        return text + ("契" * 12_000 if principle else "")
 
-    monkeypatch.setattr(macro_compact, "build_prompt", oversized)
+    monkeypatch.setattr(macro_compact, "build_prompt", expanded)
     args = ["octo/synthetic@sample", "macro", "--json"]
     capsys.readouterr()
     assert main(["estimate", *args]) == 0
     estimate = json.loads(capsys.readouterr().out)
-    assert estimate["prompt_bytes"][0] < codex.MAX_PROMPT_BYTES
-    assert estimate["prompt_bytes"][1] > codex.MAX_PROMPT_BYTES
-    assert main(["run", *args]) != 0
+    assert estimate["prompt_bytes"][0] < 32_768 < estimate["prompt_bytes"][1]
+    assert estimate["noninteractive_run_available"] is True
+    assert main(["debug", "prompt", *args]) == 0
+    prompts = json.loads(capsys.readouterr().out)["prompts"]
+    expected_prompts = {
+        role: codex.REVIEW_BOUNDARY + item["text"]
+        for role, item in zip(("diagram", "principle"), prompts, strict=True)
+    }
+    codex_trace.with_name("expected-prompts.json").write_text(
+        json.dumps(expected_prompts), encoding="utf-8"
+    )
+    assert main(["debug", "run", *args, "--yes", "--max-usd", "0.001"]) == 2
+    assert json.loads(capsys.readouterr().out)["stopped"] == "estimate_exceeds_max_usd"
     assert not codex_trace.exists()
+    expected = str(estimate["expected"]["total_usd"])
+    assert main(["debug", "run", *args, "--yes", "--max-usd", expected]) == 0
+    assert sorted(codex_trace.read_text(encoding="utf-8").splitlines()) == ["diagram", "principle"]
+
+
+@pytest.mark.parametrize(
+    ("group", "role"),
+    [("macro", "diagram"), ("micro", "discovery"), ("security", "discovery")],
+)
+def test_codex_large_design_document_estimates_and_reaches_cli(
+    codex_trace: Path, capsys: pytest.CaptureFixture[str], group: str, role: str
+) -> None:
+    repo = codex_trace.parent / "repo"
+    document = (
+        "# Design for sample.py\n\n" + "既存の実装を照合する。\n" * 1_600 + "\nEnd of design.\n"
+    )
+    assert 54_000 <= len(document.encode("utf-8")) <= 56_000
+    (repo / "design.md").write_text(document, encoding="utf-8")
+    review = create_design_doc_review(repo, "design.md", select=[])
+    args = [str(review.id), group, "--json"]
+    capsys.readouterr()
+
+    assert main(["estimate", *args]) == 0
+    estimate = json.loads(capsys.readouterr().out)
+    assert estimate["agent"] == "codex"
+    assert estimate["noninteractive_run_available"] is True
+    assert estimate["expected"]["total_usd"] > 0
+    assert "max_prompt_bytes" not in estimate
+    assert "exceeds_prompt_limit" not in estimate
+    if group == "macro":
+        note = estimate["note"]
+        assert "設計書の全文と構造" in note
+        assert "境界文を含む初期プロンプト" in note
+        assert "出力と推論は計 8,192 トークン" in note
+        assert "公開 API 単価で換算した見込みを expected.total_usd に出します" in note
+        assert "実行後の換算額は Codex CLI が報告した使用量から求めます" in note
+        assert "過去の実額の倍率" not in note
+    assert main(["debug", "prompt", *args]) == 0
+    [prompt] = json.loads(capsys.readouterr().out)["prompts"]
+    assert "End of design." in prompt["text"]
+    assert prompt["text"].count("既存の実装を照合する。") == 1_600
+    sent = codex.REVIEW_BOUNDARY + prompt["text"]
+    assert estimate["prompt_bytes"] == [len(sent.encode("utf-8"))]
+    assert estimate["prompt_bytes"][0] > 32_768
+    assert main(["estimate", *args[:-1]]) == 0
+    output = capsys.readouterr().out
+    assert f"Codex の初期起動 1 回（各プロンプト {estimate['prompt_bytes'][0]} バイト）" in output
+    assert "を超える初期プロンプト" not in output
+    assert not codex_trace.with_name("login-checked").exists()
+    assert not codex_trace.exists()
+
+    codex_trace.with_name("expected-prompts.json").write_text(
+        json.dumps({role: sent}), encoding="utf-8"
+    )
+    assert main(["run", *args]) == 0
+    assert codex_trace.read_text(encoding="utf-8").splitlines() == [role]

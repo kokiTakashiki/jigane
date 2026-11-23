@@ -106,7 +106,6 @@ class UnverifiedReason(StrEnum):
     # 役の出力に欠け、走らせ直しても欠けたままだった
     STILL_MISSING = "still_missing"
     MATERIALS_MISSING = "materials_missing"
-    MATERIALS_TOO_LARGE = "materials_too_large"
 
 
 @dataclass(frozen=True)
@@ -474,11 +473,6 @@ def _render_checked(
     if split.reference_guide:
         text = rendered.text + split.reference_guide
         rendered = RenderedPrompt(text, stamp_prompt(prompt_name, text))
-    limit = settings.budget.max_prompt_bytes
-    if limit is not None and len(rendered.text.encode("utf-8")) > limit:
-        raise _SplitMaterialsError(
-            role, UnverifiedReason.MATERIALS_TOO_LARGE, "検証資料が 32 KiB を超えます"
-        )
     check = input_budget.check_input_budget(rendered.text, settings, role=role, index=split.index)
     if check.stop is not None:
         budget_stops.append(check.stop.stored())

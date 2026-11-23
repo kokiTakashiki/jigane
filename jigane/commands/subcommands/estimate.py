@@ -45,6 +45,16 @@ from jigane.skills.output_estimate import skipped_rows_message
 from jigane.skills.review_docs import read_docs_for_review
 from jigane.storage.agent_selection import Agent
 
+CODEX_DESIGN_ESTIMATE_NOTE = (
+    "設計書の形は 1 回の起動でレビューし、道具を渡しません。"
+    "資料は宣言、設計書の全文と構造、付属の文書、名指しの照合の表、"
+    "選んだファイル、いまの形の図、前の回の指摘です。"
+    "Codex 用の境界文を含む初期プロンプトから入力トークンを概算し、"
+    f"出力と推論は計 {CODEX_LOGIN_OUTPUT_TOKENS:,} トークンとします。"
+    "公開 API 単価で換算した見込みを expected.total_usd に出します。"
+    "実行後の換算額は Codex CLI が報告した使用量から求めます。"
+)
+
 
 def register(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     estimate = subparsers.add_parser(
@@ -255,7 +265,6 @@ def print_codex_estimate(
 ) -> None:
     boundary = codex.review_boundary(uses_mcp=bool(mcp_names))
     sizes = [launch.size + len(boundary.encode("utf-8")) for launch in prompts]
-    fits = all(size <= codex.MAX_PROMPT_BYTES for size in sizes)
     sizes_text = ", ".join(map(str, sizes)) or "なし"
     launches = [
         codex_launch_estimate(launch, size, uses_mcp=bool(mcp_names))
@@ -268,11 +277,14 @@ def print_codex_estimate(
         else None
     )
     if as_json:
+        record = report.estimate.to_record()
+        if isinstance(report.estimate, DesignPolicyEstimate):
+            record["note"] = CODEX_DESIGN_ESTIMATE_NOTE
         print(
             json.dumps(
                 {
                     "group": group.value,
-                    **report.estimate.to_record(),
+                    **record,
                     "agent": Agent.CODEX,
                     "cli_auth": "chatgpt_login",
                     "model": default.name,
@@ -292,9 +304,7 @@ def print_codex_estimate(
                     "has_verifier": report.estimate.has_verifier,
                     "prompt_bytes": sizes,
                     "launches": launches,
-                    "max_prompt_bytes": codex.MAX_PROMPT_BYTES,
-                    "exceeds_prompt_limit": not fits,
-                    "noninteractive_run_available": fits and expectation is not None,
+                    "noninteractive_run_available": expectation is not None,
                     "noninteractive_requires": None if mcp_names else "codex login",
                     "noninteractive_model": None if mcp_names else default.name,
                     **(
@@ -312,7 +322,6 @@ def print_codex_estimate(
         [
             *size_lines(report.estimate),
             f"Codex の初期起動 {len(sizes)} 回（各プロンプト {sizes_text} バイト）",
-            *([] if fits else ["32 KiB を超える初期プロンプトがあるため実行できません"]),
             *(
                 ["検証などの追加起動数は実行時に決まります"]
                 if report.estimate.has_verifier
@@ -391,7 +400,7 @@ def estimate_and_print(
     # シャードの数は実行と同じ上限の組から決まる（実行の入口と同じ resolve_run_defaults）
     budget = resolve_run_defaults(group, None, effort, max_budget_usd=max_budget_usd).budget
     if agent is Agent.CODEX:
-        budget = codex.review_budget(budget, uses_mcp=bool(mcp.reference_servers))
+        budget = codex.review_budget(budget)
     launch_input = LaunchInput(assembly, group, mcp, budget)
     estimate = estimate_of(launch_input)
     report = EstimateReport(estimate, warnings)

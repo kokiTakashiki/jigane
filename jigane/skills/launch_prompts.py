@@ -48,7 +48,7 @@ class LaunchInput:
     """起動の組み立てに要る入力。
 
     mcp はセキュリティの群の MCP の注記を変える。budget は上限に収まるまでシャードを増やすので、
-    起動の数と分け方を変える。方針の群ではバイト上限がある場合に短い資料を組む。
+    起動の数と分け方を変える。資料の縮約は budget の compact_materials で選ぶ。
     """
 
     assembly: AssemblyInput
@@ -77,7 +77,7 @@ def group_launch(launch_input: LaunchInput) -> GroupLaunch:
         planned = sharded.plan_shards(assembly, group, mcp, budget)
         return tuple(LaunchPrompt(LaunchRole.DISCOVERY, text) for text in planned.prompts)
 
-    compact_policy = budget is not None and budget.max_prompt_bytes is not None
+    compact_policy = budget is not None and budget.compact_materials
 
     def policy_prompts() -> tuple[LaunchPrompt, ...]:
         if compact_policy and macro.remembered_plan(assembly).missing:
@@ -100,11 +100,7 @@ def group_launch(launch_input: LaunchInput) -> GroupLaunch:
             return GroupLaunch(
                 prompts=policy_prompts,
                 # 差し替えが効くよう、呼ぶ時点で属性を引く
-                estimate=lambda: (
-                    macro_principles_run.estimate_policy(assembly, compact=True)
-                    if compact_policy
-                    else macro_principles_run.estimate_policy(assembly)
-                ),
+                estimate=lambda: macro_principles_run.estimate_policy(assembly, budget=budget),
             )
         case GroupId.MICRO:
             return GroupLaunch(

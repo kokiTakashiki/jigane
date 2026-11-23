@@ -11,10 +11,17 @@ from pathlib import Path
 from jigane.git import process, tree_files
 from jigane.git.command_line import GitSubcommand, build_git_command
 from jigane.git.revision import CommitSha, resolve_commit_sha
-from jigane.git.tree_files import Content, NotOpened, TreeFileState, read_tree
+from jigane.git.tree_files import (
+    Content,
+    NotOpened,
+    TreeFileState,
+    check_input_parents,
+    read_tree,
+    split_input_path,
+)
 from jigane.groups.definitions import GroupId
 from jigane.llm_runs.claude import is_secret_file
-from jigane.repository_docs.classify import Inside, Outside, classify_path
+from jigane.repository_docs.classify import Outside, classify_path
 from jigane.repository_docs.kinds import DOCUMENT_KINDS, DocumentKind, kinds_for_groups
 from jigane.repository_docs.settings import SETTINGS_FILE, load_settings
 from jigane.repository_docs.skip_reason import (
@@ -71,7 +78,8 @@ NO_DOCS = RepositoryDocs((), ())
 def _precheck_outside(path: Path) -> SkipReason | None:
     # Windows ではディレクトリを開くと権限拒否になるので、開く前に通常のファイルかを分類する
     try:
-        return None if stat.S_ISREG(path.stat().st_mode) else NotRegularFile()
+        mode = path.lstat().st_mode
+        return None if stat.S_ISREG(mode) or stat.S_ISLNK(mode) else NotRegularFile()
     except (FileNotFoundError, NotADirectoryError):
         return Missing()
     except OSError:
@@ -83,27 +91,28 @@ def _read_outside(path: Path) -> bytes | SkipReason:
     return refusal if refusal is not None else _open_and_read(path)
 
 
+def _input_refusal(outcome: NotOpened) -> SkipReason:
+    reasons: dict[TreeFileState, SkipReason] = {
+        TreeFileState.MISSING: Missing(),
+        TreeFileState.NOT_REGULAR: NotRegularFile(),
+        TreeFileState.REFUSED: Unreadable("シンボリックリンクを含むパスです"),
+    }
+    return reasons.get(outcome.state, Unreadable(outcome.detail))
+
+
 def _open_and_read(path: Path) -> bytes | SkipReason:
-    # FIFO を開いて止まらないよう O_NONBLOCK で開く。stat と open の間の差し替えは fstat で拾う
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-    try:
-        descriptor = os.open(path, flags)
-    except (FileNotFoundError, NotADirectoryError):
-        return Missing()
-    except OSError as error:
-        return Unreadable(error.strerror or type(error).__name__)
-    try:
-        status = os.fstat(descriptor)
-        if not stat.S_ISREG(status.st_mode):
-            return NotRegularFile()
-        if status.st_size > MAX_DOCUMENT_BYTES:
-            return TooLarge(status.st_size)
-        with os.fdopen(descriptor, "rb", closefd=False) as stream:
-            return stream.read(MAX_DOCUMENT_BYTES + 1)
-    except OSError as error:
-        return Unreadable(error.strerror or type(error).__name__)
-    finally:
-        os.close(descriptor)
+    root, relative = split_input_path(Path.cwd(), path)
+    match read_tree(root, relative, MAX_DOCUMENT_BYTES):
+        case Content(data=data):
+            return data
+        case tree_files.TooLarge():
+            # 上限超過は read_tree の結果で決め、警告に載せるサイズだけを調べる。
+            try:
+                return TooLarge(max(path.lstat().st_size, MAX_DOCUMENT_BYTES + 1))
+            except OSError:
+                return TooLarge(MAX_DOCUMENT_BYTES + 1)
+        case NotOpened() as outcome:
+            return _input_refusal(outcome)
 
 
 def _read_base_tree(root: Path, relative: str) -> bytes | SkipReason:
@@ -170,15 +179,19 @@ def _read_head(checkout_root: Path, relative: str) -> bytes | SkipReason:
 
 
 def _read_bytes(path: str, owner: str, repo: str, base: BaseSource) -> bytes | SkipReason:
-    if not Path(path).is_absolute():
+    original = Path(path)
+    if not original.is_absolute():
         return NotAbsolute()
-    where = classify_path(path, owner, repo)
-    resolved_name = where.relative if isinstance(where, Inside) else where.resolved.name
+    checked = check_input_parents(Path.cwd(), original)
+    if isinstance(checked, NotOpened):
+        return _input_refusal(checked)
+    where = classify_path(str(checked), owner, repo)
+    resolved = where.resolved if isinstance(where, Outside) else Path(os.path.realpath(checked))
     # リンクの先の名前でも拒む。CLAUDE.md を .env へのリンクにして送らせないため
-    if is_secret_file(path) or is_secret_file(resolved_name):
+    if is_secret_file(path) or is_secret_file(resolved.name):
         return SecretName()
     if isinstance(where, Outside):
-        return _read_outside(where.resolved)
+        return _read_outside(checked)
     match base:
         case BaseTree(directory=directory):
             return _read_base_tree(directory, where.relative)

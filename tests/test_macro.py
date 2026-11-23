@@ -567,13 +567,19 @@ def history_section(review: Review) -> str:
     return macro.history_text(AssemblyInput.load(review))
 
 
+def history_rows(section: str) -> list[str]:
+    lines = section.splitlines()
+    assert lines[0] == lines[-1] == "```"
+    return lines[1:-1]
+
+
 def test_history_keeps_the_first_run_when_the_second_finds_nothing(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     run(review, MacroFake([discovered("M2")]))
     run(review, MacroFake([]))
     save_selection(review.id.directory(), Selection({"F1": Held()}))
     section = history_section(review)
-    assert section.splitlines() == [
+    assert history_rows(section) == [
         "- 前の回: 指摘なし",
         "- 2 回前 F1 hold claim M2",
     ]
@@ -590,10 +596,10 @@ def test_history_orders_three_runs_newest_first_with_stable_numbers(project: Pat
         "- 前の回 F2 M3 warning in_scope=true 区分=必読 claim M3（src/a.py:1）",
         "- 3 回前 F1 hold claim M2",
     ]
-    assert history_section(review).splitlines() == expected
+    assert history_rows(history_section(review)) == expected
     # 読むだけでは履歴は増えない
     macro.build_diagram_prompt(AssemblyInput.load(review))
-    assert history_section(review).splitlines() == expected
+    assert history_rows(history_section(review)) == expected
 
 
 def _run_many_rounds(review: Review, rounds: int, per_round: int) -> dict[str, str]:
@@ -622,7 +628,7 @@ def _run_many_rounds(review: Review, rounds: int, per_round: int) -> dict[str, s
 def test_older_rounds_keep_only_unresolved_findings_as_one_line_each(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     kinds = _run_many_rounds(review, rounds=5, per_round=3)
-    lines = history_section(review).splitlines()
+    lines = history_rows(history_section(review))
     latest = [line for line in lines if line.startswith("- 前の回 ")]
     older = [line for line in lines if not line.startswith("- 前の回 ")]
     # 直前の回は今と同じ詳しさ
@@ -652,7 +658,7 @@ def test_older_rounds_are_capped_with_a_count_and_the_section_stays_bounded(proj
     review = create_feature_review(project, ["src"], "p")
     per_round = 12
     kinds = _run_many_rounds(review, rounds=7, per_round=per_round)
-    lines = history_section(review).splitlines()
+    lines = history_rows(history_section(review))
     older = [line for line in lines if not line.startswith("- 前の回 ")]
     assert len(older) == history.OLDER_ROUND_LINE_LIMIT
     assert len(lines) <= per_round + history.OLDER_ROUND_LINE_LIMIT
