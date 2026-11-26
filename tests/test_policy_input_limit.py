@@ -187,7 +187,7 @@ def test_estimate_amount_equals_the_sum_of_the_amounts_used_to_decide(
     assert f"入力と出力の見込みの費用の見積もり: {expected:.4f} USD" in capsys.readouterr().out
 
 
-def test_all_launches_skipped_spends_nothing_and_points_at_the_limit_flag(project: Path) -> None:
+def test_all_launches_skipped_spends_nothing_and_guides_to_reduce_input(project: Path) -> None:
     review = create_feature_review(project, ["src"], "p")
     fake = MacroFake([])
     settings = claude.RunSettings(
@@ -198,7 +198,9 @@ def test_all_launches_skipped_spends_nothing_and_points_at_the_limit_flag(projec
     with pytest.raises(discovery_errors.InputBudgetError) as raised:
         macro_principles_run.run_policy(AssemblyInput.load(review), settings)
     assert fake.calls == []
-    assert "--max-budget-usd-per-call" in failures.describe(raised.value).action
+    assert failures.describe(raised.value).action == (
+        "理由に挙げた大きい節を小さくするか、対象の範囲を絞ってから、もう一度実行してください"
+    )
 
 
 def test_unlisted_model_principle_launch_is_skipped_even_for_a_tiny_prompt() -> None:

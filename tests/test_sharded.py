@@ -31,8 +31,9 @@ from jigane.findings.records import (
     load_findings_state,
     triaged_dicts,
 )
-from jigane.groups.definitions import MICRO, GroupId
-from jigane.llm_runs import claude, pricing
+from jigane.groups.definitions import MICRO, SECURITY, GroupId
+from jigane.llm_runs import claude, codex, pricing
+from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import Disposition, Stage
 from jigane.reviews.lifecycle import Review, create_feature_review
@@ -47,6 +48,7 @@ from jigane.skills import (
     shards,
 )
 from jigane.skills.assembly import AssemblyInput
+from jigane.skills.mcp import NO_MCP
 from jigane.skills.pipeline import ShardedGroupRun
 
 # 実装とセキュリティの群の記録が書く鍵。shape と discarded は方針の群だけが書く
@@ -112,6 +114,37 @@ def spec_with(calls: list[list[StoredFinding]], group: GroupId = MICRO) -> shard
         tools=micro.DISCOVERY_TOOLS,
         select=select,
     )
+
+
+@pytest.mark.parametrize("group", [MICRO, SECURITY])
+@pytest.mark.parametrize(("token_limit", "count"), [(100_000, 4), (25_000, 6), (1, 8)])
+def test_discovery_sharding_uses_the_same_budget_basis_for_both_agents(
+    project: Path, monkeypatch: pytest.MonkeyPatch, group: GroupId, token_limit: int, count: int
+) -> None:
+    for name in "abcdefghi" if count == shards.MAX_GROWN_SHARDS else "abcdef":
+        (project / "src" / f"{name}.py").write_text("x = 1\n" * 6000, encoding="utf-8")
+    assembly = AssemblyInput.load(create_feature_review(project, ["src"], "p"))
+    budget = resolve_run_defaults(group, None, None).budget
+
+    def stops(basis: claude.RunBudget, tokens: int) -> bool:
+        assert basis == budget
+        return tokens >= token_limit
+
+    monkeypatch.setattr(claude.RunBudget, "input_stops_run", stops)
+    compact_budget = codex.review_budget(budget)
+    expected = sharded.plan_shards(assembly, group, NO_MCP, budget)
+    actual = sharded.plan_shards(assembly, group, NO_MCP, compact_budget)
+    assert actual == expected
+    assert len(actual.prompts) == count
+    if count == shards.MAX_GROWN_SHARDS:
+        fake = FakeInvoke()
+        settings = claude.RunSettings(compact_budget, None, fake, has_spending_limit=False)
+        assert actual.grown_unfit
+        with pytest.raises(discovery_errors.InputBudgetError, match="8 個まで増やしても"):
+            sharded.run_sharded(spec_with([], group), assembly, settings)
+        assert fake.calls == []
+    else:
+        assert not actual.grown_unfit
 
 
 def test_selection_stage_runs_and_run_state_has_the_shared_keys(project: Path) -> None:

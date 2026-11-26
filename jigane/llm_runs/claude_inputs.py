@@ -105,7 +105,7 @@ class ClaudeInput(Enum):
         "差分に添える設定ファイルの冒頭（Makefile、justfile、pyproject の最大 40 行）を含む",
         (
             "jigane/skills/macro.py:changes_prompt_text",
-            "jigane/skills/macro.py:verifier_changes_text",
+            "jigane/skills/macro.py:verifier_changes",
             "jigane/skills/sharded.py:build_shard_prompt",
             "jigane/skills/sharded.py:_changes_with_config_heads",
             "jigane/skills/config_head.py:config_heads_section",

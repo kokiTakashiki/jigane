@@ -1,7 +1,7 @@
 """変更の文。二つのツリーから difflib で作る統一形式の差分。"""
 
 import difflib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from jigane.git.tree_files import MAX_REVIEW_FILE_BYTES, TreeFileTooLargeError, read_tree_bytes
@@ -108,11 +108,15 @@ def split_file_sections(changes: str, pairs: Sequence[FilePair]) -> list[list[st
     return [lines[start:end] for start, end in zip(starts, ends, strict=True)]
 
 
-def without_whole_deletions(changes: str, pairs: Sequence[FilePair]) -> tuple[str, list[str]]:
-    """変更の文から、丸ごと削除したファイルの節を外す。外したファイルの旧パスも返す。"""
+def without_whole_deletions(
+    changes: str, pairs: Sequence[FilePair], *, exclude: Callable[[FilePair], bool] | None = None
+) -> tuple[str, list[str]]:
+    """丸ごと削除した節を外し、その旧パスを返す。除外対象は節も旧パスも返さない。"""
     kept: list[str] = []
     removed: list[str] = []
     for pair, section in zip(pairs, split_file_sections(changes, pairs), strict=True):
+        if exclude is not None and exclude(pair):
+            continue
         if is_whole_deletion(pair):
             removed.append(required(pair.old_path))
         else:

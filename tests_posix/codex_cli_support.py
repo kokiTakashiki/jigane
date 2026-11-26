@@ -166,17 +166,21 @@ if role == "principle":
     assert model == {"P1": "gpt-6-luna", "P2": "gpt-6-luna", "P3": "gpt-6.1-terra",
                      "P4": "gpt-6.2-sol", "P5": "gpt-6.1-terra"}[viewpoint]
     assert 'model_reasoning_effort="high"' in args
-    assert 'service_tier="default"' in args
+elif role == "diagram":
+    assert model == "gpt-6.2-sol"
+    assert 'model_reasoning_effort="high"' in args
 else:
     assert model == "gpt-6-luna"
-    assert 'model_reasoning_effort="low"' in args
-    assert 'service_tier="default"' in args
+    effort = "high" if role == "discovery" else "low"
+    assert f'model_reasoning_effort="{effort}"' in args
+assert 'service_tier="default"' in args
 with Path({trace}).open("a") as trace:
     trace.write(role + "\\n")
 Path(args[args.index("--output-last-message") + 1]).write_text(json.dumps(output))
 override = Path({trace}).with_name("response-model")
 print(json.dumps({"type": "turn.completed",
                   "server_model": override.read_text() if override.exists() else model, "usage": {
-    "input_tokens": 12, "cached_input_tokens": 3, "output_tokens": 5
+    "input_tokens": 12, "cached_input_tokens": 3,
+    "output_tokens": 261 if role in ("diagram", "principle") else 5
 }}))
 """

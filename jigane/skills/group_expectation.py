@@ -4,15 +4,15 @@ Claude Code の倍率は回の記録から引く。Codex CLI は担当モデル�
 見積もり全体を走らせるのは組み立ての根（estimate と run の入口）で、ここでは走らせない。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from jigane.groups.definitions import GroupId
+from jigane.groups.definitions import LAST_ROUND_TRIP_OUTPUT_TOKENS, GroupId
 from jigane.llm_runs import claude, codex, pricing
 from jigane.reviews.catalog import ARCHIVED_INCLUDE, list_review_summaries
-from jigane.skills.estimate_result import EstimateCommon
+from jigane.skills.estimate_result import EstimateCommon, SecurityEstimate
 from jigane.skills.launch_prompts import LaunchPrompt
 from jigane.skills.pipeline import ESTIMATE_COUNTING_VERSION, read_runs
 
@@ -22,8 +22,6 @@ EXPECTATION_VERSION = 1
 NO_VERIFIER_MULTIPLIER = 1.0
 # 回の記録に実額が無いときの検証役の倍率の仮置き。測定で後から決め直す
 DEFAULT_VERIFIER_MULTIPLIER = 2.5
-# Codex CLI の初期起動 1 回あたりの出力・推論の見込み。CLI に渡す制限値ではない。
-CODEX_LOGIN_OUTPUT_TOKENS = 8_192
 
 
 class VerifierMultiplierSource(StrEnum):
@@ -71,7 +69,9 @@ def _read_group_multiplier(repository_root: Path, group: GroupId) -> float | Non
     return sum(ratios) / len(ratios) if ratios else None
 
 
-def discovery_estimate_usd(estimate: EstimateCommon, basis: claude.RunBudget) -> float:
+def discovery_estimate_usd(
+    estimate: EstimateCommon, basis: claude.RunBudget, *, mcp_count: int = 0
+) -> float:
     """jigane estimate と同じ見積もりから出す、発見役の見積もり。
 
     設計書の形は出力と推論の分を含めた見込みを発見役の見積もりとして持つので、それを使う。
@@ -79,20 +79,45 @@ def discovery_estimate_usd(estimate: EstimateCommon, basis: claude.RunBudget) ->
     expected = estimate.expected_output()
     if expected is not None:
         return expected.total_usd
+    if mcp_count and isinstance(estimate, SecurityEstimate):
+        # 資料取得の入力と応答を、サーバーごとに最後の一往復と同じトークン数で見込む。
+        extra = mcp_count * LAST_ROUND_TRIP_OUTPUT_TOKENS
+        with_mcp = replace(
+            basis, output_allowance_tokens=(basis.output_allowance_tokens or 0) + extra
+        )
+        return sum(
+            with_mcp.launch_cost(basis.prompt_tokens(size) + extra).usd
+            for size in estimate.prompt_bytes
+        )
     cost = estimate.input_cost(basis)
     return 0.0 if cost is None else cost.cost.usd
 
 
 def read_expectation(
-    estimate: EstimateCommon, basis: claude.RunBudget, repository_root: Path, group: GroupId
+    estimate: EstimateCommon,
+    basis: claude.RunBudget,
+    repository_root: Path,
+    group: GroupId,
+    *,
+    mcp_count: int = 0,
 ) -> GroupExpectation:
     """回の記録から倍率を引いて群の見込みを組む。組み立ての根で一度だけ呼ぶ。"""
-    discovery_usd = discovery_estimate_usd(estimate, basis)
-    if not estimate.has_verifier:
+    discovery_usd = discovery_estimate_usd(estimate, basis, mcp_count=mcp_count)
+    from_records = (
+        _read_group_multiplier(repository_root, group) if estimate.has_verifier else None
+    )
+    return _group_expectation(
+        discovery_usd, has_verifier=estimate.has_verifier, from_records=from_records
+    )
+
+
+def _group_expectation(
+    discovery_usd: float, *, has_verifier: bool, from_records: float | None = None
+) -> GroupExpectation:
+    if not has_verifier:
         return GroupExpectation(
             discovery_usd, NO_VERIFIER_MULTIPLIER, VerifierMultiplierSource.NO_VERIFIER
         )
-    from_records = _read_group_multiplier(repository_root, group)
     if from_records is not None:
         return GroupExpectation(discovery_usd, from_records, VerifierMultiplierSource.RUN_RECORDS)
     return GroupExpectation(
@@ -101,23 +126,16 @@ def read_expectation(
 
 
 def codex_login_expectation(
-    prompts: tuple[LaunchPrompt, ...], *, has_verifier: bool
+    prompts: tuple[LaunchPrompt, ...], *, has_verifier: bool, mcp_count: int = 0
 ) -> GroupExpectation | None:
     """初期起動ごとの入力・出力と、追加検証を含む単群の USD 換算見込み。"""
     if not prompts:
         return None
-    prefix_size = len(codex.REVIEW_BOUNDARY.encode("utf-8"))
-    nanos = sum(
-        prompt.codex_model().estimate_nanos(
-            pricing.estimate_input_tokens(prompt.size + prefix_size), CODEX_LOGIN_OUTPUT_TOKENS
-        )
-        for prompt in prompts
-    )
-    discovery_usd = nanos / codex.NANOS_PER_USD
-    if has_verifier:
-        return GroupExpectation(
-            discovery_usd, DEFAULT_VERIFIER_MULTIPLIER, VerifierMultiplierSource.DEFAULT
-        )
-    return GroupExpectation(
-        discovery_usd, NO_VERIFIER_MULTIPLIER, VerifierMultiplierSource.NO_VERIFIER
-    )
+    prefix_size = len(codex.review_boundary(uses_mcp=bool(mcp_count)).encode("utf-8"))
+    extra = mcp_count * LAST_ROUND_TRIP_OUTPUT_TOKENS
+    nanos = 0
+    for prompt in prompts:
+        model = prompt.codex_model()
+        input_tokens = pricing.estimate_input_tokens(prompt.size + prefix_size) + extra
+        nanos += model.estimate_nanos(input_tokens, model.expected_output_tokens + extra)
+    return _group_expectation(nanos / codex.NANOS_PER_USD, has_verifier=has_verifier)

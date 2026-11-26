@@ -31,6 +31,7 @@ from jigane.skills.estimator import estimate_of
 from jigane.skills.group_expectation import GroupExpectation, VerifierMultiplierSource
 from jigane.skills.launch_prompts import LaunchInput
 from jigane.skills.mcp import McpSelection, McpServer
+from jigane.storage.agent_selection import Agent
 
 pytestmark = pytest.mark.usefixtures("selected_agent")
 
@@ -663,3 +664,16 @@ def test_consent_text_shows_the_expectation_line_from_the_plan(group: GroupId) -
     assert "  群の見込み: 1.2500 USD（発見役の見積もり 0.5000 USD × 検証役の倍率 2.50）" in lines
     assert any(line.startswith("  発見役:") for line in lines)
     assert not any(line.startswith("出力と推論の分を含めた見込み") for line in lines)
+
+
+def test_consent_shares_group_amount_and_discloses_each_agent_destination() -> None:
+    plan = _plan_for(SECURITY, past_cost_usd=None)
+    claude_lines = consent_text(plan)
+    codex_lines = consent_text(dataclasses.replace(plan, agent=Agent.CODEX))
+
+    amount = "  群の見込み: 1.2500 USD（発見役の見積もり 0.5000 USD × 検証役の倍率 2.50）"
+    assert amount in claude_lines
+    assert amount in codex_lines
+    assert any("環境の認証" in line and "Anthropic" in line for line in claude_lines)
+    assert any("ChatGPT ログイン" in line and "chatgpt.com" in line for line in codex_lines)
+    assert "Codex CLI に USD 上限を設定できません。" in codex_lines

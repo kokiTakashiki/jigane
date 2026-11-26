@@ -21,9 +21,10 @@ from jigane.commands.exit_codes import EXIT_INTERRUPTED, EXIT_PROCESSING_FAILURE
 from jigane.commands.language_guidance import detail_with_guidance
 from jigane.commands.output import install_warning_handler
 from jigane.languages import registry
-from jigane.llm_runs import claude
+from jigane.llm_runs.adapter import adapter_for
+from jigane.llm_runs.invocation import Invoke
 from jigane.reviews.catalog import collapse_skipped_warnings
-from jigane.storage.agent_selection import AgentSelectionError, load_agent, require_agent
+from jigane.storage.agent_selection import Agent, AgentSelectionError, load_agent, require_agent
 from jigane.storage.store import data_home, require_private_data_home
 
 
@@ -108,27 +109,30 @@ def _run_handler(args: argparse.Namespace, context: Context) -> int:
             sys.stdout.flush()
 
 
-def _prepare_command(args: argparse.Namespace) -> None:
+def _prepare_command(args: argparse.Namespace) -> Agent | None:
+    agent = None
     if args.command == "run" or (args.command == "debug" and args.action == "run"):
-        args.agent = require_agent()
+        agent = require_agent()
+        args.agent = agent
         expected = getattr(args, "expect_agent", None)
-        if expected is not None and args.agent != expected:
+        if expected is not None and agent != expected:
             raise AgentSelectionError(f"承認時のエージェント {expected} から選択が変わりました")
     if args.command == "estimate":
         args.agent = load_agent()
     if args.command == "select-agent":
         # 言語の状態を読まず、保存する場合だけ保存側で根の権限を検査する
-        return
+        return None
     if args.command != "languages":
         # 言語の設定が壊れていても languages から修復できるようにする
         registry.require_ready(detail_with_guidance)
     _require_private_home_for_write(args.command, getattr(args, "action", None))
+    return agent
 
 
 def main(
     argv: Sequence[str] | None = None,
     *,
-    invoke: claude.Invoke = claude.run,
+    invoke: Invoke | None = None,
     is_terminal: Callable[[], bool] | None = None,
     read_answer: Callable[[str], str] | None = None,
 ) -> int:
@@ -140,8 +144,8 @@ def main(
         return EXIT_PROCESSING_FAILURE
     install_warning_handler()
     try:
-        _prepare_command(args)
-        context = Context(invoke=invoke)
+        agent = _prepare_command(args)
+        context = Context(invoke=adapter_for(agent, invoke_override=invoke).invoke)
         if is_terminal is not None:
             context = replace(context, is_terminal=is_terminal)
         if read_answer is not None:

@@ -20,7 +20,7 @@ from jigane.judgment_map.changes import (
     OMITTED_TOO_LARGE,
     file_change,
 )
-from jigane.judgment_map.classification import is_whole_deletion
+from jigane.judgment_map.classification import FilePair, is_whole_deletion
 from jigane.judgment_map.configuration import is_excluded, load_config
 from jigane.llm_runs import claude
 from jigane.markdown.fence import fence, one_line
@@ -215,6 +215,18 @@ def build_units_and_withheld(
     return _file_units(review, root, withheld), tuple(withheld)
 
 
+def secret_path_for(pair: FilePair) -> str | None:
+    """差分は変更の両側を読むため、改名や複写の旧名も検査する。"""
+    return next(
+        (
+            path
+            for path in (pair.old_path, pair.new_path)
+            if path is not None and claude.is_secret_file(path)
+        ),
+        None,
+    )
+
+
 def _diff_units(
     review: Review,
     root: Path,
@@ -234,11 +246,7 @@ def _diff_units(
             if omissions is not None:
                 omissions.append(f"{one_line(new_path)}: {OMITTED_GENERATED}")
             continue
-        # file_change は old_path の本文も base_tree から読むため、改名や複写の旧名も見る
-        secret = next(
-            (p for p in (pair.old_path, new_path) if p is not None and claude.is_secret_file(p)),
-            None,
-        )
+        secret = secret_path_for(pair)
         if secret is not None:
             withheld.append(secret)
             continue

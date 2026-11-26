@@ -10,7 +10,7 @@ import pytest
 
 from jigane.commands import main
 from jigane.git import process
-from jigane.llm_runs import codex_mcp
+from jigane.llm_runs import codex, codex_mcp
 from jigane.skills.mcp import CODEX_MCP_DIRECTORY, McpSelection, SecurityConfigError
 from jigane.storage.store import data_home
 
@@ -140,9 +140,19 @@ def test_codex_uses_selected_resources_and_records_reads(
     binary = codex_trace.with_name("codex")
     source = binary.read_text(encoding="utf-8")
     binary.write_text(
-        source.replace('assert "mcp_servers={}" in args', _CHECK_REFERENCE_RUNTIME).replace(
+        source.replace('assert "mcp_servers={}" in args\n', "").replace(
             "role, output = _group_response(schema, prompt)",
-            _MCP_EVENTS + "role, output = _group_response(schema, prompt)",
+            "role, output = _group_response(schema, prompt)\n"
+            "if role == 'discovery':\n"
+            + "".join(
+                "    " + line + "\n"
+                for line in (_CHECK_REFERENCE_RUNTIME + _MCP_EVENTS).splitlines()
+                if line
+            )
+            + "else:\n"
+            '    assert "mcp_servers={}" in args\n'
+            '    assert "合成の基準資料" not in prompt\n'
+            '    assert "選択された MCP の資料一覧" not in prompt',
         ),
         encoding="utf-8",
     )
@@ -171,11 +181,14 @@ def test_codex_uses_selected_resources_and_records_reads(
     assert estimate["cli_auth"] == "chatgpt_login"
     assert estimate["noninteractive_run_available"] is False
     assert estimate["noninteractive_unavailable_reason"] == "mcp"
-    assert estimate["expected"]["total_usd"] is None
+    assert 0 < estimate["expected"]["total_usd"] < float("inf")
     assert estimate["mcp_servers"] == ["local-refs", "other-refs"]
     assert main(["debug", "prompt", *args]) == 0
     prompt = json.loads(capsys.readouterr().out)["prompts"][0]
-    assert [prompt["bytes"]] == estimate["prompt_bytes"]
+    assert prompt["text"].startswith(codex.MCP_REVIEW_BOUNDARY)
+    assert estimate["prompt_bytes"] == [
+        len(prompt["text"].removeprefix(codex.MCP_REVIEW_BOUNDARY).encode("utf-8"))
+    ]
     assert "リポジトリのファイルや外部の参照先へ" not in prompt["text"]
     assert "合成の基準資料" in prompt["text"]
     assert main(["debug", "run", *args, "--yes", "--max-usd", "0.01"]) == 64
@@ -193,7 +206,7 @@ def test_codex_uses_selected_resources_and_records_reads(
     assert result["run"]["mcp_read_servers"] == ["local-refs"]
     invocations = result["run"]["invocations"]
     assert [row["role"] for row in invocations] == ["discovery", "rebuttal", "judge"]
-    assert all(row["mcp_read_servers"] == ["local-refs"] for row in invocations)
+    assert [row.get("mcp_read_servers") for row in invocations] == [["local-refs"], None, None]
     assert result["totals"]["usage_priced_cost_usd"] > 0
     _assert_mcp_views(args, result["run"], capsys)
 

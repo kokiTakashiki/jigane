@@ -86,10 +86,10 @@ PRINCIPLE_RUNS: dict[str, PrincipleRun] = {
 # 設計書の形は道具を渡さない一回の起動で、往復と余裕の扱いは図の形と同じ。
 # 上限と effort は形ごとに持つため、別の値として並べる
 # 出力の見込み 20000 は、完走した設計書の形の起動 33 本で、最大の入力 62,493 トークンに足しても
-# 上限 0.5 USD を下回り、どれも見送りにならない値
+# 起動の上限を下回り、どれも見送りにならない値
 DESIGN_SHAPE = RunShape(
     effort=Effort.HIGH,
-    max_budget_usd=0.5,
+    max_budget_usd=0.55,
     max_turns=2,
     reserve_margin=False,
     output_allowance_tokens=20000,

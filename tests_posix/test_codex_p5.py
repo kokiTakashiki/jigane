@@ -1,4 +1,4 @@
-"""実際の差分から P5 を選び、公開 CLI で見積もりと保存を確かめる。"""
+"""P5 の資料がある差分でも、両版が通常の原則だけを計画することを確かめる。"""
 
 import json
 import os
@@ -9,43 +9,24 @@ import pytest
 from pr_support import commit_all
 
 from jigane.commands import main
+from jigane.groups.policy_runs import PolicyRole
 from jigane.llm_runs import codex
+from jigane.reviews.catalog import load_review
 from jigane.reviews.resolution import resolve_review
+from jigane.skills.assembly import AssemblyInput
+from jigane.skills.macro_principles_run import principle_launches
 from tests_posix.codex_cli_support import FAKE_CODEX, fake_chatgpt_login
 
-P5_RESPONSE = """\
-from jsonschema import Draft202012Validator
-
+RESPONSE = """\
 props = schema["properties"]["findings"]["items"]["properties"]["viewpoint"]
 viewpoints = props.get("enum", [props.get("const")])
+assert "P5" not in viewpoints
 output = {"findings": []}
 if "merged" in schema["properties"]:
     output.update(merged=[], discarded=[])
-if viewpoints == ["P5"]:
-    assert args[args.index("--model") + 1] == "gpt-6.1-terra"
-    assert 'model_reasoning_effort="high"' in args
-    assert "P5 情報隠蔽" in prompt
-    output["findings"].append({
-        "severity": "warning",
-        "viewpoint": "P5",
-        "claim": "Keep the internal representation behind its boundary",
-        "body": "The supplied evidence shows the representation at the boundary.",
-        "evidence": [{"path": "sample.py", "start_line": 5, "end_line": 5}],
-        "declaration_ref": None,
-        "judgment_region": None,
-        "references": [],
-        "deepens": None,
-        "in_scope": True,
-        "scope_reason": "The entry point changed.",
-    })
-    validator = Draft202012Validator(schema)
-    validator.check_schema(schema)
-    validator.validate(output)
-    wrong = {**output["findings"][0], "viewpoint": "P4"}
-    assert not validator.is_valid({"findings": [wrong]})
 Path(args[args.index("--output-last-message") + 1]).write_text(json.dumps(output))
 print(json.dumps({"type": "turn.completed", "usage": {
-    "input_tokens": 12, "cached_input_tokens": 3, "output_tokens": 5
+    "input_tokens": 12, "cached_input_tokens": 3, "output_tokens": 100
 }}))
 """
 
@@ -56,7 +37,7 @@ def codex_trace(synthetic_diff: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     binary = synthetic_diff / "codex"
     binary.write_text(
         f"#!{sys.executable}\n"
-        + FAKE_CODEX.replace("{marker!r}", repr(str(trace))).replace("{response}", P5_RESPONSE),
+        + FAKE_CODEX.replace("{marker!r}", repr(str(trace))).replace("{response}", RESPONSE),
         encoding="utf-8",
     )
     binary.chmod(0o700)
@@ -102,7 +83,7 @@ def codex_trace(synthetic_diff: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ],
     ids=["store", "signature", "unrelated"],
 )
-def test_codex_p5_uses_source_shapes_for_estimate_and_run(
+def test_neither_agent_plans_p5_when_p5_shapes_are_present(
     codex_trace: Path,
     capsys: pytest.CaptureFixture[str],
     name: str,
@@ -114,6 +95,12 @@ def test_codex_p5_uses_source_shapes_for_estimate_and_run(
     commit_all(repo, name)
     assert main(["new", "range", "HEAD~1..HEAD", "--name", name]) == 0
     args = [f"octo/synthetic@{name}", "macro", "--json"]
+    review = load_review(resolve_review(args[0]))
+    compact = principle_launches(AssemblyInput.load(review), compact=True)
+    p5 = [launch.prompt for launch in compact if launch.viewpoint == "P5"]
+    assert len(p5) == int(bool(evidence))
+    if evidence:
+        assert all(fragment in p5[0] for fragment in evidence)
 
     plans = {}
     for agent in ("claude", "codex"):
@@ -123,38 +110,24 @@ def test_codex_p5_uses_source_shapes_for_estimate_and_run(
         estimate = json.loads(capsys.readouterr().out)
         assert main(["debug", "prompt", *args]) == 0
         prompts = json.loads(capsys.readouterr().out)["prompts"]
-        plans[agent] = len(prompts)
+        plans[agent] = prompts
         assert estimate["planned_invocations"] == len(prompts)
-        p5 = [prompt for prompt in prompts if "P5 情報隠蔽" in prompt["text"]]
+        assert all("P5 情報隠蔽" not in prompt["text"] for prompt in prompts)
         if agent == "codex":
-            assert [p["bytes"] + len(codex.REVIEW_BOUNDARY.encode("utf-8")) for p in prompts] == (
-                estimate["prompt_bytes"]
-            )
-            assert "P1〜P5" in estimate["run_guide"]["text"]
-            assert len(p5) == int(bool(evidence))
-            if p5:
-                assert all(fragment in p5[0]["text"] for fragment in evidence)
-        else:
-            assert "P1〜P4" in estimate["run_guide"]["text"]
-            assert not p5
+            assert estimate["prompt_bytes"] == [p["bytes"] for p in prompts]
+            assert all(row["principle"] != "P5" for row in estimate["launches"])
 
-    assert plans["codex"] - plans["claude"] == int(bool(evidence))
+    assert plans["claude"] == plans["codex"]
     assert not codex_trace.exists()
     assert main(["run", *args]) == 0
     result = json.loads(capsys.readouterr().out)
-    assert len(result["run"]["invocations"]) == plans["codex"]
-    assert len(codex_trace.read_text(encoding="utf-8").splitlines()) == plans["codex"]
-    directory = resolve_review(args[0]).directory()
-    stored = json.loads((directory / "runs.json").read_text(encoding="utf-8"))
-    assert main(["show", *args]) == 0
-    shown = json.loads(capsys.readouterr().out)
-    runs = [row for row in stored["macro"]["invocations"] if row.get("viewpoint") == "P5"]
-    findings = [row for row in shown["findings"] if row["viewpoint"] == "P5"]
-    assert len(runs) == len(findings) == int(bool(evidence))
-    if runs:
-        assert runs[0]["role"] == "principle"
-        assert runs[0]["model"] == "gpt-6.1-terra"
-        p5_id = "561ff3b2-0ec3-41bd-b611-7865229b46c7"
-        assert findings[0]["viewpoint_id"] == p5_id
-        saved_findings = json.loads((directory / "findings.json").read_text(encoding="utf-8"))
-        assert saved_findings["groups"]["macro"][0]["viewpoint"] == p5_id
+    calls = len(plans["codex"])
+    assert len(result["run"]["invocations"]) == calls
+    assert len(codex_trace.read_text(encoding="utf-8").splitlines()) == calls
+    stored = json.loads((review.id.directory() / "runs.json").read_text(encoding="utf-8"))
+    assert all(row.get("viewpoint") != "P5" for row in stored["macro"]["invocations"])
+
+
+def test_codex_keeps_the_p5_model_assignment() -> None:
+    model = codex.model_for(PolicyRole.PRINCIPLE, "P5")
+    assert (model.name, model.effort) == ("gpt-6.1-terra", "high")

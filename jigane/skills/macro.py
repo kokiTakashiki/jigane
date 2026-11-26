@@ -72,6 +72,7 @@ from jigane.skills import (
     policy_figures,
     policy_keep,
     policy_record,
+    shards,
     shared_rules,
 )
 from jigane.skills import scope as scope_marks
@@ -208,19 +209,20 @@ def diff_changes_text(diff: str) -> str:
     return f"### 変更\n\n{DIFF_CHANGES_INTRO}\n\n{fence(diff)}"
 
 
-def verifier_changes_text(review: Review) -> str:
-    """実装の検証役に渡す、差分の変更の節。丸ごと削除したファイルの本文は外し、パスだけを添える。
-
-    発見役は丸ごと削除したファイルを単位に入れない。検証役だけが本文を受けると、大きな削除で
-    入力が発見役の何倍にもなる。
-    """
+def verifier_changes(review: Review) -> adversarial.VerificationChanges:
+    """検証役の変更の節と、判定役の抜粋でも読まないパスを同じ組から作る。"""
     diff = read_stored_file(review.id.directory(), CHANGES_FILE)
-    kept, removed = without_whole_deletions(diff, load_pairs(review.id))
+    pairs = load_pairs(review.id)
+    excluded = {pair for pair in pairs if shards.secret_path_for(pair) is not None}
+    excluded_paths = frozenset(
+        path for pair in excluded for path in (pair.old_path, pair.new_path) if path is not None
+    )
+    kept, removed = without_whole_deletions(diff, pairs, exclude=excluded.__contains__)
     text = diff_changes_text(kept)
-    if not removed:
-        return text
-    listing = path_bullets(removed)
-    return f"{text}\n### 丸ごと削除したファイル（本文は省いた）\n\n{listing}\n"
+    if removed:
+        listing = path_bullets(removed)
+        text += f"\n### 丸ごと削除したファイル（本文は省いた）\n\n{listing}\n"
+    return adversarial.VerificationChanges(text, excluded_paths)
 
 
 NO_BACKGROUND_TEXT = "背景の材料は無い。"
@@ -328,7 +330,13 @@ def build_diagram_prompt(
 
 
 def check_input_budget(
-    prompt: str, settings: claude.RunSettings, index: int | None = None
+    prompt: str,
+    settings: claude.RunSettings,
+    index: int | None = None,
+    *,
+    shape: PolicyShape | None = None,
+    principle: str | None = None,
+    prompt_bytes: int | None = None,
 ) -> str | None:
     """プロンプトの大きさと出力の見込みから、1 回の起動の上限に達する見込みなら、起動の前に止める。
 
@@ -337,9 +345,9 @@ def check_input_budget(
     方針は起動ごとに道具を渡さず、往復も 群の表の DIAGRAM_SHAPE.max_turns で絞るため、
     次の一往復の余裕は引かず、上限そのものと比べる（RunSettings.budget.reserve_margin が偽）。
     """
-    if not settings.has_spending_limit:
-        return None
-    check = input_budget.check_input_budget(prompt, settings, index=index)
+    check = input_budget.check_input_budget(
+        prompt, settings, index=index, shape=shape, principle=principle, prompt_bytes=prompt_bytes
+    )
     if check.stop is not None:
         raise discovery_errors.InputBudgetError(GROUP, check.stop.message(), check.stop)
     return check.notice
@@ -423,6 +431,8 @@ def _outcome(
         # 原則の起動は、検査も見積もりの警告も起動も、原則の組を通す
         settings = replace(settings, budget=settings.budget.for_principle(extra.viewpoint))
     prompt = main_prompt if extra is None else extra.prompt
+    principle = None if extra is None else extra.viewpoint
+    prompt_bytes = len(prompt.encode("utf-8"))
     spec = (
         CONCLUDE
         if extra is None
@@ -436,7 +446,14 @@ def _outcome(
     role = role_of(plan.shape) if extra is None else role_of_kind(LaunchKind.PRINCIPLE)
     stamp = plan.stamp(prompt) if extra is None else plan.stamp_principle(extra)
     notice = join_notices(
-        check_input_budget(prompt, settings, index),
+        check_input_budget(
+            prompt,
+            settings,
+            index,
+            shape=plan.shape,
+            principle=principle,
+            prompt_bytes=prompt_bytes,
+        ),
         expected_budget_warning(review, plan.shape, prompt, settings),
     )
     invocation = settings.invocation(
@@ -444,12 +461,15 @@ def _outcome(
         json_schema=spec.schema(),
         working_directory=working_directory,
         tools=DIAGRAM_TOOLS,
+        prompt_bytes=prompt_bytes,
     )
-    invocation = replace(
-        invocation, policy_role=role, principle=None if extra is None else extra.viewpoint
-    )
+    invocation = replace(invocation, policy_role=role, principle=principle)
     try:
         result = settings.invoke(invocation)
+        validated = spec.lenient_model().model_validate(result.structured_output or {})
+        # 下流は辞書を前提にする。MISSING の欄は辞書に戻すとキーが無くなる。
+        checked = validated.model_dump(mode="json")
+        discovery_errors.require_review_output(result.record, checked["findings"])
     except claude.ClaudeInvocationError as error:
         # 起動の上限に達して止まったときもここに来る。部分の結果は使えず、指摘は保存しない。
         # 払った分と失敗の理由は run_macro が実行の記録だけに残す
@@ -466,18 +486,12 @@ def _outcome(
                 invocation=FailedInvocation(error.record, stamp.version, stamp.chars),
             ),
         ) from error
-    output = result.structured_output or {}
-    try:
-        validated = spec.lenient_model().model_validate(output)
     except ValidationError as error:
         first = error.errors()[0]
         location = ".".join(str(part) for part in first["loc"])
         raise discovery_errors.DiscoveryError(
             GROUP, f"一回の起動の出力がスキーマに適合しません: {location}: {first['msg']}"
         ) from error
-    # 下流（prepare_candidates など）は辞書を前提にする。検証した値を辞書に戻すのはここ一度だけ。
-    # モデルは実行時に組み立てるため属性を静的に読めず、MISSING の欄は戻した辞書でキーが無くなる
-    checked = validated.model_dump(mode="json")
     written = [_without_null_deepens(finding) for finding in checked["findings"]]
     prepared = pipeline.prepare_candidates(
         written, working_directory, has_bot_findings=has_bot_findings, drops=drops
@@ -665,6 +679,28 @@ def _run_plan(assembly: AssemblyInput) -> MacroPlan:
     return replace(remembered_plan(assembly), build_prompt=lambda: remembered_prompt(assembly))
 
 
+def _collect_launch_results(
+    launch: Callable[[int], LaunchResult], count: int
+) -> tuple[list[LaunchResult], str | None]:
+    results: list[LaunchResult] = []
+    malformed: list[discovery_errors.DiscoveryError] = []
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        futures = [pool.submit(launch, index) for index in range(count)]
+        for future in futures:
+            try:
+                results.append(future.result())
+            except discovery_errors.DiscoveryError as error:
+                malformed.append(error)
+    # 形式不正は従来どおり回を止める。同じ回に短い空出力があれば、その欠けも報告する。
+    if malformed and not any(
+        isinstance(result, LaunchFailed)
+        and result.failure.kind is claude.FailureKind.SHORT_EMPTY_OUTPUT
+        for result in results
+    ):
+        raise malformed[0]
+    return results, join_notices(*(str(error) for error in malformed))
+
+
 def run_macro(
     assembly: AssemblyInput,
     settings: claude.RunSettings,
@@ -712,8 +748,7 @@ def run_macro(
             return Stopped(launches[index], over)
         return outcome, own
 
-    with ThreadPoolExecutor(max_workers=len(launches)) as pool:
-        results = list(pool.map(launch, range(len(launches))))
+    results, malformed_notice = _collect_launch_results(launch, len(launches))
     stopped = [r for r in results if isinstance(r, Stopped)]
     failures = [r for r in results if isinstance(r, LaunchFailed)]
     succeeded = [r for r in results if isinstance(r, tuple)]
@@ -721,16 +756,19 @@ def run_macro(
         # 一本も起動しなかったので、記録に残す実行が無い（シャードと同じ）
         raise discovery_errors.all_launches_over_budget(GROUP, [s.error for s in stopped])
     classified = policy_keep.classify_launches(context, results)
-    if not succeeded or classified.reason is not None:
+    if not succeeded or classified.reason is not None or malformed_notice is not None:
         # 走らなかった起動が結果を置き換えない回。記録の書き出しはここの一か所で行う
         previous = policy_keep.previous_findings(review)
         steps = policy_record.unfinished_steps(
             classified.failures, classified.stops, classified.paid
         )
         run_state = policy_record.write_unfinished(context, steps)
-        if not succeeded:
+        if not succeeded and not any(
+            failed.failure.kind is claude.FailureKind.SHORT_EMPTY_OUTPUT for failed in failures
+        ):
             raise failures[0]
-        return MacroRun(previous, run_state, plan.warning, skipped=tuple(stopped))
+        notice = join_notices(plan.warning, malformed_notice)
+        return MacroRun(previous, run_state, notice, skipped=tuple(stopped))
     # 一部が失敗しても、成功した起動の指摘を使い、失敗は launch_failures に積む
     for _, own in succeeded:
         drops.without_evidence += own.without_evidence

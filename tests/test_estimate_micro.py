@@ -1,14 +1,18 @@
+import json
+from pathlib import Path
 from typing import Any, assert_never
 
 import pytest
 from fakes import MacroFake, settings_for, with_budget
+from test_security import write_mcp
 
-from jigane.commands import failures
+from jigane.commands import failures, main
 from jigane.commands.subcommands.estimate import blocker_lines, input_cost_lines, notice_lines
 from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import pricing
 from jigane.llm_runs.claude import RunBudget
 from jigane.llm_runs.pricing import INPUT_USD_PER_MILLION_TOKENS
+from jigane.reviews.lifecycle import create_feature_review
 from jigane.skills import input_budget
 from jigane.skills.estimate_result import (
     DesignPolicyEstimate,
@@ -22,6 +26,41 @@ from jigane.skills.input_budget import SectionSize
 from jigane.skills.output_estimate import MultiplierSource, OutputEstimate, warning_message
 
 MODEL = next(iter(INPUT_USD_PER_MILLION_TOKENS))
+
+
+@pytest.mark.usefixtures("selected_agent")
+@pytest.mark.parametrize("group", ["micro", "security"])
+def test_text_estimate_shows_the_json_group_expectation(
+    group: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "sample.py").write_text("value = '資料'\n", encoding="utf-8")
+    monkeypatch.chdir(root)
+    review = create_feature_review(root, ["sample.py"], name="estimate-display")
+    args = ["estimate", str(review.id), group]
+    if group == "security":
+        write_mcp(("refs", "baseline", "unselected"))
+        args += ["--mcps", "refs", "baseline"]
+
+    assert main([*args, "--json"]) == 0
+    expected = json.loads(capsys.readouterr().out)["expected"]
+    assert main(args) == 0
+    output = capsys.readouterr().out
+    assert (
+        f"群の見込み: {expected['total_usd']} USD"
+        f"（初期起動の見積もり {expected['discovery_estimate_usd']} USD"
+        f" × 検証役の倍率 {expected['verifier_multiplier']:g}）"
+    ) in output
+    if group == "security":
+        assert "使う MCP: refs, baseline\n" in output
+        assert "群の見込みには、初期起動ごとに選択した各 MCP との一往復を含めます。" in output
+        assert "unselected" not in output
+    else:
+        assert "使う MCP:" not in output
 
 
 def micro_estimate(prompt_bytes: list[int]) -> ImplementationEstimate:

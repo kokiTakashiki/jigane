@@ -4,7 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, assert_never
 
+from jigane.groups.policy_runs import PolicyShape
 from jigane.llm_runs import claude, pricing
+from jigane.llm_runs.defaults import preflight_budget
 from jigane.skills import launch_index
 from jigane.skills.launch_index import LaunchKind
 
@@ -182,31 +184,29 @@ def check_input_budget(
     *,
     role: str | None = None,
     index: int | None = None,
+    shape: PolicyShape | None = None,
+    principle: str | None = None,
+    prompt_bytes: int | None = None,
 ) -> BudgetCheck:
-    """プロンプトの大きさだけの下限の見積もりで、その起動を呼んでよいかを返す。切り詰めはしない。
-
-    settings.budget.reserve_margin が真なら、CLI に渡す上限から次の一往復の余裕を引くので
-    （claude.cli_budget_usd）、引いた値が下限を割る入力と、出力の見込みのある組で起動の費用の見込みが
-    引いた値以上の入力を止める。偽なら、起動の費用の見込み（出力の分のある組は、それを足した額）が
-    上限以上のときに止める。
-    単価の表に無いモデルは、表の最高の単価で見積もって検査し、その旨の文を返す。
-    """
-    if not settings.has_spending_limit:
-        return BudgetCheck(None, None)
-    budget = settings.budget
-    tokens = budget.prompt_tokens(len(prompt.encode("utf-8")))
+    """上流 CLI の上限強制の可否によらず、共通の予算で起動を判定する。"""
+    budget = preflight_budget(settings, shape=shape, principle=principle)
+    size = len(prompt.encode("utf-8")) if prompt_bytes is None else prompt_bytes
+    tokens = budget.prompt_tokens(size)
+    stopped = budget.input_stops_run(tokens)
+    if stopped:
+        budget = budget.stopping_reference(tokens) or budget
     estimated = budget.launch_cost(tokens)
     notice = (
         pricing.assumed_price_notice(budget.model, estimated) if estimated.assumed_price else None
     )
-    if not budget.input_stops_run(tokens):
+    if not stopped:
         return BudgetCheck(None, notice)
     stop = BudgetStop(
         role,
         index,
         tokens,
         estimated.usd,
-        budget.max_budget_usd,
+        budget.effective_limit(tokens, estimated),
         tuple(largest_sections(prompt)),
         notice,
         budget.reserve_margin,

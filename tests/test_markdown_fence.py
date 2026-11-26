@@ -129,9 +129,11 @@ def test_deleted_file_listing_stays_on_one_line(
 ) -> None:
     (tmp_path / CHANGES_FILE).write_text("", encoding="utf-8")
     monkeypatch.setattr(macro, "load_pairs", lambda _id: [])
-    monkeypatch.setattr(macro, "without_whole_deletions", lambda _diff, _pairs: ("", [EVIL]))
+    monkeypatch.setattr(
+        macro, "without_whole_deletions", lambda _diff, _pairs, **_kwargs: ("", [EVIL])
+    )
     review = cast("Any", SimpleNamespace(id=SimpleNamespace(directory=lambda: tmp_path)))
-    assert f"\n- {ESCAPED}\n" in macro.verifier_changes_text(review)
+    assert f"\n- {ESCAPED}\n" in macro.verifier_changes(review).text
 
 
 def test_shard_file_list_stays_on_one_line(feature_review: Review) -> None:

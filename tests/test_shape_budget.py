@@ -84,12 +84,12 @@ def write_settings(document: dict[str, object]) -> None:
 
 def test_shape_defaults_come_from_the_policy_shape_and_keep_the_current_values() -> None:
     assert PolicyShape.DIAGRAM.run_shape.max_budget_usd == 0.36
-    assert PolicyShape.DESIGN.run_shape.max_budget_usd == 0.5
+    assert PolicyShape.DESIGN.run_shape.max_budget_usd == 0.55
     for shape in (PolicyShape.DIAGRAM, PolicyShape.DESIGN):
         assert shape.run_shape.effort == "high"
 
 
-def test_every_default_value_is_unchanged_for_every_group_and_shape() -> None:
+def test_default_budget_and_effort_for_every_group_and_shape() -> None:
     assert [
         (
             resolve_run_defaults(group, None, None).effort,
@@ -97,7 +97,7 @@ def test_every_default_value_is_unchanged_for_every_group_and_shape() -> None:
         )
         for group in (MACRO, MICRO, SECURITY)
     ] == [("high", 0.36), (None, 0.5), (None, 0.5)]
-    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.max_budget_usd == 0.5
+    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.max_budget_usd == 0.55
 
 
 def test_only_the_diagram_shape_has_a_principle_budget() -> None:
@@ -182,7 +182,7 @@ def test_resolution_order_is_argument_then_shape_then_group(
 
 
 def test_resolution_order_values_of_the_table() -> None:
-    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.max_budget_usd == 0.5
+    assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).budget.max_budget_usd == 0.55
     assert resolve_run_defaults(MICRO, None, None).budget.max_budget_usd == 0.5
     assert resolve_run_defaults(MICRO, None, None).effort is None
     assert resolve_run_defaults(MACRO, PolicyShape.DESIGN, None).effort == "high"
@@ -214,7 +214,7 @@ def test_settings_json_does_not_reach_the_launch(repo: Path) -> None:
     write_settings(SETTINGS_WITH_BUDGETS)
     fake = MacroFake([])
     assert main(["run", str(review.id), "macro"], invoke=fake) == EXIT_OK
-    assert fake.calls[0].budget.limit_usd == 0.5
+    assert fake.calls[0].budget.limit_usd == 0.55
 
 
 def test_the_flag_changes_the_limit(repo: Path) -> None:
@@ -230,7 +230,7 @@ def test_estimate_ignores_settings_json(repo: Path, capsys: pytest.CaptureFixtur
     write_settings(SETTINGS_WITH_BUDGETS)
     assert main(["estimate", str(review.id), "macro", "--json"]) == EXIT_OK
     estimate = json.loads(capsys.readouterr().out)
-    assert estimate["max_budget_usd_per_call"] == 0.5
+    assert estimate["max_budget_usd_per_call"] == 0.55
     assert estimate["effort"] == "high"
 
 
@@ -240,11 +240,21 @@ def test_estimate_and_run_decide_the_limit_the_same_way(
     review = create_design_doc_review(repo, DOCUMENT_PATH)
     for flag in ([], ["--max-budget-usd-per-call", "0.9"]):
         fake = MacroFake([])
-        assert main(["run", str(review.id), "macro", *flag], invoke=fake) == EXIT_OK
-        capsys.readouterr()
+        assert (
+            main(
+                ["run", str(review.id), "macro", *flag],
+                invoke=fake,
+                is_terminal=lambda: True,
+                read_answer=lambda _: "y",
+            )
+            == EXIT_OK
+        )
+        consent = capsys.readouterr().err
         assert main(["estimate", str(review.id), "macro", "--json", *flag]) == EXIT_OK
         estimate = json.loads(capsys.readouterr().out)
-        assert estimate["max_budget_usd_per_call"] == fake.calls[0].budget.limit_usd
+        limit = estimate["max_budget_usd_per_call"]
+        assert limit == fake.calls[0].budget.limit_usd
+        assert f"1 回の目安 {limit:g} USD" in consent
     assert estimate["max_budget_usd_per_call"] == 0.9
 
 
@@ -254,7 +264,7 @@ def test_estimate_json_uses_the_group_limit_and_includes_the_output_part(
     review = create_design_doc_review(repo, DOCUMENT_PATH)
     assert main(["estimate", str(review.id), "macro", "--json", "--effort", "low"]) == EXIT_OK
     estimate = json.loads(capsys.readouterr().out)
-    assert estimate["max_budget_usd_per_call"] == 0.5
+    assert estimate["max_budget_usd_per_call"] == 0.55
     assert estimate["effort"] == "low"
     expected = estimate["expected"]
     assert expected["output_multiplier_source"] == MultiplierSource.DEFAULT.value
@@ -265,7 +275,7 @@ def test_estimate_json_uses_the_group_limit_and_includes_the_output_part(
     ).usd
     assert expected["total_usd"] == pytest.approx(plain_input_usd * DEFAULT_OUTPUT_MULTIPLIER)
     assert expected["total_usd"] > plain_input_usd
-    assert expected["exceeds_budget"] is (expected["total_usd"] >= 0.5)
+    assert expected["exceeds_budget"] is (expected["total_usd"] >= 0.55)
     assert ("budget_warning" in expected) is expected["exceeds_budget"]
     assert not set(estimate) & {
         "total_usd",

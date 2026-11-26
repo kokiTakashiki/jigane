@@ -5,11 +5,12 @@ import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import dataclass, fields, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
-from enum import StrEnum
+from decimal import Decimal
 from fnmatch import fnmatchcase
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from jigane.git.process import (
@@ -20,8 +21,8 @@ from jigane.git.process import (
     run_claude_resolved,
 )
 from jigane.groups.definitions import Effort
-from jigane.groups.policy_runs import PolicyRole
 from jigane.llm_runs import claude_mcp
+from jigane.llm_runs import invocation as invocation_types
 from jigane.llm_runs.codex_mcp import StdioServer
 from jigane.llm_runs.cost import (
     BudgetOutcome,
@@ -44,34 +45,13 @@ from jigane.llm_runs.pricing import (
 )
 from jigane.text.json_input import JsonTooDeepError, loads_bounded
 
-
-@dataclass(frozen=True)
-class LaunchBudget:
-    """1 回の起動の上限。CLI に渡す額と失敗の代用の額を、この一つの値から導く。"""
-
-    # 上限そのもの。金額が報告されない失敗の額をこの値で代える（run）
-    limit_usd: float
-    # CLI に渡す額。上限から次の一往復の余裕を引いてある（cli_budget_usd）
-    cli_usd: float
-
-
-@dataclass(frozen=True)
-class Invocation:
-    prompt: str
-    json_schema: dict[str, Any]
-    working_directory: Path
-    budget: LaunchBudget
-    model: str
-    tools: tuple[str, ...] = ("Read",)
-    effort: Effort | None = None
-    mcp_configs: tuple[Path, ...] = ()
-    allowed_mcp_tools: tuple[str, ...] = ()
-    # None は --max-turns を渡さない（上限なし）
-    max_turns: int | None = None
-    policy_role: PolicyRole | None = None
-    principle: str | None = None
-    reference_mcp: tuple[StdioServer, ...] = ()
-    mcp_server_names: tuple[str, ...] = ()
+# 呼び出し元と試験の import を共通型に移し終えるまで、claude からも同じ型を公開する。
+FailureKind = invocation_types.FailureKind
+Invocation = invocation_types.Invocation
+ClaudeInvocationError = invocation_types.InvocationError
+InvocationResult = invocation_types.InvocationResult
+Invoke = invocation_types.Invoke
+LaunchBudget = invocation_types.LaunchBudget
 
 
 @dataclass(frozen=True)
@@ -101,8 +81,11 @@ class StoredInvocationRecord:
 
     def usage_fields(self) -> dict[str, Any]:
         """額を除く欄。額と出所は cost_as_record が書く。"""
-        usage = asdict(self)
-        del usage["cost"]
+        usage = {
+            item.name: getattr(self, item.name)
+            for item in fields(StoredInvocationRecord)
+            if item.name != "cost"
+        }
         if usage["max_budget_usd"] is None:
             del usage["max_budget_usd"]
         if usage["model"] is None:
@@ -164,16 +147,15 @@ class StoredInvocationRecord:
 
 @dataclass(frozen=True)
 class InvocationRecord(StoredInvocationRecord):
-    """USD 上限を渡せる起動では Invocation.budget.limit_usd を写す。"""
+    """USD 上限を渡せる起動では invocation.Invocation.budget.limit_usd を写す。"""
 
+    # 実行時だけ使う。保存用の代入値と、報告された 0 を区別する。
+    # 課金に必要な使用量の状態を表す usage_incomplete とは独立する。
+    output_tokens_reported: bool = False
 
-@dataclass(frozen=True)
-class InvocationResult:
-    structured_output: dict[str, Any] | None
-    record: InvocationRecord
-
-
-Invoke = Callable[[Invocation], InvocationResult]
+    @property
+    def reported_output_tokens(self) -> int | None:
+        return self.output_tokens if self.output_tokens_reported else None
 
 
 @dataclass(frozen=True)
@@ -190,8 +172,12 @@ class RunBudget:
     # と単価で起動の費用を見積もる。方針の図の形は応答 1 回分、実装とセキュリティは最後の一往復分。
     # None の組は入力だけの見積もりのまま
     output_allowance_tokens: int | None = None
-    # 図の方針と差分の発見・検証に、縮約した資料を使う
+    # 差分の検証に縮約資料を使う移行中の設定。macro の本文と費用判定はこの値によらない
     compact_materials: bool = False
+    reference: "RunBudget | None" = None
+    # 既存の分割計画は金額が同じ予算を同一視する。明示の有無は単価差の補正にだけ使う
+    explicit_limit: bool = dataclass_field(default=False, compare=False)
+    price_launch: Callable[[int, int | None], InputCost] | None = None
 
     @property
     def counts_output(self) -> bool:
@@ -206,6 +192,8 @@ class RunBudget:
 
     def launch_cost(self, prompt_tokens: int) -> "InputCost":
         """起動の費用の見込み。出力の見込みのある組は書き込みに出力を足し、None の組は入力だけ。"""
+        if self.price_launch is not None:
+            return self.price_launch(prompt_tokens, self.output_allowance_tokens)
         if self.output_allowance_tokens is None:
             return input_cost_usd(self.model, prompt_tokens)
         return billed_launch_cost(self.model, prompt_tokens, self.output_allowance_tokens)
@@ -216,10 +204,28 @@ class RunBudget:
             return self
         return self.principles[number]
 
-    def cli_usd(self, prompt_tokens: int) -> float | None:
+    def effective_limit(self, prompt_tokens: int, cost: InputCost) -> float:
+        """既定の上限にだけ、基準単価から増えた分を足す。"""
+        if self.explicit_limit or self.reference is None or cost.assumed_price:
+            return self.max_budget_usd
+        baseline = self.reference.launch_cost(prompt_tokens)
+        if baseline.assumed_price:
+            return self.max_budget_usd
+        increase = Decimal(str(cost.usd)) - Decimal(str(baseline.usd))
+        return float(Decimal(str(self.max_budget_usd)) + max(Decimal(0), increase))
+
+    def cli_usd(self, prompt_tokens: int, limit_usd: float | None = None) -> float | None:
+        if limit_usd is None:
+            limit_usd = self.effective_limit(prompt_tokens, self.launch_cost(prompt_tokens))
         # 最後の一往復の出力を引くのは、余裕を引く組で出力の見込みのあるものだけ
         output_tokens = self.output_allowance_tokens if self.reserve_margin else None
-        return cli_budget_usd(self.model, prompt_tokens, self.max_budget_usd, output_tokens)
+        return cli_budget_usd(self.model, prompt_tokens, limit_usd, output_tokens)
+
+    def stopping_reference(self, prompt_tokens: int) -> "RunBudget | None":
+        reference = self.reference
+        if reference is None or self.explicit_limit:
+            return None
+        return reference if reference.input_stops_run(prompt_tokens) else None
 
     def input_stops_run(self, prompt_tokens: int) -> bool:
         """プロンプトの大きさから見積もった費用で、その起動を止めるか。
@@ -230,16 +236,14 @@ class RunBudget:
         上限以上のときに止める。真で出力の見込みのある組は、launch_cost が CLI に渡す上限以上の
         ときに止め、見込みの無い組は、CLI に渡す上限が下限を割るときに止める。
         """
-        if not self.reserve_margin:
-            return self.launch_cost(prompt_tokens).usd >= self.max_budget_usd
-        cli_usd = self.cli_usd(prompt_tokens)
-        if cli_usd is None:
+        if self.stopping_reference(prompt_tokens) is not None:
             return True
-        if not self.counts_output:
-            return False
-        # CLI は往復の合間に、渡した上限で打ち切る。最初の往復の書き込みだけで CLI の上限に
-        # 届く入力は、費用を使って指摘が 0 件になるので、上限そのものとの比較では通さない。
-        return self.launch_cost(prompt_tokens).usd >= cli_usd
+        cost = self.launch_cost(prompt_tokens)
+        limit = self.effective_limit(prompt_tokens, cost)
+        if not self.reserve_margin:
+            return cost.usd >= limit
+        remaining = self.cli_usd(prompt_tokens, limit)
+        return remaining is None or (self.counts_output and cost.usd >= remaining)
 
 
 @dataclass(frozen=True)
@@ -258,11 +262,12 @@ class RunSettings:
     invoke: Invoke
     # 往復の上限。None の実行は --max-turns を渡さない
     max_turns: int | None = None
-    has_spending_limit: bool = True
+    has_spending_limit: bool = True  # 上流 CLI で USD 上限を強制できるか
     allow_tools: bool = True
     reference_mcp: tuple[StdioServer, ...] = ()
+    denied_read_paths: frozenset[str] = frozenset()
 
-    def invocation(
+    def invocation(  # noqa: PLR0913 同じ起動用の本文バイト数を再利用する
         self,
         *,
         prompt: str,
@@ -272,69 +277,42 @@ class RunSettings:
         mcp_configs: tuple[Path, ...] = (),
         allowed_mcp_tools: tuple[str, ...] = (),
         mcp_server_names: tuple[str, ...] = (),
+        prompt_bytes: int | None = None,
     ) -> Invocation:
         """self.budget.reserve_margin が偽なら、CLI に上限そのものを渡す（余裕を引かない）。"""
-        budget = self.budget.max_budget_usd
-        if self.has_spending_limit and self.budget.reserve_margin:
-            tokens = self.budget.prompt_tokens(len(prompt.encode("utf-8")))
-            reduced = self.budget.cli_usd(tokens)
-            # None は余裕を引くと下限を割る入力。走らせる前の検査（skills/input_budget）が先に
-            # 止める約束で、検査の無い起動でも下限の値を渡し、上限を超える側へは倒さない。
-            budget = (
-                reduced
-                if reduced is not None
-                else self.budget.max_budget_usd * MIN_CLI_BUDGET_FRACTION
-            )
+        enabled_tools = tools if self.allow_tools else ()
         return Invocation(
             prompt=prompt,
             json_schema=json_schema,
             working_directory=working_directory,
-            budget=LaunchBudget(limit_usd=self.budget.max_budget_usd, cli_usd=budget),
+            budget=self._launch_budget(prompt, prompt_bytes),
             model=self.budget.model,
-            tools=tools if self.allow_tools else (),
+            tools=enabled_tools,
             effort=self.effort,
             mcp_configs=mcp_configs,
             allowed_mcp_tools=allowed_mcp_tools,
             max_turns=self.max_turns,
             reference_mcp=self.reference_mcp,
             mcp_server_names=mcp_server_names,
+            denied_read_paths=self.denied_read_paths if enabled_tools else frozenset(),
         )
 
-
-class FailureKind(StrEnum):
-    """起動の失敗の種類。失敗を投げる地点が決める。
-
-    走らせ直せば通りうるのは `transient` が真の種類だけ。
-    """
-
-    TIMEOUT = "timeout"
-    CONNECTION = "connection"
-    RATE_LIMIT = "rate_limit"
-    OVERLOADED = "overloaded"
-    SERVER_ERROR = "server_error"
-    BUDGET_EXCEEDED = "budget_exceeded"
-    TURNS_EXCEEDED = "turns_exceeded"
-    BAD_OUTPUT = "bad_output"
-    MCP_RESPONSE = "mcp_response"
-    OTHER = "other"
-
-    @property
-    def transient(self) -> bool:
-        return self in _TRANSIENT_KINDS
+    def _launch_budget(self, prompt: str, prompt_bytes: int | None) -> LaunchBudget:
+        budget = self.budget
+        limit = budget.max_budget_usd
+        if not self.has_spending_limit or (not budget.reserve_margin and budget.reference is None):
+            return LaunchBudget(limit_usd=limit, cli_usd=limit)
+        size = len(prompt.encode("utf-8")) if prompt_bytes is None else prompt_bytes
+        tokens = budget.prompt_tokens(size)
+        limit = budget.effective_limit(tokens, budget.launch_cost(tokens))
+        reduced = budget.cli_usd(tokens, limit) if budget.reserve_margin else limit
+        # 上限に合わない入力は事前検査で止める。検査を経ない起動でも余裕を戻さない
+        cli_usd = reduced if reduced is not None else limit * MIN_CLI_BUDGET_FRACTION
+        return LaunchBudget(limit_usd=limit, cli_usd=cli_usd)
 
 
 # claude の標準出力は信頼しない入力なので、読む前に入れ子の深さを数えて上限で拒む
 _MAX_OUTPUT_NESTING = 200
-
-_TRANSIENT_KINDS = frozenset(
-    {
-        FailureKind.TIMEOUT,
-        FailureKind.CONNECTION,
-        FailureKind.RATE_LIMIT,
-        FailureKind.OVERLOADED,
-        FailureKind.SERVER_ERROR,
-    }
-)
 
 # HTTP の状態の数字は、金額や小数の一部（0.429、0.4291）に当たらないよう、前後に数字と小数点が
 # 続かない 3 桁に限り、さらに「status」「HTTP」「error」の直後か、状態の名前の直前にあるものだけ
@@ -385,29 +363,6 @@ def _cost(payload: dict[str, Any] | None) -> Cost:
     if payload is not None and "total_cost_usd" in payload:
         return Measured(float(payload["total_cost_usd"]))
     return Unreported()
-
-
-class ClaudeInvocationError(Exception):
-    def __init__(
-        self,
-        cause: str,
-        record: InvocationRecord,
-        kind: FailureKind = FailureKind.OTHER,
-    ) -> None:
-        super().__init__(cause)
-        # cause は表示と保存の文面だけ。種類は投げる地点が kind で決める
-        self.cause = cause
-        # 金額が報告されない失敗の額は、投げる地点が起動の上限で代えて渡す（failure_record）
-        self.record = record
-        self.kind = kind
-
-    @property
-    def transient(self) -> bool:
-        return self.kind.transient
-
-    @property
-    def cost(self) -> Cost:
-        return self.record.cost
 
 
 def _schema_for_cli(schema: dict[str, Any]) -> dict[str, Any]:
@@ -514,7 +469,26 @@ def secret_read_denials() -> list[str]:
     ]
 
 
+_GITIGNORE_LITERAL_ESCAPES = str.maketrans({char: "\\" + char for char in "\\*?[] "})
+
+
+def _absolute_read_denial(path: PurePath) -> str:
+    # Claude Code は Windows のドライブを /c/ の形に変換して照合する。
+    if isinstance(path, PureWindowsPath) and path.drive.endswith(":"):
+        absolute = f"/{path.drive[-2].lower()}/{path.relative_to(path.anchor).as_posix()}"
+    else:
+        absolute = path.as_posix()
+    # // はファイルシステムの根に固定する。インライン設定でも設定元に依存しない。
+    return f"Read(/{absolute.translate(_GITIGNORE_LITERAL_ESCAPES)})"
+
+
 def build_command(invocation: Invocation) -> list[str]:
+    denials = secret_read_denials()
+    if invocation.denied_read_paths:
+        root = invocation.working_directory.resolve()
+        denials.extend(
+            _absolute_read_denial(root / path) for path in sorted(invocation.denied_read_paths)
+        )
     # プロンプトは引数に入れない。標準入力で渡す（run を参照）
     command = [
         claude_binary(),
@@ -528,7 +502,7 @@ def build_command(invocation: Invocation) -> list[str]:
         json.dumps(
             {
                 "permissions": {
-                    "deny": secret_read_denials(),
+                    "deny": denials,
                     "blockReadsOutsideWorkingDirectories": True,
                 },
                 "includeGitInstructions": False,
@@ -613,10 +587,13 @@ def parse_record(
     started_at: str,
     model: str | None = None,
 ) -> InvocationRecord:
-    usage = payload.get("usage") or {}
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    output_tokens = invocation_types.reported_output_tokens(usage)
     return InvocationRecord(
         input_tokens=usage.get("input_tokens", 0),
-        output_tokens=usage.get("output_tokens", 0),
+        output_tokens=output_tokens or 0,
         cache_read_input_tokens=usage.get("cache_read_input_tokens", 0),
         cache_creation_input_tokens=usage.get("cache_creation_input_tokens", 0),
         cost=_cost(payload),
@@ -628,6 +605,7 @@ def parse_record(
         started_at=started_at,
         max_budget_usd=limit_usd,
         model=model,
+        output_tokens_reported=output_tokens is not None,
     )
 
 

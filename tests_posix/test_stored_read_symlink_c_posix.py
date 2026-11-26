@@ -41,7 +41,7 @@ def _diff_review(project: Path) -> Review:
     "read",
     [
         macro.changes_prompt_text,
-        macro.verifier_changes_text,
+        macro.verifier_changes,
         policy_value_sets._added_lines,
     ],
 )

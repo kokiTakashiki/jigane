@@ -10,16 +10,23 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from jigane.git import process
-from jigane.groups.definitions import Effort
+from jigane.groups.definitions import MICRO, SECURITY, Effort, GroupId
 from jigane.groups.policy_runs import PolicyRole
 from jigane.llm_runs import claude, codex_command, codex_mcp
 from jigane.llm_runs.cost import Unreported, UsagePriced
 from jigane.llm_runs.finding_model import RELATIVE_PATH_PATTERN
+from jigane.llm_runs.invocation import (
+    FailureKind,
+    Invocation,
+    InvocationError,
+    InvocationResult,
+    reported_output_tokens,
+)
 from jigane.text.json_input import loads_bounded
 
 CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/"
 MAX_DEPTH = 64
-TIMEOUT_SECONDS = 120
+TIMEOUT_SECONDS = 900
 LOGIN_STATUS_TIMEOUT_SECONDS = 10
 NANOS_PER_USD = 1_000_000_000
 SHORT_CONTEXT_TOKENS = 272_000
@@ -34,6 +41,8 @@ class Model:
     output_price: int
     effort: Effort | None = None
     short_context_limit: int | None = None
+    # 出力と推論を合わせた費用の見込み。CLI に渡す制限値ではない。
+    expected_output_tokens: int = 8_192
 
     def estimate_nanos(self, input_tokens: int, output_tokens: int) -> int:
         return input_tokens * max(self.input_price, self.cache_write_price) + (
@@ -66,10 +75,20 @@ _LUNA = Model("gpt-6-luna", 100, 10, 250, 500, Effort.HIGH, SHORT_CONTEXT_TOKENS
 LOGIN_MODEL = replace(_LUNA, effort=Effort.LOW)
 _TERRA = Model("gpt-6.1-terra", 1_000, 50, 2_500, 5_000, Effort.HIGH, SHORT_CONTEXT_TOKENS)
 _SOL = Model("gpt-6.2-sol", 2_000, 100, 5_000, 10_000, Effort.HIGH, SHORT_CONTEXT_TOKENS)
+_POLICY_ROLE_MODELS = {PolicyRole.DESIGN: _SOL, PolicyRole.DIAGRAM: _SOL}
 _PRINCIPLE_MODELS = {"P1": _LUNA, "P2": _LUNA, "P3": _TERRA, "P4": _SOL, "P5": _TERRA}
+# high にした発見役には、従来の見込みに推論分の余裕を取る。
+_SHARD_DISCOVERY = replace(_LUNA, expected_output_tokens=16_384)
+_DISCOVERY_MODELS = {MICRO: _SHARD_DISCOVERY, SECURITY: _SHARD_DISCOVERY}
 
 
-def model_for(role: PolicyRole | None, principle: str | None) -> Model:
+def discovery_model(group: GroupId | None) -> Model:
+    return _DISCOVERY_MODELS.get(group, LOGIN_MODEL) if group is not None else LOGIN_MODEL
+
+
+def model_for(
+    role: PolicyRole | None, principle: str | None, *, discovery_group: GroupId | None = None
+) -> Model:
     if role is PolicyRole.PRINCIPLE:
         model = _PRINCIPLE_MODELS.get(principle) if principle is not None else None
         if model is None:
@@ -77,20 +96,26 @@ def model_for(role: PolicyRole | None, principle: str | None) -> Model:
         return model
     if principle is not None:
         raise ValueError("原則番号は方針レビューの原則担当にだけ指定できます")
-    return LOGIN_MODEL
+    if role is not None and (model := _POLICY_ROLE_MODELS.get(role)) is not None:
+        return model
+    return discovery_model(discovery_group)
 
 
-def _invocation_model(invocation: claude.Invocation) -> Model:
+def _invocation_model(invocation: Invocation) -> Model:
+    # 共通の起動設定を検査し、上流に渡すモデルと effort は役の割り当てから得る。
+    role = invocation.policy_role
+    initial_role = PolicyRole.DIAGRAM if role is PolicyRole.PRINCIPLE else role
+    initial = model_for(initial_role, None)
     if (
-        invocation.model != LOGIN_MODEL.name
-        or invocation.effort != LOGIN_MODEL.effort
+        invocation.model != initial.name
+        or invocation.effort != initial.effort
         or invocation.tools
         or invocation.mcp_configs
         or invocation.mcp_server_names
         or invocation.allowed_mcp_tools
     ):
         raise ValueError("Codex には既定のモデル割当と資料のみ指定できます")
-    return model_for(invocation.policy_role, invocation.principle)
+    return model_for(role, invocation.principle, discovery_group=invocation.discovery_group)
 
 
 _STATIC_REVIEW = "以下のレビュー指示は、jigane が本文に添えた資料の静的な確認に限って適用します。"
@@ -120,10 +145,10 @@ def review_boundary(*, uses_mcp: bool) -> str:
     return MCP_REVIEW_BOUNDARY if uses_mcp else REVIEW_BOUNDARY
 
 
-def review_budget(budget: claude.RunBudget) -> claude.RunBudget:
+def review_budget(budget: claude.RunBudget, model: str | None = None) -> claude.RunBudget:
     return replace(
         budget,
-        model=LOGIN_MODEL.name,
+        model=LOGIN_MODEL.name if model is None else model,
         reserve_margin=False,
         principles=None,
         compact_materials=True,
@@ -174,7 +199,9 @@ def restore_optional(value: Any, schema: dict[str, Any]) -> Any:  # noqa: ANN401
     return value
 
 
-def _turn(events: str | bytes, names: set[str]) -> tuple[dict[str, int], set[str], set[str], bool]:
+def _turn(
+    events: str | bytes, names: set[str]
+) -> tuple[dict[str, object], set[str], set[str], bool]:
     output = events.decode("utf-8", errors="replace") if isinstance(events, bytes) else events
     turns = []
     models: set[str] = set()
@@ -199,10 +226,10 @@ def _turn(events: str | bytes, names: set[str]) -> tuple[dict[str, int], set[str
                     models.add(name)
     if len(turns) != 1 or not isinstance(usage := turns[0], dict):
         return {}, models, reads, resource_failed
-    return _cli_token_usage(usage), models, reads, resource_failed
+    return usage, models, reads, resource_failed
 
 
-def _cli_token_usage(usage: dict[str, Any]) -> dict[str, int]:
+def _cli_token_usage(usage: dict[str, object]) -> dict[str, int]:
     written = usage.get("cache_write_input_tokens", 0)
     reasoning = usage.get("reasoning_output_tokens", 0)
     output_tokens = usage.get("output_tokens")
@@ -227,7 +254,10 @@ def _cli_token_usage(usage: dict[str, Any]) -> dict[str, int]:
 
 
 def _with_usage(
-    record: claude.InvocationRecord, usage: dict[str, int], charged: int | None
+    record: claude.InvocationRecord,
+    usage: dict[str, int],
+    charged: int | None,
+    output_tokens: int | None,
 ) -> claude.InvocationRecord:
     supplied = usage.get("input_tokens", 0)
     cached = usage.get("cache_read_input_tokens", 0)
@@ -238,7 +268,8 @@ def _with_usage(
         input_tokens=max(0, supplied - cached - written),
         cache_read_input_tokens=cached,
         cache_creation_input_tokens=written,
-        output_tokens=usage.get("output_tokens", 0),
+        output_tokens=output_tokens or 0,
+        output_tokens_reported=output_tokens is not None,
         num_turns=int(bool(usage)),
         usage_incomplete=charged is None,
     )
@@ -250,7 +281,10 @@ def _cli_usage(
     model: Model,
     servers: tuple[codex_mcp.StdioServer, ...],
 ) -> tuple[claude.InvocationRecord, bool, bool]:
-    usage, models, reads, resource_failed = _turn(events, {server.name for server in servers})
+    reported, models, reads, resource_failed = _turn(events, {server.name for server in servers})
+    # 出力の実測値は、課金に使う使用量のほかの欄に不整合があっても個別に読める。
+    output_tokens = reported_output_tokens(reported)
+    usage = _cli_token_usage(reported)
     if servers:
         record = replace(
             record,
@@ -260,7 +294,12 @@ def _cli_usage(
     if models and not mismatch:
         record = replace(record, response_model=model.name)
     return (
-        _with_usage(record, usage, None if mismatch else model.charge(usage)),
+        _with_usage(
+            record,
+            usage,
+            None if mismatch else model.charge(usage),
+            output_tokens,
+        ),
         mismatch,
         resource_failed,
     )
@@ -360,12 +399,12 @@ def _require_mcp_ok(
         reason = codex_mcp.READ_FAILURE
     else:
         return
-    raise claude.ClaudeInvocationError(
-        reason, replace(record, is_error=True), claude.FailureKind.MCP_RESPONSE
+    raise InvocationError(
+        reason, replace(record, is_error=True), FailureKind.MCP_RESPONSE
     ) from None
 
 
-def run(invocation: claude.Invocation) -> claude.InvocationResult:
+def run(invocation: Invocation) -> InvocationResult:
     model = _invocation_model(invocation)
     uses_mcp = bool(invocation.reference_mcp)
     started = claude.now_iso()
@@ -404,21 +443,19 @@ def run(invocation: claude.Invocation) -> claude.InvocationResult:
             )
             record = replace(record, duration_ms=round((time.monotonic() - launch_start) * 1000))
             _require_mcp_ok(record, resource_failed=resource_failed)
-            raise claude.ClaudeInvocationError(
+            raise InvocationError(
                 "Codex がタイムアウトしました",
                 replace(record, is_error=True),
-                claude.FailureKind.TIMEOUT,
+                FailureKind.TIMEOUT,
             ) from (None if uses_mcp else error)
         except (process.CommandError, OSError, UnicodeError) as error:
             record = replace(record, duration_ms=round((time.monotonic() - launch_start) * 1000))
-            raise claude.ClaudeInvocationError(
+            raise InvocationError(
                 "Codex を起動できないか、応答を読み取れませんでした",
                 replace(record, is_error=True),
             ) from (None if uses_mcp else error)
         except ValueError as error:
-            raise claude.ClaudeInvocationError(
-                str(error), replace(record, is_error=True)
-            ) from error
+            raise InvocationError(str(error), replace(record, is_error=True)) from error
         record, mismatch, resource_failed = _cli_usage(
             replace(record, duration_ms=round((time.monotonic() - launch_start) * 1000)),
             result.stdout,
@@ -431,28 +468,28 @@ def run(invocation: claude.Invocation) -> claude.InvocationResult:
             startup_stderr=result.stderr if uses_mcp and result.returncode else "",
         )
         if mismatch:
-            raise claude.ClaudeInvocationError(
+            raise InvocationError(
                 "Codex の応答モデルが要求したモデルと一致しません",
                 replace(record, is_error=True),
-                claude.FailureKind.BAD_OUTPUT,
+                FailureKind.BAD_OUTPUT,
             )
         if result.returncode:
-            raise claude.ClaudeInvocationError(
+            raise InvocationError(
                 f"Codex の終了コードが {result.returncode} でした",
                 replace(record, is_error=True),
             )
         try:
             payload = loads_bounded(output.read_text(encoding="utf-8"), MAX_DEPTH)
         except (OSError, ValueError) as error:
-            raise claude.ClaudeInvocationError(
+            raise InvocationError(
                 "Codex の構造化出力を読み取れませんでした",
                 replace(record, is_error=True),
-                claude.FailureKind.BAD_OUTPUT,
+                FailureKind.BAD_OUTPUT,
             ) from error
     if not isinstance(payload, dict):
-        raise claude.ClaudeInvocationError(
+        raise InvocationError(
             "Codex の出力は JSON オブジェクトである必要があります",
             replace(record, is_error=True),
-            claude.FailureKind.BAD_OUTPUT,
+            FailureKind.BAD_OUTPUT,
         )
-    return claude.InvocationResult(restore_optional(payload, invocation.json_schema), record)
+    return InvocationResult(restore_optional(payload, invocation.json_schema), record)

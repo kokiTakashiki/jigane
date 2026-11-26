@@ -6,7 +6,24 @@ pipeline より下、input_budget（BudgetStop）より上に置く。
 from collections.abc import Sequence
 
 from jigane.groups.definitions import GroupId
+from jigane.llm_runs.claude import InvocationRecord
+from jigane.llm_runs.invocation import FailureKind, InvocationError
 from jigane.skills.input_budget import BudgetStop
+
+MIN_EMPTY_REVIEW_OUTPUT_TOKENS = 100
+
+
+def require_review_output(record: InvocationRecord, findings: Sequence[object]) -> None:
+    """主たるレビュー起動で、検証済みの配列を後処理する前に確かめる。"""
+    tokens = record.reported_output_tokens
+    if not findings and tokens is not None and tokens < MIN_EMPTY_REVIEW_OUTPUT_TOKENS:
+        raise InvocationError(
+            f"警告: 出力が {tokens} トークン（{MIN_EMPTY_REVIEW_OUTPUT_TOKENS} 未満）で"
+            "指摘を得られず、レビューが欠けています。"
+            "もう一度実行するか、別のエージェントで確かめてください",
+            record,
+            FailureKind.SHORT_EMPTY_OUTPUT,
+        )
 
 
 class DiscoveryError(Exception):

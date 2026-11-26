@@ -34,13 +34,13 @@ from jigane.skills.estimate_result import (
 )
 from jigane.skills.estimator import estimate_of
 from jigane.skills.group_expectation import (
-    CODEX_LOGIN_OUTPUT_TOKENS,
     GroupExpectation,
+    VerifierMultiplierSource,
     codex_login_expectation,
     read_expectation,
 )
 from jigane.skills.launch_prompts import LaunchInput, LaunchPrompt, launch_prompts
-from jigane.skills.mcp import NO_MCP, McpSelection
+from jigane.skills.mcp import ALL_TOOLS_NOTICE, NO_MCP, McpSelection
 from jigane.skills.output_estimate import skipped_rows_message
 from jigane.skills.review_docs import read_docs_for_review
 from jigane.storage.agent_selection import Agent
@@ -50,7 +50,7 @@ CODEX_DESIGN_ESTIMATE_NOTE = (
     "資料は宣言、設計書の全文と構造、付属の文書、名指しの照合の表、"
     "選んだファイル、いまの形の図、前の回の指摘です。"
     "Codex 用の境界文を含む初期プロンプトから入力トークンを概算し、"
-    f"出力と推論は計 {CODEX_LOGIN_OUTPUT_TOKENS:,} トークンとします。"
+    "出力と推論は計 {output_tokens:,} トークンとします。"
     "公開 API 単価で換算した見込みを expected.total_usd に出します。"
     "実行後の換算額は Codex CLI が報告した使用量から求めます。"
 )
@@ -202,10 +202,36 @@ def estimate_record(
 
 
 def _with_group_expectation(
-    record: dict[str, Any], expectation: GroupExpectation
+    record: dict[str, Any], expectation: GroupExpectation | None
 ) -> dict[str, Any]:
     """入力の費用の欄の `expected` に群の見込みを重ねる。設計書の形は既存の鍵を残す。"""
-    return {**record, "expected": {**record.get("expected", {}), **expectation.as_record()}}
+    group_record = {"total_usd": None} if expectation is None else expectation.as_record()
+    return {**record, "expected": {**record.get("expected", {}), **group_record}}
+
+
+def group_expectation_lines(expectation: GroupExpectation | None) -> list[str]:
+    if expectation is None:
+        return ["群の費用を見積もれません。予定する初期起動がありません。"]
+    total = f"群の見込み: {expectation.total_usd} USD"
+    if expectation.source == VerifierMultiplierSource.NO_VERIFIER:
+        return [total]
+    return [
+        (
+            f"{total}"
+            f"（初期起動の見積もり {expectation.discovery_usd} USD"
+            f" × 検証役の倍率 {expectation.multiplier:g}）"
+        )
+    ]
+
+
+def mcp_lines(names: tuple[str, ...], notice: str) -> list[str]:
+    if not names:
+        return []
+    return [
+        f"使う MCP: {', '.join(names)}",
+        f"{notice}。",
+        "群の見込みには、初期起動ごとに選択した各 MCP との一往復を含めます。",
+    ]
 
 
 def print_estimate(
@@ -215,14 +241,11 @@ def print_estimate(
     *,
     as_json: bool,
     expectation: GroupExpectation,
-    effort: Effort | None = None,
-    max_budget_usd: float | None = None,
+    defaults: RunDefaults,
+    mcp_names: tuple[str, ...],
 ) -> None:
     warnings = report.warnings
     estimate = report.estimate
-    defaults = resolve_run_defaults(
-        group, estimate.policy_shape(), effort, max_budget_usd=max_budget_usd
-    )
     basis = defaults.budget
     model = basis.model
     blockers = failures.blockers()
@@ -241,6 +264,8 @@ def print_estimate(
             f"入力トークンの見積もり（検査と見積もりに使う数）: {estimate.discovery_input_tokens}",
             *notice_lines(estimate),
             *input_cost_lines(estimate, basis),
+            *group_expectation_lines(expectation),
+            *mcp_lines(mcp_names, ALL_TOOLS_NOTICE),
             *skipped_rows_lines(estimate),
             *past_run_lines(estimate.past_run, model),
             f"モデルの既定値: {model}",
@@ -263,23 +288,24 @@ def print_codex_estimate(
     as_json: bool,
     mcp_names: tuple[str, ...],
 ) -> None:
-    boundary = codex.review_boundary(uses_mcp=bool(mcp_names))
-    sizes = [launch.size + len(boundary.encode("utf-8")) for launch in prompts]
+    uses_mcp = bool(mcp_names)
+    boundary_size = len(codex.review_boundary(uses_mcp=uses_mcp).encode("utf-8"))
+    sizes = [launch.size for launch in prompts]
     sizes_text = ", ".join(map(str, sizes)) or "なし"
     launches = [
-        codex_launch_estimate(launch, size, uses_mcp=bool(mcp_names))
+        codex_launch_estimate(launch, size, boundary_size, uses_mcp=uses_mcp)
         for launch, size in zip(prompts, sizes, strict=True)
     ]
-    default = codex.LOGIN_MODEL
-    expectation = (
-        codex_login_expectation(prompts, has_verifier=report.estimate.has_verifier)
-        if not mcp_names
-        else None
+    default = prompts[0].codex_model() if prompts else codex.discovery_model(group)
+    expectation = codex_login_expectation(
+        prompts, has_verifier=report.estimate.has_verifier, mcp_count=len(mcp_names)
     )
     if as_json:
         record = report.estimate.to_record()
         if isinstance(report.estimate, DesignPolicyEstimate):
-            record["note"] = CODEX_DESIGN_ESTIMATE_NOTE
+            record["note"] = CODEX_DESIGN_ESTIMATE_NOTE.format(
+                output_tokens=default.expected_output_tokens
+            )
         print(
             json.dumps(
                 {
@@ -297,14 +323,12 @@ def print_codex_estimate(
                     ).to_json(),
                     "history_warnings": [warning.to_json() for warning in report.warnings],
                     "input_cost_usd": None,
-                    "expected": (
-                        {"total_usd": None} if expectation is None else expectation.as_record()
-                    ),
+                    **_with_group_expectation({}, expectation),
                     "planned_invocations": len(sizes),
                     "has_verifier": report.estimate.has_verifier,
                     "prompt_bytes": sizes,
                     "launches": launches,
-                    "noninteractive_run_available": expectation is not None,
+                    "noninteractive_run_available": not uses_mcp and expectation is not None,
                     "noninteractive_requires": None if mcp_names else "codex login",
                     "noninteractive_model": None if mcp_names else default.name,
                     **(
@@ -321,7 +345,7 @@ def print_codex_estimate(
     print_lines(
         [
             *size_lines(report.estimate),
-            f"Codex の初期起動 {len(sizes)} 回（各プロンプト {sizes_text} バイト）",
+            f"Codex の初期起動 {len(sizes)} 回（各プロンプトの本文 {sizes_text} バイト）",
             *(
                 ["検証などの追加起動数は実行時に決まります"]
                 if report.estimate.has_verifier
@@ -334,37 +358,33 @@ def print_codex_estimate(
                 f"（effort {row['effort'] or '既定'}、本文の入力概算 {row['input_usd']:.6f} USD）"
                 for row in launches
             ),
-            *([f"使う MCP: {', '.join(mcp_names)}", f"{REFERENCE_NOTICE}。"] if mcp_names else []),
             (
                 "本文の入力概算はバイト数と公開 API 単価で換算し、"
-                "スキーマ、キャッシュ、出力、推論を含みません"
+                "上流の境界文、スキーマ、キャッシュ、出力、推論を含みません"
                 + ("。MCP から実行中に取得する資料も含みません。" if mcp_names else "。")
             ),
+            *group_expectation_lines(expectation),
             *(
-                [f"{codex.NO_DEBUG_MCP}。"]
-                if mcp_names
-                else codex_debug_estimate_lines(expectation)
+                [
+                    (
+                        "群の見込みは、初期起動ごとの境界文込みの入力と"
+                        f"出力・推論 {default.expected_output_tokens:,} トークンを"
+                        "公開 API 単価で換算します。"
+                    )
+                ]
+                if expectation is not None
+                else []
             ),
+            *mcp_lines(mcp_names, REFERENCE_NOTICE),
+            *([f"{codex.NO_DEBUG_MCP}。"] if mcp_names else []),
             f"{codex.NO_SPENDING_LIMIT}。",
             *(f"警告: {warning.text()}" for warning in report.warnings),
         ]
     )
 
 
-def codex_debug_estimate_lines(expectation: GroupExpectation | None) -> list[str]:
-    if expectation is None:
-        return ["群の費用を見積もれないため非対話の単群は実行できません。"]
-    return [
-        (
-            f"群の見込み: {expectation.total_usd} USD"
-            f"（初期起動の入力と出力・推論 {CODEX_LOGIN_OUTPUT_TOKENS:,} トークン/回の概算"
-            f" × 検証役の倍率 {expectation.multiplier:g}）"
-        )
-    ]
-
-
 def codex_launch_estimate(
-    launch: LaunchPrompt, size: int, *, uses_mcp: bool = False
+    launch: LaunchPrompt, size: int, boundary_size: int, *, uses_mcp: bool = False
 ) -> dict[str, Any]:
     model = launch.codex_model()
     tokens = pricing.estimate_input_tokens(size)
@@ -378,7 +398,11 @@ def codex_launch_estimate(
         "noninteractive_model": None if uses_mcp else model.name,
         "noninteractive_effort": None if uses_mcp else model.effort,
         "noninteractive_input_usd": (
-            None if uses_mcp else tokens * model.input_price / codex.NANOS_PER_USD
+            None
+            if uses_mcp
+            else pricing.estimate_input_tokens(size + boundary_size)
+            * model.input_price
+            / codex.NANOS_PER_USD
         ),
     }
 
@@ -420,9 +444,13 @@ def estimate_and_print(
         review,
         group,
         as_json=as_json,
-        expectation=read_expectation(estimate, budget, Path(review.repository_root), group),
-        effort=effort,
-        max_budget_usd=max_budget_usd,
+        expectation=read_expectation(
+            estimate, budget, Path(review.repository_root), group, mcp_count=len(mcp.servers)
+        ),
+        mcp_names=mcp.names,
+        defaults=resolve_run_defaults(
+            group, estimate.policy_shape(), effort, max_budget_usd=max_budget_usd
+        ),
     )
 
 

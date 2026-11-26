@@ -10,9 +10,13 @@ from test_claude import fake_runner, make_invocation
 
 from jigane.commands import main
 from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK, EXIT_PROCESSING_FAILURE
+from jigane.commands.mcp_argument import load_mcp_selection
+from jigane.git.process import is_windows
+from jigane.groups.definitions import GroupId
 from jigane.llm_runs import claude
 from jigane.llm_runs.cost import Measured
 from jigane.reviews.lifecycle import create_feature_review
+from jigane.skills.mcp import SecurityConfigError
 
 project = test_security.project
 
@@ -26,6 +30,54 @@ RESULT = {
     "total_cost_usd": 0.012,
     "structured_output": {"findings": []},
 }
+
+
+@pytest.mark.parametrize(
+    "codex_cli",
+    [False, pytest.param(True, marks=pytest.mark.skipif(is_windows(), reason="stdio は POSIX"))],
+)
+def test_mcp_selection_binds_existing_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, codex_cli: bool
+) -> None:
+    monkeypatch.setenv("JIGANE_MCP_HOME", str(tmp_path))
+    names = ("z-ref", "a_ref")
+    directory = tmp_path / ("mcp-codex" if codex_cli else "mcp-claude")
+    directory.mkdir(mode=0o700)
+    paths = tuple(tmp_path / name if codex_cli else directory / f"{name}.json" for name in names)
+    for name, path in zip(names, paths, strict=True):
+        path.write_text("synthetic registration\n", encoding="utf-8")
+        path.chmod(0o700 if codex_cli else 0o600)
+        if codex_cli:
+            (directory / name).symlink_to(path)
+    guide = tmp_path / "guide.toml"
+    guide.write_text(
+        '[mcps.a_ref]\nuse_for = "second"\n[mcps.z-ref]\nuse_for = " first "\n',
+        encoding="utf-8",
+    )
+    selection = load_mcp_selection(
+        (*names, names[0]), GroupId.SECURITY, guide, codex_cli=codex_cli
+    )
+    assert selection.names == names
+    assert tuple(server.use_for for server in selection.servers) == ("first", "second")
+    resolved = tuple(path.resolve() for path in paths)
+    if codex_cli:
+        assert tuple(
+            (server.name, server.executable) for server in selection.reference_servers
+        ) == tuple(zip(names, resolved, strict=True))
+        assert not selection.config_paths
+        assert not selection.allowed_tools()
+    else:
+        assert selection.config_paths == resolved
+        assert selection.reference_servers == ()
+        allowed = ("mcp__z-ref", "mcp__a_ref", *claude.MCP_RESOURCE_TOOLS)
+        assert selection.allowed_tools() == allowed
+    with pytest.raises(SecurityConfigError, match="作業ディレクトリの外"):
+        selection.require_outside(tmp_path)
+    monkeypatch.setenv("JIGANE_MCP_HOME", str(tmp_path / "missing"))
+    with pytest.raises(SecurityConfigError, match="半角英数字"):
+        load_mcp_selection(("../refs",), GroupId.SECURITY, guide, codex_cli=codex_cli)
+    with pytest.raises(SecurityConfigError, match="同じ集合ではありません"):
+        load_mcp_selection(("refs",), GroupId.SECURITY, guide, codex_cli=codex_cli)
 
 
 def _init(status: str = "connected", *other_names: str) -> dict[str, object]:

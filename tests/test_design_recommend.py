@@ -370,11 +370,13 @@ def test_bare_method_is_narrowed_by_type_in_same_section(tmp_path: Path) -> None
     ]
 
 
-def test_bare_name_with_unrelated_type_in_section_does_not_fall_to_module_function(
+def test_bare_name_with_unrelated_type_in_section_falls_to_module_function(
     tmp_path: Path,
 ) -> None:
     matches = _method_matches(tmp_path, "# 題\n\n## 1. 節\n\n`Other` の `unique_helper`。\n")
-    assert isinstance(matches["unique_helper", 5], NotFound)
+    match = matches["unique_helper", 5]
+    assert _paths(match) == ["lib/helpers.py"]
+    assert _kinds(match) == ["function"]
 
 
 def test_bare_name_without_type_resolves_to_unique_module_function(tmp_path: Path) -> None:

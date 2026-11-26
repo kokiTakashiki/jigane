@@ -80,7 +80,7 @@ def test_login_debug_matches_estimate_and_records_usage_from_a_non_tty(
         row for row in json.loads(capsys.readouterr().out)["rows"] if row["role"] == TOTAL_ROLE
     )
     assert stored["usage_priced_cost_usd"] == result["totals"]["usage_priced_cost_usd"]
-    assert stored["output_tokens"] == 5 * len(roles)
+    assert stored["output_tokens"] == (261 if group == "macro" else 5 * len(roles))
 
 
 @pytest.mark.parametrize("basis", ["input_only", "before_verification", "below_estimate"])

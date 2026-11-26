@@ -22,7 +22,7 @@ from jigane.llm_runs.launch_failure import (
     rerun_count,
     stopped_rerun_count,
 )
-from jigane.skills import adversarial, pipeline, shard_material, shards, shared_rules
+from jigane.skills import adversarial, macro, pipeline, shard_material, shards, shared_rules
 
 
 def make_candidate(viewpoint: str = "D1", claim: str = "c") -> dict[str, Any]:
@@ -657,7 +657,7 @@ def test_excerpt_drops_in_tree_symlink_and_oversized_file(tmp_path: Path) -> Non
         (2, 1, ["rebuttal", "judge"], None),
     ],
 )
-def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
+def test_static_verification_checks_the_cited_lines_and_shows_the_normal_diff(
     tmp_path: Path,
     evidence_line: int,
     challenge_length: int,
@@ -669,7 +669,7 @@ def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
     def invoke(invocation: claude.Invocation) -> claude.InvocationResult:
         assert not invocation.tools
         assert "kept context" in invocation.prompt
-        assert "unrelated context" not in invocation.prompt
+        assert "unrelated context" in invocation.prompt
         if "challenge" in invocation.json_schema["properties"]["items"]["items"]["properties"]:
             observed.append("rebuttal")
             item = {"index": 0, "challenge": challenge_text, "checked": [location]}
@@ -700,7 +700,7 @@ def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
             "+unrelated context",
         ),
     )
-    locations = {"sample": shard_material.hunks(unit)}
+    changes = macro.diff_changes_text("\n".join(unit.diff_lines) + "\n")
     location = {"path": "sample", "start_line": evidence_line, "end_line": evidence_line}
     candidate = {**make_candidate(), "evidence": [location]}
     settings = claude.RunSettings(
@@ -713,10 +713,10 @@ def test_static_verification_checks_the_cited_hunk_and_each_rendered_role(
     outcome = adversarial.verify(
         [candidate],
         group=MICRO,
-        changes="",
+        changes=changes,
         working_directory=tmp_path,
         settings=settings,
-        static_evidence=lambda positions: shard_material.evidence(locations, positions, tmp_path),
+        presented_lines=shard_material.presented_lines([unit], changes),
     )
     assert observed == roles
     assert [item.reason for item in outcome.unverified] == ([] if reason is None else [reason])

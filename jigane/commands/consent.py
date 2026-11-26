@@ -8,9 +8,9 @@ from dataclasses import dataclass, replace
 from jigane.commands.public_urls import installed_version, terms_urls
 from jigane.git.process import CONSENT_PROMPT_END
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, Effort, GroupId
-from jigane.groups.policy_runs import PolicyRole
-from jigane.llm_runs import claude, codex
-from jigane.llm_runs.codex_mcp import REFERENCE_NOTICE
+from jigane.groups.policy_runs import PolicyRole, role_of
+from jigane.llm_runs import claude
+from jigane.llm_runs.adapter import adapter_for
 from jigane.skills.estimate_result import DiagramPolicyEstimate, Estimate
 from jigane.skills.group_expectation import GroupExpectation
 from jigane.skills.mcp import ALL_TOOLS_NOTICE, NO_MCP, McpSelection
@@ -96,6 +96,7 @@ class LaunchPlan:
     mcp: McpSelection = NO_MCP
     codex_principles: tuple[str, ...] = ()
     agent: Agent = Agent.CLAUDE
+    policy_role: PolicyRole | None = None
 
     @property
     def group(self) -> GroupId:
@@ -149,6 +150,7 @@ def launch_plan(
     breakdown = _breakdown_of(group, estimate, settings.budget)
     if discovery_calls is not None:
         breakdown = replace(breakdown, discovery_calls=discovery_calls)
+    shape = estimate.policy_shape()
     return LaunchPlan(
         breakdown,
         group != MACRO,
@@ -157,6 +159,15 @@ def launch_plan(
         estimate.expected_output() is not None,
         mcp=NO_MCP if group == MACRO else mcp,
         codex_principles=codex_principles,
+        policy_role=None if shape is None else role_of(shape),
+    )
+
+
+def _expectation_line(expectation: GroupExpectation) -> str:
+    return EXPECTATION_LINE.format(
+        total=expectation.total_usd,
+        discovery=expectation.discovery_usd,
+        multiplier=expectation.multiplier,
     )
 
 
@@ -165,35 +176,27 @@ def consent_text(
 ) -> list[str]:
     label = GROUP_BY_ID[plan.group].label
     expectation = plan.expectation
+    disclosure = adapter_for(plan.agent).disclosure(
+        plan.group, plan.codex_principles, plan.policy_role
+    )
     if plan.agent is Agent.CODEX:
         calls = f"初期の起動は {plan.minimum_calls} 回です。"
         if plan.can_increase:
             calls += "検証・採否処理などの追加起動数は指摘や実行結果によって変わります。"
         return [
-            f"{label}の実行は Codex CLI（codex exec）を使います。{calls}",
-            (
-                "Codex CLI に保存された ChatGPT ログインで、OpenAI の ChatGPT（chatgpt.com）に、"
-                "jigane が組み立てたコード、文書、履歴、検証資料などを送ります。"
-            ),
-            "一時ディレクトリで動かし、シェル、プラグイン、Web 検索を無効にします。",
+            f"{label}の実行は {disclosure.command}を使います。{calls}",
+            disclosure.data_flow,
+            *disclosure.isolation,
             *(
                 [
                     f"使う MCP: {', '.join(plan.mcp.names)}",
-                    f"登録したコマンドを起動し、{REFERENCE_NOTICE}。",
-                    "取得した資料は同じ送信先へ送ります。",
+                    *disclosure.mcp_notes,
                 ]
                 if plan.mcp.reference_servers
                 else ["MCP は使いません。"]
             ),
-            f"モデル {codex.LOGIN_MODEL.name}（effort {codex.LOGIN_MODEL.effort}）",
-            *(
-                f"原則 {number}: {model.name}（effort {model.effort}）"
-                for number in plan.codex_principles
-                for model in (codex.model_for(PolicyRole.PRINCIPLE, number),)
-            ),
-            f"{codex.NO_SPENDING_LIMIT}。",
-            "報告された使用量をモデルの公開 API 単価で USD に換算して記録します。",
-            "請求額は OpenAI 側で確認してください。",
+            *disclosure.model_and_billing,
+            *([_expectation_line(expectation)] if expectation is not None else []),
         ]
     if expectation is None:
         raise ValueError("同意に表示する実行経路または費用の見込みがありません")
@@ -210,20 +213,15 @@ def consent_text(
         else ["MCP は使いません"]
     )
     lines = [
-        f"{label}の実行は Claude Code CLI（claude -p）を起動します。",
+        f"{label}の実行は {disclosure.command}を起動します。",
+        disclosure.data_flow,
         *mcp,
         f"起動の回数: {calls}",
         f"effort: {plan.effort or '渡さない（Claude Code CLI の既定）'}",
         f"この群の内訳（{label}）:",
         f"  発見役: {plan.breakdown.calls_text()}",
     ]
-    lines.append(
-        EXPECTATION_LINE.format(
-            total=expectation.total_usd,
-            discovery=expectation.discovery_usd,
-            multiplier=expectation.multiplier,
-        )
-    )
+    lines.append(_expectation_line(expectation))
     if plan.breakdown.has_verifier:
         lines.append("  検証役: 回数は見つかった指摘の数で決まり、事前には分かりません")
     else:

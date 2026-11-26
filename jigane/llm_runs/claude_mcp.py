@@ -1,4 +1,4 @@
-"""Claude Code が管理する MCP の状態を stream-json のイベントから読む。"""
+"""Claude Code の MCP に許可する道具と stream-json の状態。"""
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -16,6 +16,12 @@ _DISABLED = "Claude Code が選択した MCP サーバは無効と報告しま�
 _TOOL_FAILURE = "Claude Code が MCP の呼び出しに失敗しました"
 # tool_use / tool_result の項目は message.content の配列内、外から 4 段目の辞書にある。
 _EVENT_METADATA_DEPTH = 4
+
+
+def allowed_tools(names: tuple[str, ...]) -> tuple[str, ...]:
+    if not names:
+        return ()
+    return (*(f"mcp__{name}" for name in names), *MCP_RESOURCE_TOOLS)
 
 
 @dataclass(frozen=True)

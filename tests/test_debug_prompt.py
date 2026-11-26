@@ -14,7 +14,7 @@ from jigane.llm_runs import codex
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import create_feature_review
 from jigane.reviews.resolution import resolve_review
-from jigane.skills import adversarial, macro_compact
+from jigane.skills import adversarial, policy_principles
 from jigane.skills.assembly import AssemblyInput
 from jigane.skills.estimator import estimate_of
 from jigane.skills.launch_prompts import LaunchInput, LaunchRole
@@ -104,10 +104,9 @@ def codex_macro(monkeypatch: pytest.MonkeyPatch) -> MacroFake:
     return fake
 
 
-def test_codex_p1_sends_the_guide_and_the_definition_with_direct_comparison_locations(
+def test_macro_p1_sends_the_value_set_definition_and_comparison_locations(
     value_set_review: str, codex_macro: MacroFake, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    guide = adversarial.template_text(macro_compact.P1_GUIDE)
     prompts = run_json(capsys, value_set_review, "macro")["prompts"]
     assert (
         main(
@@ -118,22 +117,14 @@ def test_codex_p1_sends_the_guide_and_the_definition_with_direct_comparison_loca
     assert sorted(call.prompt for call in codex_macro.calls) == sorted(
         entry["text"] for entry in prompts
     )
-    [p1] = [entry["text"] for entry in prompts if guide in entry["text"]]
-    assert p1.startswith("方針の静的レビュー。- P1 ")
-    assert "| 定義 | 文字列での比較 | 値 |" in p1
+    [p1] = [entry["text"] for entry in prompts if "- P1 単一の情報源" in entry["text"]]
+    assert "### 値の組の表" in p1
     [row] = [line for line in p1.splitlines() if line.startswith("| src/defs.py:1 NAMES |")]
-    assert "4 (src/use.py:2 等値 'alpha'" in row
-    assert "src/use.py:3 所属 'beta', 'gamma'" in row
-    assert "src/use.py:4 接頭辞 'alp' ほか 1 件)" in row
-    assert "src/defs.py:3 所属" not in row
+    assert "`alpha`, `beta`, `gamma`" in row
+    assert "5 (src/defs.py:3 所属, src/use.py:2 等値, src/use.py:3 所属 ほか 2 件)" in row
 
     assert main(["select-agent", "claude"]) == EXIT_OK
-    claude_prompts = run_json(capsys, value_set_review, "macro")["prompts"]
-    assert all(guide not in entry["text"] for entry in claude_prompts)
-    [claude_p1] = [
-        entry["text"] for entry in claude_prompts if "- P1 単一の情報源" in entry["text"]
-    ]
-    assert "src/defs.py:3 所属" in claude_p1
+    assert run_json(capsys, value_set_review, "macro")["prompts"] == prompts
 
 
 def test_codex_run_uses_the_full_p1_prompt_from_debug_prompt(
@@ -143,18 +134,16 @@ def test_codex_run_uses_the_full_p1_prompt_from_debug_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     template_text = adversarial.template_text
+    tail = "\n" + "通常本文の追加行\n" * 2_000 + "通常本文の末尾\n"
     monkeypatch.setattr(
         adversarial,
         "template_text",
-        lambda name: (
-            template_text(name) + "a" * 33_000
-            if name == macro_compact.P1_GUIDE
-            else template_text(name)
-        ),
+        lambda name: template_text(name) + (tail if name == policy_principles.PROMPT else ""),
     )
     prompts = run_json(capsys, value_set_review, "macro")["prompts"]
-    [p1] = [entry for entry in prompts if "## P1の資料の読み方" in entry["text"]]
-    assert p1["bytes"] > 32_768
+    [p1] = [entry for entry in prompts if "- P1 単一の情報源" in entry["text"]]
+    assert p1["bytes"] == len(p1["text"].encode("utf-8")) > 32_768
+    assert p1["text"].endswith(tail)
     assert (
         main(
             ["run", value_set_review, "macro"], is_terminal=lambda: True, read_answer=lambda _: "y"

@@ -163,6 +163,10 @@ class Index:
     skipped: list[str] = field(default_factory=list)
     # パスから、そのファイルのモジュール型の修飾名。宣言の記録はこの接頭辞を持たない
     modules: dict[str, str] = field(default_factory=dict)
+    # モジュール型を持たない言語のトップレベル関数。呼び出しの索引には入らない
+    free_functions: dict[str, list[tuple[str, Declaration]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
     # パスから、そのファイルの import が束縛する名前と取り込んだ元の修飾名
     imported: dict[str, dict[str, str]] = field(default_factory=dict)
     # パスから、対になるマークアップが呼ぶ名前の候補（XAML のイベント結線）
@@ -408,7 +412,18 @@ def _build_index(root: Path, paths: Sequence[str], adapter: SequenceAdapter) -> 
                 _add_type(index, replace(decl, qualified_name=index.type_name(key)), key)
             else:
                 _add_member(index, decl, path, declarations, source)
+        _add_free_functions(index, path, declarations.values())
     return index
+
+
+def _add_free_functions(index: Index, path: str, declarations: Iterable[Declaration]) -> None:
+    if path in index.modules:
+        return
+    for declaration in declarations:
+        if declaration.kind == "function":
+            # Swift の宣言名には引数ラベルが付く。索引は名前だけで引く
+            name = declaration.qualified_name.partition("(")[0]
+            index.free_functions[name].append((path, declaration))
 
 
 def _read_markup(root: Path, paired_markup_path: str | None) -> str | None:

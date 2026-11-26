@@ -58,6 +58,10 @@ class BlockerKind(StrEnum):
     SECURITY_CONFIG = "security_config"
 
 
+class UnsupportedReviewWorkspaceError(Exception):
+    """レビューを開始できない作業場所。"""
+
+
 @dataclass(frozen=True)
 class Blocker(Failure):
     """実行の前に分かっている、実行を止める前提の欠け。形は実行の失敗と同じで、種類だけを列挙型に絞る。"""
@@ -140,6 +144,15 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
             "レビューエージェントの選択を確認してください",
             "`jigane select-agent` を実行してください。"
             "明示指定は `jigane select-agent claude` または `jigane select-agent codex` です",
+        ),
+    ),
+    (
+        UnsupportedReviewWorkspaceError,
+        Kind(
+            "unsupported_review_workspace",
+            "レビューを開始できませんでした",
+            "Windows のローカルドライブに置いたリポジトリでレビューしてください。"
+            "WSL 内のリポジトリは、WSL 内で jigane を実行してレビューしてください",
         ),
     ),
     (
@@ -241,8 +254,7 @@ KINDS: tuple[tuple[type[BaseException], Kind], ...] = (
         Kind(
             "input_budget",
             "資料が大きすぎて実行を止めました",
-            "理由に挙げた大きい節を小さくするか、対象の範囲を絞ってください。"
-            "上限を上げるときは --max-budget-usd-per-call を指定してください",
+            "理由に挙げた大きい節を小さくするか、対象の範囲を絞ってから、もう一度実行してください",
         ),
     ),
     (

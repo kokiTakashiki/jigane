@@ -540,35 +540,6 @@ def _document_types(types_by_section: dict[int, list[TypeInfo]]) -> list[TypeInf
     return merged
 
 
-def _bare_members(
-    world: _World, name: str, scope_types: list[TypeInfo], document_types: list[TypeInfo]
-) -> tuple[list[Member], list[Member]]:
-    """単独名の引き当て先のメンバーを、(確定, 曖昧) に分ける。
-
-    絞りは三段で、先の段で当たればそこで止める。
-    1. 同じ節が名指した型が持つメソッド。節に型の名指しがあるのに、その型のどれもが
-       持たない名前は絞れていない名前なので、次の段へ流さない。
-    2. 節に型の名指しが無いときは、設計書の全体が名指した型が持つメソッド。
-    3. 全体の型でも当たらないときだけ、モジュール直下の関数。
-    """
-    if scope_types:
-        found = [m for info in scope_types for m in info.members.get(name, [])]
-    else:
-        found = [m for info in document_types for m in info.members.get(name, [])]
-        if not found:
-            found = [
-                m
-                for index in world.indexes.indexes
-                for info in index.types.values()
-                if LocationKind(info.kind) is LocationKind.MODULE
-                for m in info.members.get(name, [])
-            ]
-    found.sort(key=lambda m: (m.path, m.line, m.qualified_name))
-    if len({m.owner for m in found}) > 1:
-        return [], found
-    return found, []
-
-
 _LocationKey = tuple[str, int, str, LocationKind]
 
 
@@ -657,14 +628,41 @@ def _match_bare_members(
     ambiguous: dict[_LocationKey, None],
     declarations: list[_Declaration],
 ) -> None:
-    """単独名の引き当て先のメンバーを、確定は引き当て先へ、曖昧は曖昧の側へ足す。"""
-    owners = {key: info for index in world.indexes.indexes for key, info in index.types.items()}
-    resolved, unresolved = _bare_members(world, name, scope_types, document_types)
-    for member in resolved:
-        locations[_member_key(owners.get(member.owner), member)] = None
-        declarations.append(_Declaration(None, member))
-    for member in unresolved:
-        ambiguous[_member_key(owners.get(member.owner), member)] = None
+    """節の型（無ければ文書全体の型）を優先し、当たらなければトップレベルの宣言を引く。"""
+    groups = [
+        (info, info.members[name])
+        for info in scope_types or document_types
+        if name in info.members
+    ]
+    free: list[_LocationKey] = []
+    if not groups:
+        for index in world.indexes.indexes:
+            for info in index.types.values():
+                if LocationKind(info.kind) is not LocationKind.MODULE:
+                    continue
+                # 節に型があっても関数を引く。変数などは従来どおり、節に型が無い場合だけ引く
+                members = tuple(
+                    m
+                    for m in info.members.get(name, ())
+                    if not scope_types or LocationKind(m.kind) is LocationKind.METHOD
+                )
+                if members:
+                    groups.append((info, members))
+            free.extend(
+                (path, decl.span.start_line, decl.qualified_name, LocationKind.FUNCTION)
+                for path, decl in index.free_functions.get(name, ())
+            )
+
+    by_location = {_member_key(info, m): m for info, members in groups for m in members}
+    # 同じ所有型やファイルにあるオーバーロードはまとめ、所有元が複数なら曖昧とする
+    keys = dict.fromkeys(sorted((*by_location, *free)))
+    if len(groups) + len({key[0] for key in free}) > 1:
+        ambiguous.update(keys)
+    else:
+        locations.update(keys)
+        declarations.extend(
+            _Declaration(None, by_location[key]) for key in keys if key in by_location
+        )
 
 
 def _member_key(owner: TypeInfo | None, member: Member) -> _LocationKey:

@@ -92,13 +92,16 @@ def test_full_text_shard_gets_no_extra_head(review: Review) -> None:
 
 
 def test_rebuttal_changes_carry_the_head(review: Review, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(macro, "verifier_changes_text", lambda _review: "### 変更\n\ndiff")
+    materials = adversarial.VerificationChanges("### 変更\n\ndiff", frozenset({"fixture.txt"}))
+    monkeypatch.setattr(macro, "verifier_changes", lambda _review: materials)
     plan = ShardPlan(ShardPlanKind.DIFF, (unit("justfile"), unit("src/a.py")), ())
-    changes = sharded._changes_with_config_heads(review, plan)
+    prepared = sharded._changes_with_config_heads(review, plan)
+    assert prepared.excluded_excerpt_paths == materials.excluded_excerpt_paths
+    changes = prepared.text
     assert changes.startswith("### 変更\n\ndiff")
     assert "=== justfile （冒頭の設定） ===\n```\nset unstable\nset lists" in changes
     only_python = ShardPlan(ShardPlanKind.DIFF, (unit("src/a.py"),), ())
-    assert sharded._changes_with_config_heads(review, only_python) == "### 変更\n\ndiff"
+    assert sharded._changes_with_config_heads(review, only_python) == materials
     rendered = adversarial.render_prompt("rebuttal", changes, candidates_json=[])
     assert "set unstable" in rendered.text
 
@@ -108,7 +111,9 @@ def test_plan_other_than_diff_adds_nothing(
 ) -> None:
     monkeypatch.setattr(macro, "changes_prompt_text", lambda _review: "### 変更")
     plan = ShardPlan(ShardPlanKind.FILES, (unit("justfile"),), ())
-    assert sharded._changes_with_config_heads(review, plan) == "### 変更"
+    assert sharded._changes_with_config_heads(review, plan) == adversarial.VerificationChanges(
+        "### 変更", frozenset()
+    )
 
 
 @pytest.mark.parametrize(

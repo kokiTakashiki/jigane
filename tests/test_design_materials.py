@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from design_materials_support import work
 
 from jigane.languages.kinds import LocationKind
@@ -144,3 +145,170 @@ def test_declaration_kinds_are_outside_the_labelled_location_kinds() -> None:
     declarations = set(LocationKind) - NON_DECLARATION_KINDS
     assert declarations
     assert declarations.isdisjoint(LOCATION_LABELS)
+
+
+def _write_sources(root: Path, files: dict[str, str]) -> None:
+    for path, source in files.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+
+
+def test_generated_file_hint_resolves_functions_in_sections_with_types(tmp_path: Path) -> None:
+    functions = {
+        "git_invocation": "jigane/git/invocation.py",
+        "build_git_invocation": "jigane/git/command_line.py",
+        "_classify_file": "jigane/judgment_map/classification.py",
+        "materials_sections": "jigane/policy_materials/changed_files.py",
+        "file_change": "jigane/judgment_map/changes.py",
+    }
+    _write_sources(
+        tmp_path, {path: f"def {name}():\n    pass\n" for name, path in functions.items()}
+    )
+    _write_sources(tmp_path, {"jigane/git/kinds.py": "class GitSubcommand:\n    pass\n"})
+    document = """\
+# 生成物の印
+
+## 起動の入口
+`GitSubcommand` と `git_invocation` と `build_git_invocation`。
+`jigane/git/invocation.py` を参照する。
+
+## 資料の組み方
+`GitSubcommand` と `_classify_file` と `materials_sections` と `file_change`。
+"""
+    table = design_materials(tmp_path, "docs/generated-file-hint.md", document, []).mentions
+    assert "| `GitSubcommand` | type | 起動の入口 | 4 | 引き当たった | class " in table
+    assert (
+        "| `jigane/git/invocation.py` | path | 起動の入口 | 5 | 引き当たった | ファイル " in table
+    )
+    expected = set()
+    for name, path in functions.items():
+        section, line = ("起動の入口", 4) if "git" in name else ("資料の組み方", 8)
+        qualified = path.removesuffix(".py").replace("/", ".") + "." + name
+        expected.add(
+            f"| `{name}` | type | {section} | {line} | 引き当たった | "
+            f"function {qualified} {path}:1 |"
+        )
+    assert expected <= set(table.splitlines())
+
+
+def test_handover_notice_resolves_parenthesized_function_with_type_in_same_section(
+    tmp_path: Path,
+) -> None:
+    path = "claudeworks/core/host.py"
+    _write_sources(
+        tmp_path,
+        {
+            path: "\n" * 20 + 'def detect_host_kind() -> str:\n    return "linux"\n',
+            "claudeworks/core/runner.py": "class Runner:\n    pass\n",
+        },
+    )
+    document = (
+        f"# 引き継ぎ\n\n## 先行する副コマンド\n`Runner` と `{path}` の `detect_host_kind()`。\n"
+    )
+    doc_path = "docs/private/handover-notice/handover-notice.md"
+    table = design_materials(tmp_path, doc_path, document, []).mentions
+    assert (
+        "| `detect_host_kind` | type | 先行する副コマンド | 4 | 引き当たった | "
+        f"function claudeworks.core.host.detect_host_kind {path}:21 |"
+    ) in table.splitlines()
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "type_kind", "type_name", "method_name", "function_label"),
+    [
+        (
+            "tools.py",
+            (
+                "class Worker:\n    def check_item(self):\n        pass\n"
+                "async def read_item():\n    pass\n"
+            ),
+            "class",
+            "tools.Worker",
+            "check_item",
+            "tools.read_item",
+        ),
+        (
+            "Tools.swift",
+            (
+                "struct Worker {\n    func checkItem(value: Int) {}\n}\n"
+                "func read_item(value: Int) {}\n"
+            ),
+            "struct",
+            "Worker",
+            "checkItem",
+            "read_item(value:)",
+        ),
+        (
+            "Worker.cs",
+            "class Worker {\n    void checkItem(int value) {}\n}\n",
+            "class",
+            "Worker",
+            "checkItem",
+            None,
+        ),
+        (
+            "Worker.java",
+            "class Worker {\n    void checkItem(int value) {}\n}\n",
+            "class",
+            "Worker",
+            "checkItem",
+            None,
+        ),
+    ],
+    ids=["python", "swift", "csharp", "java"],
+)
+def test_callable_mentions_use_language_declarations(
+    tmp_path: Path,
+    path: str,
+    source: str,
+    type_kind: str,
+    type_name: str,
+    method_name: str,
+    function_label: str | None,
+) -> None:
+    _write_sources(tmp_path, {path: source})
+    text = (
+        "# 設計\n\n## 入口\n"
+        f"`Worker`、`{method_name}()`、`Worker.{method_name}` と `read_item`。\n"
+    )
+    rows = design_materials(tmp_path, "docs/design.md", text, []).mentions.splitlines()
+    method_location = f"method {type_name}.{method_name} {path}:2"
+    assert (
+        f"| `Worker` | type | 入口 | 4 | 引き当たった | {type_kind} {type_name} {path}:1 |" in rows
+    )
+    assert f"| `{method_name}` | type | 入口 | 4 | 引き当たった | {method_location} |" in rows
+    assert (
+        f"| `Worker.{method_name}` | qualified_name | 入口 | 4 | 引き当たった | "
+        f"{method_location} |"
+    ) in rows
+    if function_label is not None:
+        assert (
+            f"| `read_item` | type | 入口 | 4 | 引き当たった | "
+            f"function {function_label} {path}:4 |"
+        ) in rows
+
+
+def test_overloads_are_shown_together_and_separate_function_owners_are_ambiguous(
+    tmp_path: Path,
+) -> None:
+    _write_sources(
+        tmp_path,
+        {
+            "Tools.swift": "func read_item() {}\nfunc read_item(value: Int) {}\n",
+            "Worker.swift": "struct Worker {}\n",
+        },
+    )
+    text = "# 設計\n\n## 入口\n`Worker` と `read_item()`。\n"
+    locations = "function read_item() Tools.swift:1、function read_item(value:) Tools.swift:2"
+    materials = design_materials(tmp_path, "docs/design.md", text, ["Tools.swift"])
+    assert f"引き当たった | {locations} |" in materials.mentions
+    assert "`read_item` を名指しました" in materials.selection
+
+    _write_sources(tmp_path, {"other.py": "def read_item():\n    pass\n"})
+    materials = design_materials(tmp_path, "docs/design.md", text, ["Tools.swift", "other.py"])
+    assert (
+        f"曖昧（候補が複数で、一つに絞れない） | {locations}、"
+        "function other.read_item other.py:1 |"
+    ) in materials.mentions
+    assert materials.selection.count(NOT_RECOMMENDED_TEXT) == 2

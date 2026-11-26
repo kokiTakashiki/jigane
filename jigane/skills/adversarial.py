@@ -3,7 +3,7 @@
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
@@ -11,6 +11,7 @@ from importlib import resources
 from pathlib import Path
 from string import Template
 from typing import Any, Literal, cast
+from unicodedata import normalize
 
 from pydantic import BaseModel, ValidationError
 
@@ -31,7 +32,7 @@ from jigane.llm_runs.launch_failure import (
 )
 from jigane.llm_runs.prompt_stamp import PromptStamp
 from jigane.preconditions.integers import positive_int
-from jigane.skills import disclosed, input_budget, pipeline, shared_rules
+from jigane.skills import disclosed, input_budget, pipeline, shard_material, shared_rules
 from jigane.skills.output_models import (
     AlternativeItem,
     DefenseItem,
@@ -241,14 +242,10 @@ class _SplitFailedError(Exception):
         self.role = role
 
 
-StaticEvidence = Callable[[Sequence[tuple[int, int, str]]], str | None]
-
-
-class _SplitMaterialsError(Exception):
-    def __init__(self, role: str, reason: UnverifiedReason, message: str) -> None:
-        super().__init__(message)
-        self.role = role
-        self.reason = reason
+@dataclass(frozen=True)
+class VerificationChanges:
+    text: str
+    excluded_excerpt_paths: frozenset[str]
 
 
 class _SplitStoppedError(Exception):
@@ -320,25 +317,46 @@ def _readable_lines(path: str, working_directory: Path) -> list[str] | None:
         return None
 
 
-def _excerpt(location: object, working_directory: Path) -> dict[str, Any] | None:
+def _excerpt_path_key(path: str) -> str:
+    # 大文字小文字や Unicode の合成の違いを同じファイルとして扱うファイルシステムがある。
+    return normalize("NFC", path).casefold()
+
+
+def _excerpt(
+    location: object,
+    working_directory: Path,
+    excluded_path_keys: frozenset[str],
+    presented_lines: shard_material.EvidenceLines | None,
+) -> dict[str, Any] | None:
     """反証役が示した位置の実物を、jigane が読んで抜粋にする。読めない位置は None。"""
     parsed = _line_range(location)
     if parsed is None:
         return None
     start, end, raw = parsed
     path = claude.normalize_path(raw, working_directory)
-    if path is None:
+    if path is None or _excerpt_path_key(path) in excluded_path_keys:
         return None
-    lines = _readable_lines(path, working_directory)
-    if lines is None or start > len(lines):
-        return None
-    end = min(end, start + EXCERPT_MAX_LINES - 1, len(lines))
-    text = "\n".join(f"{n}: {lines[n - 1]}" for n in range(start, end + 1))
+    end = min(end, start + EXCERPT_MAX_LINES - 1)
+    if presented_lines is None:
+        lines = _readable_lines(path, working_directory)
+        if lines is None or start > len(lines):
+            return None
+        end = min(end, len(lines))
+        text = "\n".join(f"{n}: {lines[n - 1]}" for n in range(start, end + 1))
+    else:
+        # 提示資料の索引には根拠行の照合と同じパスを使う。除外は正規化後のパスで済ませる。
+        indexed = presented_lines.get(raw, {})
+        if not _covers(indexed, start, end):
+            return None
+        text = "\n".join(f"{n}: {indexed[n]}" for n in range(start, end + 1))
     return {"path": path, "start_line": start, "end_line": end, "text": text}
 
 
 def _checked_excerpts(
-    rebuttals: dict[int, dict[str, Any]], working_directory: Path
+    rebuttals: dict[int, dict[str, Any]],
+    working_directory: Path,
+    excluded_path_keys: frozenset[str],
+    presented_lines: shard_material.EvidenceLines | None,
 ) -> list[dict[str, Any]]:
     """候補ごとに、反証役が確かめた位置の抜粋を作る。反証役の書いた文字列は使わない。"""
     result: list[dict[str, Any]] = []
@@ -349,7 +367,7 @@ def _checked_excerpts(
         for location in checked if isinstance(checked, list) else []:
             if len(excerpts) >= EXCERPT_MAX_LOCATIONS or used >= EXCERPT_MAX_CHARS:
                 break
-            excerpt = _excerpt(location, working_directory)
+            excerpt = _excerpt(location, working_directory, excluded_path_keys, presented_lines)
             if excerpt is None:
                 continue
             excerpt["text"] = excerpt["text"][: EXCERPT_MAX_CHARS - used]
@@ -403,61 +421,62 @@ class _Split:
     form: Form
     candidates: tuple[dict[str, Any], ...]
     group: GroupId
-    static_evidence: StaticEvidence | None = None
-    reference_guide: str = ""
+    presented_lines: shard_material.EvidenceLines | None = None
+    excluded_excerpt_path_keys: frozenset[str] = frozenset()
 
 
-def _candidate_positions(candidate: dict[str, Any]) -> list[tuple[int, int, str]]:
-    positions = [_line_range(location) for location in candidate.get("evidence", [])]
-    if None in positions:
-        return []
-    return [position for position in positions if position is not None]
+def _covers(lines: dict[int, str], start: int, end: int) -> bool:
+    return end - start < len(lines) and all(n in lines for n in range(start, end + 1))
 
 
-def _check_static_output(
-    item: RoleItem, split: _Split, candidate: dict[str, Any], changes: str, role: str
-) -> None:
-    if split.static_evidence is None:
-        return
-    positions = _candidate_positions(candidate)
+def _presented(location: object, lines: shard_material.EvidenceLines) -> bool:
+    position = _line_range(location)
+    if position is None:
+        return False
+    start, end, path = position
+    return _covers(lines.get(path, {}), start, end)
+
+
+def _static_output_issue(item: RoleItem, lines: shard_material.EvidenceLines) -> str | None:
     if isinstance(item, RebuttalItem):
         locations = item.checked
-    elif isinstance(item, JudgeRebuttalItem) and item.verified:
+    elif isinstance(item, JudgeRebuttalItem):
+        if not item.verified:
+            return "提示資料で候補の核心を確認できませんでした"
         locations = item.recheck
-    elif isinstance(item, JudgeAlternativeItem):
-        locations = []
     else:
-        raise _SplitMaterialsError(
-            role, UnverifiedReason.MATERIALS_MISSING, "提示資料で候補の核心を確認できませんでした"
-        )
-    for location in locations:
-        position = _line_range(location.model_dump(mode="json"))
-        if position is None or split.static_evidence([*positions, position]) != changes:
-            raise _SplitMaterialsError(
-                role, UnverifiedReason.MATERIALS_MISSING, "提示資料に含まれない根拠行です"
-            )
+        return None
+    if any(not _presented(location.model_dump(mode="json"), lines) for location in locations):
+        return "提示資料に含まれない根拠行です"
+    return None
+
+
+def _missing_candidates(
+    candidates: tuple[dict[str, Any], ...], lines: shard_material.EvidenceLines | None
+) -> list[int]:
+    if lines is None:
+        return []
+    return [
+        number
+        for number, candidate in enumerate(candidates)
+        if not (locations := candidate.get("evidence"))
+        or not all(_presented(location, lines) for location in locations)
+    ]
 
 
 def _checked_role_items(
-    indexed: dict[int, RoleItem], local: dict[int, int], split: _Split, changes: str, role: str
+    indexed: dict[int, RoleItem],
+    local: dict[int, int],
+    lines: shard_material.EvidenceLines | None,
+    missing_material: Callable[[int, str], None],
 ) -> dict[int, RoleItem]:
-    mapped = {local[position]: item for position, item in indexed.items() if position in local}
-    for number, item in mapped.items():
-        _check_static_output(item, split, split.candidates[number], changes, role)
-    return mapped
-
-
-def _verification_materials(split: _Split, fallback: str) -> str:
-    if split.static_evidence is None:
-        return fallback
-    materials = split.static_evidence(_candidate_positions(split.candidates[0]))
-    if materials:
-        return materials
-    raise _SplitMaterialsError(
-        Role.REBUTTAL if split.form == Role.REBUTTAL else Role.ALTERNATIVE,
-        UnverifiedReason.MATERIALS_MISSING,
-        "提示できるハンクで候補の根拠行を被覆できません",
-    )
+    checked = {local[position]: item for position, item in indexed.items() if position in local}
+    if lines is not None:
+        for number, item in tuple(checked.items()):
+            if (issue := _static_output_issue(item, lines)) is not None:
+                missing_material(number, issue)
+                del checked[number]
+    return checked
 
 
 def _render_checked(
@@ -470,9 +489,6 @@ def _render_checked(
     budget_stops: list[input_budget.StoredBudgetStop],
 ) -> RenderedPrompt:
     rendered = render_prompt(prompt_name, changes, **values)
-    if split.reference_guide:
-        text = rendered.text + split.reference_guide
-        rendered = RenderedPrompt(text, stamp_prompt(prompt_name, text))
     check = input_budget.check_input_budget(rendered.text, settings, role=role, index=split.index)
     if check.stop is not None:
         budget_stops.append(check.stop.stored())
@@ -481,18 +497,75 @@ def _render_checked(
 
 
 def _rebuttal_material(
-    rebuttals: dict[int, dict[str, Any]], working_directory: Path, settings: claude.RunSettings
+    rebuttals: dict[int, dict[str, Any]],
+    working_directory: Path,
+    split: _Split,
+    *,
+    allow_tools: bool,
 ) -> dict[str, object]:
-    if not settings.allow_tools:
-        # 提示したハンクに対応する座標を、そのハンクと一緒に判定役へ渡す。
+    if not allow_tools and split.presented_lines is None:
+        # 差分以外の静的な資料では、座標を資料と一緒に判定役へ渡す。
         return {"challenges_json": list(rebuttals.values()), "excerpts_json": []}
     # 位置と抜粋は excerpts_json に移し、challenges_json からは外す。
     return {
         "challenges_json": [
             {k: v for k, v in item.items() if k != "checked"} for item in rebuttals.values()
         ],
-        "excerpts_json": _checked_excerpts(rebuttals, working_directory),
+        "excerpts_json": _checked_excerpts(
+            rebuttals, working_directory, split.excluded_excerpt_path_keys, split.presented_lines
+        ),
     }
+
+
+def _role_values(
+    prompt_name: str,
+    candidates: list[dict[str, Any]],
+    shown: dict[str, dict[int, dict[str, Any]]],
+    working_directory: Path,
+    split: _Split,
+    *,
+    allow_tools: bool,
+) -> dict[str, object]:
+    values: dict[str, object] = {"candidates_json": _indexed(candidates)}
+    for name, items in shown.items():
+        values[_PLACEHOLDER_NAMES[name]] = list(items.values())
+    if prompt_name == Role.JUDGE_REBUTTAL:
+        values.update(
+            _rebuttal_material(
+                shown[Role.REBUTTAL], working_directory, split, allow_tools=allow_tools
+            )
+        )
+    return values
+
+
+def _missing_output_records(
+    split_index: int, role: str, missing: list[int], still_missing: list[int], recovered: list[int]
+) -> list[StoredFailure]:
+    if still_missing:
+        return [
+            CandidatesUnverified(
+                split_index,
+                role,
+                claude.FailureKind.BAD_OUTPUT,
+                _missing_reason(role, still_missing),
+                2,
+                Disposition.RERUN_FAILED,
+                candidates=tuple(still_missing),
+            )
+        ]
+    if recovered:
+        return [
+            CandidatesUnverified(
+                split_index,
+                role,
+                claude.FailureKind.BAD_OUTPUT,
+                _missing_reason(role, missing),
+                1,
+                Disposition.RECOVERED,
+                candidates=tuple(recovered),
+            )
+        ]
+    return []
 
 
 def _verify_split(
@@ -510,7 +583,6 @@ def _verify_split(
     役の出力が一部の候補の index を欠いたときは、欠けた候補だけでその役を一度走らせ直す。
     走らせ直しても欠けた候補は以後の役へ進めず、未検証として数える。
     """
-    changes = _verification_materials(split, changes)
     form, split_index, candidates = split.form, split.index, split.candidates
     schemas = role_schemas()
     # この試行の失敗の記録は、分割が確定するまで呼び出し側へ渡さない
@@ -520,6 +592,31 @@ def _verify_split(
     active = list(range(len(candidates)))
     outputs: dict[str, dict[int, RoleItem]] = {}
     left_unverified: list[UnverifiedCandidate] = []
+    without_materials: set[int] = set()
+    presented_lines = split.presented_lines
+
+    def missing_material(number: int, role: str, message: str) -> None:
+        failures.append(
+            CandidatesUnverified(
+                split_index,
+                role,
+                claude.FailureKind.OTHER,
+                message,
+                attempt,
+                Disposition.NOT_RERUN,
+                candidates=(number,),
+            )
+        )
+        without_materials.add(number)
+        left_unverified.append(
+            UnverifiedCandidate(candidates[number], UnverifiedReason.MATERIALS_MISSING)
+        )
+
+    def available(numbers: Iterable[int]) -> list[int]:
+        return [number for number in numbers if number not in without_materials]
+
+    for number in _missing_candidates(candidates, presented_lines):
+        missing_material(number, form, "提示資料に候補の根拠行がありません")
 
     def run_role(
         role: str, prompt_name: str, previous: tuple[str, ...], subset: list[int], kind: RerunKind
@@ -527,9 +624,6 @@ def _verify_split(
         """subset の候補だけで役を一度起動する。結果は分割の中の番号で返す。"""
         # プロンプトの index は subset の中の位置で振り、結果を返すときに分割の番号へ戻す
         local = dict(enumerate(subset))
-        values: dict[str, object] = {
-            "candidates_json": _indexed([candidates[number] for number in subset])
-        }
         shown: dict[str, dict[int, dict[str, Any]]] = {
             name: {
                 position: {**outputs[name][number].model_dump(mode="json"), "index": position}
@@ -537,10 +631,14 @@ def _verify_split(
             }
             for name in previous
         }
-        for name in previous:
-            values[_PLACEHOLDER_NAMES[name]] = list(shown[name].values())
-        if prompt_name == Role.JUDGE_REBUTTAL:
-            values.update(_rebuttal_material(shown[Role.REBUTTAL], working_directory, settings))
+        values = _role_values(
+            prompt_name,
+            [candidates[number] for number in subset],
+            shown,
+            working_directory,
+            split,
+            allow_tools=settings.allow_tools,
+        )
         rendered = _render_checked(
             prompt_name, changes, values, settings, role, split, budget_stops
         )
@@ -566,51 +664,36 @@ def _verify_split(
             RoleInvocationRecord(role, split_index, result.record, rendered.stamp, kind)
         )
         indexed = _index_items(result.structured_output or {}, role, prompt_name)
-        return _checked_role_items(indexed, local, split, changes, role)
+        return _checked_role_items(
+            indexed,
+            local,
+            presented_lines,
+            lambda number, issue: missing_material(number, role, issue),
+        )
 
     for role, prompt_name, previous in _roles_for(form):
+        active = available(active)
         if not active:
             # 前の役で全ての候補が未検証になった。起動する候補が無い
             break
         outputs[role] = run_role(role, prompt_name, previous, active, initial_kind)
-        missing = [number for number in active if number not in outputs[role]]
+        missing = available(number for number in active if number not in outputs[role])
         if missing:
-            first_reason = _missing_reason(role, missing)
             rerun = RerunKind.MISSING_CANDIDATES
             outputs[role].update(run_role(role, prompt_name, previous, missing, rerun))
-            still_missing = [number for number in missing if number not in outputs[role]]
-            if still_missing:
-                # 走らせ直しても欠けた候補は棄却も確定もせず、未検証のまま以後の役から外す
-                failures.append(
-                    CandidatesUnverified(
-                        split_index,
-                        role,
-                        claude.FailureKind.BAD_OUTPUT,
-                        _missing_reason(role, still_missing),
-                        2,
-                        Disposition.RERUN_FAILED,
-                        candidates=tuple(still_missing),
-                    )
-                )
-                left_unverified += [
-                    UnverifiedCandidate(candidates[number], UnverifiedReason.STILL_MISSING)
-                    for number in still_missing
-                ]
-                active = [number for number in active if number not in still_missing]
-            else:
-                failures.append(
-                    CandidatesUnverified(
-                        split_index,
-                        role,
-                        claude.FailureKind.BAD_OUTPUT,
-                        first_reason,
-                        1,
-                        Disposition.RECOVERED,
-                        candidates=tuple(missing),
-                    )
-                )
+            still_missing = available(number for number in missing if number not in outputs[role])
+            recovered = [number for number in missing if number in outputs[role]]
+            failures.extend(
+                _missing_output_records(split_index, role, missing, still_missing, recovered)
+            )
+            # 走らせ直しても欠けた候補は棄却も確定もせず、未検証のまま以後の役から外す
+            left_unverified += [
+                UnverifiedCandidate(candidates[number], UnverifiedReason.STILL_MISSING)
+                for number in still_missing
+            ]
+            active = [number for number in active if number not in still_missing]
 
-    findings = _adjudicate_active(form, outputs, active, candidates, working_directory)
+    findings = _adjudicate_active(form, outputs, available(active), candidates, working_directory)
     return SplitVerification(tuple(findings), tuple(failures), tuple(left_unverified))
 
 
@@ -691,25 +774,14 @@ def _debate_output(form: Form, outputs: dict[str, dict[int, RoleItem]], i: int) 
     }
 
 
-def _verification_splits(
-    candidates: list[dict[str, Any]], static_evidence: StaticEvidence | None
-) -> list[tuple[Form, list[dict[str, Any]]]]:
-    splits = split_candidates(candidates)
-    if static_evidence is None:
-        return splits
-    # 資料不足や役ごとの上限超過を他の候補の検証に波及させない。
-    return [(form, [candidate]) for form, batch in splits for candidate in batch]
-
-
 def verify(
     candidates: list[dict[str, Any]],
     *,
     group: GroupId,
-    changes: str | Callable[[list[dict[str, Any]]], str],
+    changes: str | VerificationChanges | Callable[[list[dict[str, Any]]], str],
     working_directory: Path,
     settings: claude.RunSettings,
-    static_evidence: StaticEvidence | None = None,
-    reference_guide: str = "",
+    presented_lines: shard_material.EvidenceLines | None = None,
 ) -> VerificationOutcome:
     findings: list[VerifiedCandidate] = []
     invocations: list[RoleInvocationRecord] = []
@@ -717,41 +789,32 @@ def verify(
     unverified: list[UnverifiedCandidate] = []
     budget_stops: list[input_budget.StoredBudgetStop] = []
     failures: list[StoredFailure] = []
-    for split_index, (form, split) in enumerate(_verification_splits(candidates, static_evidence)):
-        materials = (
-            None
-            if static_evidence is not None
-            else (changes(split) if callable(changes) else changes)
-        )
+    excluded_path_keys: frozenset[str] = frozenset()
+    if isinstance(changes, VerificationChanges):
+        excluded_path_keys = frozenset(map(_excerpt_path_key, changes.excluded_excerpt_paths))
+        changes = changes.text
+    for split_index, (form, split) in enumerate(split_candidates(candidates)):
+        materials = changes(split) if callable(changes) else changes
         # 走らせ直しの契機になった失敗。次の実行の結果で扱いが決まるまで確定しない
         pending: _SplitFailedError | None = None
         for attempt in range(1, MAX_SPLIT_ATTEMPTS + 1):
             try:
                 verified = _verify_split(
                     _Split(
-                        split_index, form, tuple(split), group, static_evidence, reference_guide
+                        split_index,
+                        form,
+                        tuple(split),
+                        group,
+                        presented_lines,
+                        excluded_path_keys,
                     ),
-                    changes=materials or "",
+                    changes=materials,
                     working_directory=working_directory,
                     settings=settings,
                     invocations=invocations,
                     budget_stops=budget_stops,
                     attempt=attempt,
                 )
-            except _SplitMaterialsError as error:
-                failures.append(
-                    CandidatesUnverified(
-                        split_index,
-                        error.role,
-                        claude.FailureKind.OTHER,
-                        str(error),
-                        attempt,
-                        Disposition.NOT_RERUN,
-                        candidates=tuple(range(len(split))),
-                    )
-                )
-                failed_splits += 1
-                unverified.extend(UnverifiedCandidate(c, error.reason) for c in split)
             except _SplitStoppedError:
                 # 停止の記録は budget_stops に済んでいる。起動していないので停止そのものには
                 # 失敗の記録を付けず、発見役の同じ停止と同じく、

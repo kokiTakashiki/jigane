@@ -13,6 +13,7 @@ from jigane.commands.budget_argument import add_max_budget_argument, principle_n
 from jigane.commands.consent import LaunchPlan, launch_plan, require_consent
 from jigane.commands.context import Context
 from jigane.commands.exit_codes import EXIT_INCOMPLETE_COVERAGE, EXIT_OK
+from jigane.commands.failures import UnsupportedReviewWorkspaceError
 from jigane.commands.group_argument import add_group_argument
 from jigane.commands.mcp_argument import add_mcps_argument, load_mcp_selection
 from jigane.commands.output import print_lines, warning_lines, warnings_json
@@ -30,6 +31,7 @@ from jigane.findings.records import (
     load_history_checked,
     triaged_dicts,
 )
+from jigane.git.process import is_windows
 from jigane.groups.definitions import (
     GROUP_BY_ID,
     GROUPS,
@@ -39,8 +41,9 @@ from jigane.groups.definitions import (
     GroupId,
     RunShape,
 )
-from jigane.groups.policy_runs import PolicyShape
+from jigane.groups.policy_runs import PolicyShape, role_of
 from jigane.llm_runs import claude, codex, failure_views, launch_failure
+from jigane.llm_runs.adapter import adapter_for
 from jigane.llm_runs.defaults import RunDefaults, resolve_run_defaults
 from jigane.reviews.catalog import load_review
 from jigane.reviews.lifecycle import Review
@@ -193,6 +196,14 @@ def _total_cost_line(totals: dict[str, Any], run: pipeline.GroupRun) -> str:
     )
 
 
+def _finding_count_lines(count: int, run: pipeline.GroupRun, *lines: str) -> tuple[str, ...]:
+    if count == 0 and any(
+        failure.kind is claude.FailureKind.SHORT_EMPTY_OUTPUT for failure in run.current_failures
+    ):
+        return ()
+    return lines
+
+
 def report_macro(
     result: macro.MacroRun,
     review: Review,
@@ -219,12 +230,14 @@ def report_macro(
         print_lines(
             history.lines,
             [
-                (
+                *_finding_count_lines(
+                    len(result.findings),
+                    run,
                     f"方針の指摘: {len(result.findings)} 件"
                     f"（発見 {run.discovered} 件、"
-                    f"根拠なしで捨てた {run.dropped_without_evidence} 件）"
+                    f"根拠なしで捨てた {run.dropped_without_evidence} 件）",
+                    *no_document_body_lines(review, len(result.findings)),
                 ),
-                *no_document_body_lines(review, len(result.findings)),
                 _total_cost_line(totals, run),
             ],
             over_budget_lines(totals),
@@ -338,10 +351,12 @@ def report_sharded(
         print_lines(
             history.lines,
             [
-                (
+                *_finding_count_lines(
+                    len(result.findings),
+                    run,
                     f"{label}の指摘: {len(result.findings)} 件（発見 {run.discovered} 件、"
                     f"根拠なしで捨てた {run.dropped_without_evidence} 件、"
-                    f"担当の外の根拠で捨てた {run.dropped_outside_shard} 件）"
+                    f"担当の外の根拠で捨てた {run.dropped_outside_shard} 件）",
                 ),
                 (
                     f"被覆: シャード {run.succeeded_shards}/{run.shards}、"
@@ -496,18 +511,23 @@ def plan_of(
     estimate = estimate_of(launch_input)
     discovery_calls = None
     codex_principles: tuple[str, ...] = ()
-    expectation = None
+    mcp_count = len(mcp.servers)
     if agent is Agent.CODEX:
         prompts = launch_prompts(launch_input)
         discovery_calls = len(prompts)
         codex_principles = tuple(
             launch.principle for launch in prompts if launch.principle is not None
         )
-        if not mcp.reference_servers:
-            expectation = codex_login_expectation(prompts, has_verifier=estimate.has_verifier)
-    if settings.has_spending_limit:
+        expectation = codex_login_expectation(
+            prompts, has_verifier=estimate.has_verifier, mcp_count=mcp_count
+        )
+    else:
         expectation = read_expectation(
-            estimate, settings.budget, Path(assembly.review.repository_root), group
+            estimate,
+            settings.budget,
+            Path(assembly.review.repository_root),
+            group,
+            mcp_count=mcp_count,
         )
     plan = launch_plan(
         estimate,
@@ -585,22 +605,10 @@ def run_review(
 
     公開の CLI はここを通らない。同意の無い起動は、開発の道具の側が費用を確かめて引き受ける。
     """
-    review = load_review(resolve_review(identifier))
-    shape = group_defaults(group)
+    review = _load_review_for_run(identifier)
     policy_shape = macro.policy_shape(review) if group == MACRO else None
     defaults = resolve_run_defaults(group, policy_shape, effort)
-    settings = claude.RunSettings(
-        budget=claude.RunBudget(
-            defaults.budget.model,
-            defaults.budget.max_budget_usd,
-            shape.reserve_margin,
-            defaults.budget.principles,
-            defaults.budget.output_allowance_tokens,
-        ),
-        effort=defaults.effort,
-        invoke=invoke,
-        max_turns=shape.max_turns,
-    )
+    settings = run_settings(group, invoke, defaults)
     history = load_history_checked(review.id.directory())
     assembly = AssemblyInput.from_loaded(review, history, docs=read_docs_for_review(review, group))
     mcp = load_mcp_selection(mcps, group, mcp_guide)
@@ -615,8 +623,29 @@ class PreparedRun:
     plan: LaunchPlan
 
 
+def _is_unc_workspace(root: str) -> bool:
+    path = root.replace("/", "\\")
+    if path.startswith(("\\\\?\\", "\\\\.\\")):
+        return path[4:].casefold().startswith("unc\\")
+    return path.startswith("\\\\")
+
+
+def _load_review_for_run(identifier: str) -> Review:
+    review = load_review(resolve_review(identifier))
+    if is_windows():
+        workspace = review.repository_root
+        # UNC はその場で拒み、ほかのパスは Read の拒否規則が使う解決済みの根も確かめる。
+        if _is_unc_workspace(workspace) or _is_unc_workspace(str(Path(workspace).resolve())):
+            raise UnsupportedReviewWorkspaceError(
+                "Windows ネイティブでは UNC パスをレビューの作業場所に使えません"
+            )
+    return review
+
+
 def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
     """資料と設定と計画を組む。何も書き始めない。`run` と `debug run` が共有する。"""
+    # Windows では Codex の対応 OS の確認より先に、両エージェント共通の UNC 制限を適用する。
+    review = _load_review_for_run(args.review) if is_windows() else None
     uses_codex = args.agent == Agent.CODEX
     if uses_codex:
         if not codex_supported():
@@ -628,24 +657,20 @@ def prepare_run(args: argparse.Namespace, context: Context) -> PreparedRun:
         )
     group: GroupId = args.group
     mcp = load_mcp_selection(args.mcps, group, args.mcp_guide, codex_cli=uses_codex)
-    review = load_review(resolve_review(args.review))
+    if review is None:
+        review = _load_review_for_run(args.review)
+    shape = policy_shape_of(group, review)
     defaults = resolve_run_defaults(
         args.group,
-        policy_shape_of(args.group, review),
+        shape,
         args.effort,
         args.model,
         args.max_budget_usd_per_call,
     )
-    settings = run_settings(args.group, context.invoke, defaults)
-    if uses_codex:
-        settings = replace(
-            settings,
-            budget=codex.review_budget(settings.budget),
-            effort=codex.LOGIN_MODEL.effort,
-            invoke=codex.run,
-            has_spending_limit=False,
-            allow_tools=False,
-        )
+    adapter = adapter_for(args.agent, invoke_override=context.invoke)
+    settings = adapter.run_settings(
+        run_settings(group, adapter.invoke, defaults), None if shape is None else role_of(shape)
+    )
     # 前の回の指摘を資料にする前に読めるかを見る。実行の中で壊れが直ることは想定しない。
     # 同意の見積もりも実行の資料も、ここで読んだ履歴から組む。読むだけで、何も書き始めない
     history = load_history_checked(review.id.directory())

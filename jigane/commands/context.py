@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from jigane.llm_runs import claude
+from jigane.llm_runs.invocation import Invoke
 
 
 def stdio_is_terminal() -> bool:
@@ -28,12 +28,12 @@ class Context:
     """入口が組み立て、解析した引数とともに実行の関数へ渡す依存。
 
     Attributes:
-        invoke: Claude Code CLI を起動する関数。検査は偽物に差し替える。
+        invoke: 選択済みのレビューエージェントを起動する関数。検査は偽物に差し替える。
         is_terminal: 標準入力と標準出力がともに端末かを返す関数。同意を取れるかの判定に使う。
         read_answer: 質問を出して利用者の答えを読む関数。
     """
 
-    invoke: claude.Invoke
+    invoke: Invoke
     # 呼び出しのたびにモジュールの関数を引く。検査が差し替えるのはこのモジュールの関数
     # なので、関数を直に渡すと差し替えが効かない
     is_terminal: Callable[[], bool] = field(

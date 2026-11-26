@@ -29,8 +29,7 @@ from jigane.findings.records import (
     triaged,
 )
 from jigane.groups.definitions import GROUP_BY_ID, MACRO, MICRO, GroupId
-from jigane.judgment_map.changes import OMITTED_GENERATED
-from jigane.llm_runs import claude, codex
+from jigane.llm_runs import claude
 from jigane.llm_runs.defaults import resolve_run_defaults
 from jigane.llm_runs.finding_model import RoleSpec
 from jigane.llm_runs.launch_failure import (
@@ -325,14 +324,9 @@ def _history_text(group: GroupId, assembly: AssemblyInput, shard: Shard) -> str:
 def mcp_note(mcp: McpSelection) -> str:
     """プロンプトの $mcp_note に差し込む、MCP の有無の説明。置き場の無い雛形では使われない。"""
     if mcp.servers:
-        lookup = (
-            "MCP の資料一覧・テンプレートから項目を探して本文を取得し、"
-            if mcp.codex_cli
-            else "体系の項目はこれらの MCP の道具で引いて本文を読み、"
-        )
         return (
             f"{MCP_AVAILABLE_LABEL.text}{', '.join(one_line(name) for name in mcp.names)}。"
-            f"{lookup}"
+            "選択した MCP で体系の項目を探して本文を取得し、"
             "確かめた識別子を references に書く。記憶だけで書かない。"
         )
     return (
@@ -383,17 +377,11 @@ def build_shard_prompt(
     review = assembly.review
     prompt_name = prompt_name_of(group)
     common = adversarial.common_prompt()
-    ordered = (
-        shard.units
-        if isinstance(shard, shards.DiffShard) and shard.note
-        else sorted(shard.units, key=lambda unit: unit.path)
-    )
+    ordered = sorted(shard.units, key=lambda unit: unit.path)
     content = "\n".join(unit.text for unit in ordered)
     intro = _shard_intro(shard, group)
     match shard:
         case shards.DiffShard():
-            intro += shard.note
-            content += shard.contracts
             heads = config_head.config_heads_section(Path(review.repository_root), shard.paths)
             if heads:
                 content += "\n" + heads
@@ -447,7 +435,13 @@ class PlannedShards:
     # 既定の数に達し、MAX_GROWN_SHARDS まで増やしてもどれかのプロンプトが止まるか。
     # 単位が少なくて増やせない差分では偽のまま、収まるシャードだけを走らせる
     grown_unfit: bool = False
-    hunks: dict[str, tuple[shard_material.Hunk, ...]] = field(default_factory=dict)
+
+
+def _discovery_budget(group: GroupId, budget: claude.RunBudget) -> claude.RunBudget:
+    # 起動用に変えたモデルと上限の余裕を、発見の分割と見送りでは通常の群の既定に戻す。
+    if budget.compact_materials:
+        return resolve_run_defaults(group, None, None, max_budget_usd=budget.max_budget_usd).budget
+    return budget
 
 
 def _any_prompt_stops(prompts: Sequence[str], budget: claude.RunBudget) -> bool:
@@ -470,6 +464,7 @@ def plan_shards(
     どのプロンプトも止まらない最小の数を選ぶ。budget が None なら増やさない。
     """
     review = assembly.review
+    basis = None if budget is None else _discovery_budget(group, budget)
 
     def planned(limit: int) -> PlannedShards:
         plan = shards.build_plan(review, group, limit)
@@ -478,121 +473,9 @@ def plan_shards(
         return PlannedShards(plan, tuple(concern_list), prompts)
 
     def stops(candidate: PlannedShards) -> bool:
-        return budget is not None and _any_prompt_stops(candidate.prompts, budget)
+        return basis is not None and _any_prompt_stops(candidate.prompts, basis)
 
-    if budget is not None and budget.compact_materials:
-        # 同意の計画と実行に同じシャードを渡す
-        return assembly.remember(
-            (
-                "codex_shards",
-                group,
-                mcp_note(mcp),
-                mcp_guide_note(mcp),
-                bool(mcp.reference_servers),
-            ),
-            lambda: _plan_codex_shards(assembly, group, mcp),
-        )
     return _grow_shard_plan(planned, stops)
-
-
-def _plan_codex_shards(
-    assembly: AssemblyInput, group: GroupId, mcp: McpSelection
-) -> PlannedShards:
-    review = assembly.review
-    plan = shards.build_plan(review, group, track_omissions=True)
-    if plan.kind is not shards.ShardPlanKind.DIFF:
-        concerns = [shard_concerns(group, review, shard) for shard in plan.shards]
-        prompts = build_shard_prompts(group, assembly, plan.shards, concerns, mcp)
-        return PlannedShards(plan, tuple(concerns), tuple(prompts))
-
-    unavailable = [note for note in plan.omissions if not note.endswith(OMITTED_GENERATED)]
-    if unavailable:
-        raise discovery_errors.DiscoveryError(group, "差分の資料不足: " + "、".join(unavailable))
-    try:
-        index = {
-            unit.path: shard_material.with_contracts(
-                unit, shard_material.hunks(unit), Path(review.repository_root)
-            )
-            for unit in plan.units
-        }
-    except ValueError as error:
-        raise discovery_errors.DiscoveryError(group, str(error)) from error
-    packed = _pack_codex_diff(assembly, group, mcp, plan, index)
-    return replace(packed, hunks=index)
-
-
-_CODEX_DIFF_TARGET_BYTES = 32_768
-
-
-def _pack_codex_diff(
-    assembly: AssemblyInput,
-    group: GroupId,
-    mcp: McpSelection,
-    plan: shards.ShardPlan,
-    index: dict[str, tuple[shard_material.Hunk, ...]],
-) -> PlannedShards:
-    note = (
-        "\n同じパスが複数のシャードに現れる場合、ここに載るハンクだけを担当します。"
-        "根拠には資料で読める新側の行番号を使い、必要な契約も位置で示します。"
-    )
-    if plan.omissions:
-        note += "\n対象外の生成物・設定による除外: " + "、".join(plan.omissions)
-
-    fragments = {part.unit: part for parts in index.values() for part in parts}
-
-    def make(units: tuple[shards.Unit, ...]) -> shards.DiffShard:
-        contracts = shard_material.contract_section(
-            [fragments[unit] for unit in units if unit in fragments]
-        )
-        return shards.DiffShard(units, note, contracts)
-
-    def render(part: shards.DiffShard, number: int, total: int) -> tuple[ShardConcerns, str]:
-        concerns = shard_concerns(group, assembly.review, part)
-        prompt = build_shard_prompt(
-            group, assembly, part, number, total, concerns=concerns, mcp=mcp
-        )
-        return concerns, prompt
-
-    # 取り得る最大の番号の桁幅で詰め、確定した番号でもう一度描画する。
-    upper = sum(max(1, len(parts)) for parts in index.values())
-    boundary = codex.review_boundary(uses_mcp=bool(mcp.reference_servers))
-    prefix_size = len(boundary.encode("utf-8"))
-
-    def fits(units: tuple[shards.Unit, ...]) -> bool:
-        _, prompt = render(make(units), upper, upper)
-        return len(prompt.encode("utf-8")) + prefix_size <= _CODEX_DIFF_TARGET_BYTES
-
-    buckets = _pack_diff_units(plan.units, index, fits)
-    packed = [make(bucket) for bucket in buckets]
-    rendered = [render(part, i, len(packed)) for i, part in enumerate(packed, start=1)]
-    return PlannedShards(
-        replace(plan, shards=tuple(packed)),
-        tuple(concerns for concerns, _ in rendered),
-        tuple(prompt for _, prompt in rendered),
-    )
-
-
-def _pack_diff_units(
-    units: Sequence[shards.Unit],
-    index: dict[str, tuple[shard_material.Hunk, ...]],
-    fits: Callable[[tuple[shards.Unit, ...]], bool],
-) -> list[tuple[shards.Unit, ...]]:
-    packed: list[tuple[shards.Unit, ...]] = []
-    bucket: tuple[shards.Unit, ...] = ()
-    for unit in units:
-        parts = (
-            (unit,) if fits((unit,)) else tuple(hunk.unit for hunk in index[unit.path]) or (unit,)
-        )
-        for part in parts:
-            # 目安を超えるハンクも、本文と根拠を保ったままシャードに入れる。
-            if bucket and not fits((*bucket, part)):
-                packed.append(bucket)
-                bucket = ()
-            bucket = (*bucket, part)
-    if bucket:
-        packed.append(bucket)
-
-    return packed
 
 
 def _grow_shard_plan(
@@ -685,9 +568,12 @@ def _discover_shard(
     prompt: str,
     index: int,
     settings: claude.RunSettings,
+    discovery_settings: claude.RunSettings,
 ) -> _ShardResult:
     stamp = adversarial.stamp_prompt(prompt_name_of(spec.group), prompt)
-    check = input_budget.check_input_budget(prompt, settings, role=DISCOVERY_ROLE, index=index)
+    check = input_budget.check_input_budget(
+        prompt, discovery_settings, role=DISCOVERY_ROLE, index=index
+    )
     if check.stop is not None:
         return _ShardResult(index, None, None, stamp, check.stop)
     try:
@@ -700,7 +586,11 @@ def _discover_shard(
             mcp_server_names=spec.mcp.names if spec.mcp.config_paths else (),
             allowed_mcp_tools=spec.allowed_mcp_tools,
         )
-        result = settings.invoke(invocation)
+        result = settings.invoke(replace(invocation, discovery_group=spec.group))
+        validated = spec.lenient_model.model_validate(result.structured_output or {})
+        # 下流は辞書を前提にする。MISSING の欄は辞書に戻すとキーが無くなる。
+        checked = validated.model_dump(mode="json")
+        discovery_errors.require_review_output(result.record, checked["findings"])
     except claude.ClaudeInvocationError as error:
         failure = _discovery_failure(index, error.kind, str(error))
         return _ShardResult(
@@ -710,9 +600,6 @@ def _discover_shard(
             stamp,
             failure=failure,
         )
-    output = result.structured_output or {}
-    try:
-        validated = spec.lenient_model.model_validate(output)
     except ValidationError as error:
         first = error.errors()[0]
         location = ".".join(str(part) for part in first["loc"])
@@ -722,8 +609,6 @@ def _discover_shard(
             f"出力が schema に合いません: {location}: {first['msg']}",
         )
         return _ShardResult(index, None, result.record, stamp, failure=failure)
-    # 下流は辞書を前提にする。辞書に戻すのはここ一度だけで、MISSING の欄はキーが無くなる
-    checked = validated.model_dump(mode="json")
     return _ShardResult(index, tuple(checked["findings"]), result.record, stamp)
 
 
@@ -790,16 +675,19 @@ def _prepare(
     return candidates, outside
 
 
-def _changes_with_config_heads(review: Review, plan: shards.ShardPlan) -> str:
+def _changes_with_config_heads(
+    review: Review, plan: shards.ShardPlan, changes: adversarial.VerificationChanges | None = None
+) -> adversarial.VerificationChanges:
     """検証役に渡す変更の節。差分の計画では、設定ファイルの冒頭の設定を添える。"""
     if plan.kind is not shards.ShardPlanKind.DIFF:
-        # 全文と設計書の計画は、ファイルを冒頭ごと渡している
-        return macro.changes_prompt_text(review)
-    changes = macro.verifier_changes_text(review)
+        # 全文と設計書の計画は改名の組を持たず、ファイルを冒頭ごと渡している
+        return adversarial.VerificationChanges(macro.changes_prompt_text(review), frozenset())
+    if changes is None:
+        changes = macro.verifier_changes(review)
     heads = config_head.config_heads_section(
         Path(review.repository_root), [unit.path for unit in plan.units]
     )
-    return f"{changes}\n\n{heads}" if heads else changes
+    return replace(changes, text=f"{changes.text}\n\n{heads}") if heads else changes
 
 
 def _static_changes(shard_list: Sequence[Shard], candidates: list[dict[str, Any]]) -> str:
@@ -818,6 +706,33 @@ def _static_changes(shard_list: Sequence[Shard], candidates: list[dict[str, Any]
     return "\n\n".join(dict.fromkeys(texts))
 
 
+type VerificationBody = adversarial.VerificationChanges | Callable[[list[dict[str, Any]]], str]
+
+
+def _static_verification_inputs(
+    review: Review, plan: shards.ShardPlan, group: GroupId, *, allow_tools: bool
+) -> tuple[VerificationBody, shard_material.EvidenceLines | None] | None:
+    if allow_tools:
+        return None
+    if plan.kind is not shards.ShardPlanKind.DIFF:
+        return lambda candidates: _static_changes(plan.shards, candidates), None
+    try:
+        changes = _changes_with_config_heads(review, plan)
+        return changes, shard_material.presented_lines(plan.units, changes.text)
+    except ValueError as error:
+        raise discovery_errors.DiscoveryError(group, str(error)) from error
+
+
+def _claude_diff_inputs(
+    review: Review, plan: shards.ShardPlan, settings: claude.RunSettings
+) -> tuple[claude.RunSettings, adversarial.VerificationChanges | None]:
+    if not (plan.shards and settings.allow_tools and plan.kind is shards.ShardPlanKind.DIFF):
+        return settings, None
+    # 起動時の拒否と判定役の抜粋は、同じ差分の除外結果を使う。
+    changes = macro.verifier_changes(review)
+    return replace(settings, denied_read_paths=changes.excluded_excerpt_paths), changes
+
+
 def run_sharded(
     spec: ShardedGroup,
     assembly: AssemblyInput,
@@ -827,36 +742,55 @@ def run_sharded(
     review = assembly.review
     started = time.monotonic()
     working_directory = Path(review.repository_root)
-    planned = plan_shards(assembly, spec.group, spec.mcp, settings.budget)
+    # 起動に USD 上限を渡せない場合も、発見の見送りには共通の上限を使う。
+    discovery_settings = (
+        replace(
+            settings,
+            budget=_discovery_budget(spec.group, settings.budget),
+            has_spending_limit=True,
+        )
+        if settings.budget.compact_materials
+        else settings
+    )
+    planned = plan_shards(assembly, spec.group, spec.mcp, discovery_settings.budget)
     plan = planned.plan
-    units = plan.units
     shard_list = plan.shards
     total = len(shard_list)
     if planned.grown_unfit:
         # 増やしても収まらない差分は、一部のシャードだけでも、費用を使う前に見送る
         for index, prompt in enumerate(planned.prompts):
             check = input_budget.check_input_budget(
-                prompt, settings, role=DISCOVERY_ROLE, index=index
+                prompt, discovery_settings, role=DISCOVERY_ROLE, index=index
             )
             if check.stop is not None:
                 raise discovery_errors.InputBudgetError(
                     spec.group, check.stop.message() + UNFIT_GUIDE, check.stop
                 )
 
-    shard_concern_list = planned.concerns
-    sent_concerns = [item.passed for item in shard_concern_list]
+    static_verification = _static_verification_inputs(
+        review, plan, spec.group, allow_tools=settings.allow_tools
+    )
+    settings, live_changes = _claude_diff_inputs(review, plan, settings)
+    sent_concerns = [item.passed for item in planned.concerns]
     results: list[_ShardResult] = []
     if total:
-        prompts = planned.prompts
         with ThreadPoolExecutor(max_workers=shards.MAX_SHARDS) as pool:
             futures = [
-                pool.submit(_discover_shard, spec, review, prompt, index, settings)
-                for index, prompt in enumerate(prompts)
+                pool.submit(
+                    _discover_shard, spec, review, prompt, index, settings, discovery_settings
+                )
+                for index, prompt in enumerate(planned.prompts)
             ]
             results = [future.result() for future in futures]
+    # 選択した MCP は発見役だけに渡す。
+    settings = replace(settings, reference_mcp=())
     failed = [r for r in results if r.discovered is None]
     stops = [r.stop for r in results if r.stop is not None]
-    if total and len(failed) == total:
+    all_failed = total > 0 and len(failed) == total
+    if all_failed and not any(
+        shard.failure is not None and shard.failure.kind is claude.FailureKind.SHORT_EMPTY_OUTPUT
+        for shard in failed
+    ):
         raise _all_discoveries_failed(spec.group, failed, stops, grown_unfit=planned.grown_unfit)
 
     drops = pipeline.DropCounts()
@@ -880,23 +814,18 @@ def run_sharded(
     nit_candidates = [c for c in in_scope_candidates if c["severity"] == "nit"]
     to_verify = [c for c in in_scope_candidates if c["severity"] != "nit"]
 
-    def static_changes(candidates: list[dict[str, Any]]) -> str:
-        return _static_changes(shard_list, candidates)
+    changes, presented_lines = static_verification or (
+        _changes_with_config_heads(review, plan, live_changes) if to_verify else "",
+        None,
+    )
 
     outcome = adversarial.verify(
         to_verify,
         group=spec.group,
-        changes=_changes_with_config_heads(review, plan)
-        if settings.allow_tools
-        else static_changes,
+        changes=changes,
         working_directory=working_directory,
         settings=settings,
-        reference_guide=mcp_guide_note(spec.mcp) if spec.mcp.codex_cli else "",
-        static_evidence=(
-            lambda locations: shard_material.evidence(planned.hunks, locations, working_directory)
-        )
-        if settings.budget.compact_materials and plan.kind is shards.ShardPlanKind.DIFF
-        else None,
+        presented_lines=presented_lines,
     )
 
     kept = pipeline.keep_valid(
@@ -943,14 +872,14 @@ def run_sharded(
 
     failed_indexes = {r.shard_index for r in failed}
     incomplete_paths = {unit.path for i in failed_indexes for unit in shard_list[i].units}
-    reviewed_files = sum(unit.path not in incomplete_paths for unit in units)
+    reviewed_files = sum(unit.path not in incomplete_paths for unit in plan.units)
     records = [
         pipeline.stored_invocation(
             DISCOVERY_ROLE,
             r.shard_index,
             r.record,
             r.stamp,
-            concerns=shard_concern_list[r.shard_index],
+            concerns=planned.concerns[r.shard_index],
         )
         for r in results
         if r.record is not None
@@ -993,18 +922,17 @@ def run_sharded(
         mcp=pipeline.McpRecord(spec.mcp.names),
         shards=total,
         succeeded_shards=total - len(failed),
-        target_files=len(units),
+        target_files=len(plan.units),
         reviewed_files=reviewed_files,
         budget_stops=(
             *(stop.stored() for stop in stops),
             *outcome.budget_stops,
         ),
     )
-    pipeline.save_run(
-        review,
-        GroupResult((*selection.findings, *unverified_findings), selection.theme_update),
-        run_state,
-        spec.group,
-    )
     findings = (*selection.findings, *unverified_findings)
+    # 全シャードが失敗した回の前の保存結果は、従来どおり空の結果で置き換えない。
+    if not all_failed:
+        pipeline.save_run(
+            review, GroupResult(findings, selection.theme_update), run_state, spec.group
+        )
     return ShardedRun(findings, run_state, plan.drifts, plan.withheld, plan.omissions)
